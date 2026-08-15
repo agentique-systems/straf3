@@ -1,0 +1,37 @@
+[package]
+name = "straf3-sim"
+description = "The simulation. A pure function from (state, command) to state."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# BELOW THE LINE, and the strictest crate in the workspace. Enforced by
+# `cargo xtask check-seam`.
+#
+# The dependency list is deliberately one entry long. In particular this crate
+# does NOT depend on straf3-collision, even though collision is also below the
+# line: straf3-collision pulls in parry3d, and spec section 4 makes parry
+# conditional on a determinism audit. The simulation asks about geometry
+# through the `World` trait it defines itself (src/world.rs), so whichever
+# crate ends up answering — parry, a hand-rolled brush tracer, or a test stub —
+# is a decision that can be revisited without touching physics.
+#
+# Adding a dependency here is an architectural change, not a convenience.
+[dependencies]
+glam.workspace = true
+
+# The headless runner (spec criterion 7). It lives OUTSIDE src/ on purpose.
+#
+# It has to read a file, and the library must never do that. Keeping it at
+# bin/ rather than src/bin/ means `src/` contains only code that is bound by
+# the no-filesystem, no-clock rule, so the seam check's source scan over src/
+# stays a true statement about the library rather than a scan with carve-outs.
+#
+# Longer term this belongs in a straf3-cli or straf3-replay binary; it is here
+# because the runner has to exist now and this crate is the only place Wave 1
+# can put it. See docs at the top of bin/headless.rs.
+[[bin]]
+name = "straf3-headless"
+path = "bin/headless.rs"

@@ -1,0 +1,32 @@
+# A sample input for `straf3-headless` (spec criterion 7).
+#
+#     cargo run -p straf3-sim --bin straf3-headless -- \
+#         crates/straf3-sim/inputs/demo.straf3in
+#
+# This is a test fixture, not a replay. The real recorded demo format belongs
+# to straf3-replay; this exists so the headless path can be exercised before
+# that format exists.
+#
+# Note what is declared here: the command rate and the physics profile. Those
+# are the two recorded parameters that make a run reproducible (spec D2, D1).
+# Nothing about frames, windows or rendering appears, because the simulation
+# has no concept of them.
+
+rate 125            # 8 ms per command — the D2 default
+profile cpm         # D1 default
+world flat 0        # an infinite floor at z=0
+spawn 0 0 200       # start 200 units up, so there is a fall to watch
+yaw 90              # facing +Y
+
+# cmd <repeat> <fwd> <right> <up> <buttons> <pitch> <yaw> [roll]
+
+# Fall to the floor. 100 commands x 8 ms = 800 ms.
+cmd 100   0    0  0  -       0  90
+
+# Hold forward and sweep the view right, which is the shape of a strafejump
+# input even though the placeholder physics does not yet respond to it.
+cmd 40  127    0  0  -       0  90
+cmd 40  127   64  0  -       0  95
+cmd 40  127   64  0  -       0 100
+cmd  1  127   64  0  jump    0 105
+cmd 60  127   64  0  -       0 110
