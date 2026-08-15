@@ -255,17 +255,25 @@ static BOXES: &[Box3] = &[
     // without jumping. The other side of the same coin as `crate`, which you
     // cannot.
     Box3 {
-        mins: vec3(s(-320.0), s(-704.0), FLOOR_TOP),
-        maxs: vec3(s(-192.0), s(-576.0), s(16.0)),
+        mins: vec3(s(-448.0), s(-704.0), FLOOR_TOP),
+        maxs: vec3(s(-320.0), s(-576.0), s(16.0)),
         surface: SurfaceFlags::NONE,
         color: SAND,
         label: "step",
     },
     // 64 tall, above both the step height and a standing jump (≈45 units at
     // 270 ups against 800 gravity): needs a run-up or a double jump.
+    //
+    // It used to end at x=0, which is [`SPAWN`]'s x — and since the hull is ±15
+    // wide, a player who spawned and pressed forward walked 49 units and stopped
+    // dead against it, on their very first impression of the game. Both this and
+    // `step` sit 128 further west now, which keeps their pairing and the 64-unit
+    // gap between them while leaving the arena's centre lane (x ∈ [-128, 128])
+    // clear from the spawn to the north wall. `the_lane_the_spawn_faces_is_open`
+    // is what keeps it that way.
     Box3 {
-        mins: vec3(s(-128.0), s(-704.0), FLOOR_TOP),
-        maxs: vec3(s(0.0), s(-576.0), s(64.0)),
+        mins: vec3(s(-256.0), s(-704.0), FLOOR_TOP),
+        maxs: vec3(s(-128.0), s(-576.0), s(64.0)),
         surface: SurfaceFlags::NONE,
         color: RUST,
         label: "crate",
@@ -338,6 +346,13 @@ pub static ARENA: Arena = Arena {
 
 /// Where the player starts: open floor, south of everything, facing north up
 /// the length of the arena.
+///
+/// "Facing north up the length of the arena" is a promise about the geometry,
+/// not just about the numbers: the lane the spawn looks down must be *empty*, so
+/// that holding forward accelerates for a couple of thousand units instead of
+/// stopping against something 49 units in. Nothing in [`BOXES`] or [`RAMPS`]
+/// enters x ∈ [-128, 128] north of here, and
+/// `tests::the_lane_the_spawn_faces_is_open` fails if that stops being true.
 ///
 /// Z is `24.125`, not `24`: 24 is where the standing hull's feet sit exactly on
 /// the floor plane, and *exactly on* counts as inside a brush, so the very
@@ -570,6 +585,52 @@ mod tests {
         assert!(!t.hit(), "nothing is between spawn and the south wall");
     }
 
+    /// How far the spawn must be able to see down its own facing direction.
+    ///
+    /// 1024 units is about 1.7 seconds of ground running, or two strafe jumps:
+    /// enough that the first thing the player does is accelerate rather than
+    /// stop. The clear run is actually ~2280, to the north wall.
+    const SPAWN_SIGHTLINE: Scalar = s(1024.0);
+
+    #[test]
+    fn the_lane_the_spawn_faces_is_open() {
+        // The direction the *player* will actually walk, derived from SPAWN_YAW
+        // rather than assumed to be north — the defect this replaces was
+        // survivable precisely because `open_floor_at_head_height_is_clear`
+        // traced south, the one direction nobody walks from a spawn that faces
+        // north.
+        let yaw = SPAWN_YAW.to_radians();
+        let ahead = vec3(yaw.cos(), yaw.sin(), s(0.0));
+        let t = ARENA.trace(&sweep(SPAWN, SPAWN + ahead * SPAWN_SIGHTLINE));
+        assert!(
+            !t.hit(),
+            "the player holds forward from the spawn and stops {} units in, \
+             against a surface with normal {:?} — the spawn faces into geometry",
+            t.fraction * SPAWN_SIGHTLINE,
+            t.normal,
+        );
+    }
+
+    #[test]
+    fn the_spawn_lane_is_open_at_every_height_the_hull_occupies() {
+        // The forward sweep above uses the standing hull, which reaches 32 above
+        // the origin. A crouched player, and a player mid-jump, occupy different
+        // slices of the same lane, and a solid that cleared the standing hull by
+        // sitting low would still be a wall to walk into.
+        for feet in [s(0.0), s(16.0), s(45.0)] {
+            let from = SPAWN + vec3(s(0.0), s(0.0), feet);
+            let yaw = SPAWN_YAW.to_radians();
+            let ahead = vec3(yaw.cos(), yaw.sin(), s(0.0));
+            let t = ARENA.trace(&sweep(from, from + ahead * SPAWN_SIGHTLINE));
+            assert!(
+                !t.hit(),
+                "with the feet {feet} above the floor the spawn lane is blocked \
+                 after {} units",
+                t.fraction * SPAWN_SIGHTLINE,
+            );
+        }
+    }
+
     #[test]
     fn the_perimeter_wall_stops_you_leaving() {
         // Straight south from spawn into the south wall at y = -1536.
@@ -682,8 +743,8 @@ mod tests {
 
     #[test]
     fn starting_inside_a_solid_reports_it() {
-        // Dead centre of the crate.
-        let inside = vec3(s(-64.0), s(-640.0), s(32.0));
+        // Dead centre of the crate, x ∈ [-256, -128] and y ∈ [-704, -576].
+        let inside = vec3(s(-192.0), s(-640.0), s(32.0));
         let t = ARENA.trace(&sweep(inside, inside));
         assert!(t.start_solid);
         assert!(t.all_solid);
@@ -696,11 +757,23 @@ mod tests {
         // Walking west into the step at floor height: the step's top (16) is
         // under the 18-unit step height, so the mover steps up. What the trace
         // must report is simply that the hull is blocked at floor level.
-        let t = ARENA.trace(&sweep(
-            vec3(s(-160.0), s(-640.0), s(24.125)),
-            vec3(s(-260.0), s(-640.0), s(24.125)),
-        ));
+        //
+        // Starting at x = -64, east of the crate's -128 face: start the sweep
+        // inside the crate and `hit()` is answered by `start_solid`, which
+        // would pass this test while proving nothing about either obstacle.
+        let start = vec3(s(-64.0), s(-640.0), s(24.125));
+        let t = ARENA.trace(&sweep(start, vec3(s(-500.0), s(-640.0), s(24.125))));
+        assert!(!t.start_solid, "the sweep must begin on open floor");
         assert!(t.hit(), "the crate is in the way before the step is");
+        // 15 units of hull plus the 49 units of floor between x = -64 and the
+        // crate's east face: the crate is what stops it, not the step further
+        // west.
+        let travelled = t.fraction * s(436.0);
+        assert!(
+            (travelled - s(49.0)).abs() < s(0.01),
+            "stopped after {travelled} units, expected 49 — something other than \
+             the crate answered"
+        );
         // The crate (top 64) is what it hits first, and 64 is well over the
         // step height — this is the obstacle you must jump.
         assert!(s(64.0) > profile.step_height);
