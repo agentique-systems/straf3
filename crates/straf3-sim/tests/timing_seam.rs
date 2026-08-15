@@ -98,15 +98,64 @@ fn is_permitted_home(name: &str) -> bool {
     name == "crates/straf3-sim/src/num.rs"
 }
 
-/// Lines that are code rather than documentation.
+/// Strip `//` and `/* */` comments from Rust source, tracking actual comment
+/// state rather than guessing from a line's leading characters.
+///
+/// A leading-character heuristic (skip any line starting with `*`, on the
+/// theory that it is a javadoc-style block-comment continuation) is a second
+/// evasion in itself: this crate writes no `/* */` comments anywhere, so the
+/// heuristic never protects anything, and it silently drops a real code line
+/// that happens to start with a multiplication operator — exactly the shape
+/// `* 0.001` takes when rustfmt wraps a long expression.
+fn strip_comments(source: &str) -> String {
+    let mut out = String::with_capacity(source.len());
+    let mut chars = source.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '/' if chars.peek() == Some(&'/') => {
+                for c in chars.by_ref() {
+                    if c == '\n' {
+                        out.push('\n');
+                        break;
+                    }
+                }
+            }
+            '/' if chars.peek() == Some(&'*') => {
+                chars.next();
+                let mut depth = 1u32;
+                while depth > 0 {
+                    match chars.next() {
+                        Some('*') if chars.peek() == Some(&'/') => {
+                            chars.next();
+                            depth -= 1;
+                        }
+                        Some('/') if chars.peek() == Some(&'*') => {
+                            chars.next();
+                            depth += 1;
+                        }
+                        Some('\n') => out.push('\n'),
+                        Some(_) => {}
+                        None => break,
+                    }
+                }
+            }
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+/// Lines that are code rather than documentation, comments stripped.
 ///
 /// Doc comments name `seconds_from_millis` and quote Q3's `* 0.001` constantly
 /// — that is the point of them — so counting raw occurrences would measure the
 /// documentation. This strips comments so the check measures the code.
-fn code_lines(source: &str) -> impl Iterator<Item = &str> {
-    source.lines().map(str::trim).filter(|l| {
-        !l.is_empty() && !l.starts_with("//") && !l.starts_with("/*") && !l.starts_with('*')
-    })
+fn code_lines(source: &str) -> Vec<String> {
+    strip_comments(source)
+        .lines()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect()
 }
 
 #[test]
@@ -121,7 +170,7 @@ fn there_is_exactly_one_milliseconds_to_scalar_conversion_site() {
             // The definition itself, and the unit test that pins it to Q3's
             // expression, both live in `num.rs` and are not call sites in the
             // sense the criterion means.
-            if name == "num.rs" {
+            if is_permitted_home(&name) {
                 continue;
             }
             callers.push((name.clone(), line.to_string()));
@@ -140,37 +189,151 @@ fn there_is_exactly_one_milliseconds_to_scalar_conversion_site() {
             .join("\n")
     );
     assert_eq!(
-        callers[0].0, "step.rs",
+        callers[0].0, "crates/straf3-sim/src/step.rs",
         "the conversion moved out of step.rs, to {}",
         callers[0].0
     );
 }
 
-/// The other half of "and nowhere else": a second site could be written without
-/// naming `seconds_from_millis` at all, by open-coding Q3's `msec * 0.001`.
+/// The conversion factors this criterion cares about. Written once here and
+/// reused by both the literal check and the alias check below, so the two
+/// halves of the scan agree on what a "thousandth" looks like.
+const SCALES: [&str; 4] = ["0.001", "1000.0", "1e-3", "1_000.0"];
+
+/// A source file's code, with line breaks collapsed inside each `;`-terminated
+/// statement.
 ///
-/// The scan is for the *shape* of that defect — a millisecond-named value in
-/// the same expression as a thousandth — rather than for the constant alone.
-/// `0.001` and `1000.0` are ordinary numbers that appear as coordinates, hull
-/// sizes and tolerances all over the crate; flagging every one of them would
-/// produce a check that has to be suppressed, and a check that is routinely
-/// suppressed protects nothing.
+/// `code_lines` strips comments but is still line-oriented, so an expression
+/// split across lines — `s(f32::from(ms))\n    * THOUSANDTH;` — never puts the
+/// duration and the scale in the same string the scanner looks at. Joining on
+/// `;` is a rough model of "one statement", but it is the boundary the actual
+/// defect (a value multiplied by a thousandth) has to cross, and Rust code
+/// makes `;` cheap to rely on for this.
+fn statements(source: &str) -> Vec<String> {
+    let joined = code_lines(source).join(" ");
+    joined
+        .split(';')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+/// The name bound by an assignment-shaped statement — `const NAME: T = …`,
+/// `let NAME = …` or `let mut NAME = …` — together with its right-hand side.
+/// `None` for anything else, including comparisons (`==`, `!=`, `<=`, `>=`),
+/// which share the byte `=` but are not bindings.
+fn binding(stmt: &str) -> Option<(String, &str)> {
+    let eq = stmt.rfind('=')?;
+    if matches!(
+        stmt.as_bytes().get(eq.wrapping_sub(1)),
+        Some(b'=' | b'!' | b'<' | b'>')
+    ) {
+        return None;
+    }
+    let head = stmt[..eq].trim();
+    let name = if let Some(rest) = head.strip_prefix("const ") {
+        rest
+    } else if let Some(rest) = head.strip_prefix("let mut ") {
+        rest
+    } else if let Some(rest) = head.strip_prefix("let ") {
+        rest
+    } else {
+        return None;
+    }
+    .split(':')
+    .next()
+    .unwrap_or("")
+    .trim();
+    if name.is_empty() {
+        return None;
+    }
+    Some((name.to_ascii_lowercase(), stmt[eq + 1..].trim()))
+}
+
+/// Identifiers whose right-hand side names one of [`SCALES`] — `const
+/// MS_TO_SEC: Scalar = s(0.001);` or `const INV_THOUSAND: Scalar = s(1.0 /
+/// 1000.0);` — so the scan can treat a later `* MS_TO_SEC` the same as it
+/// would treat `* 0.001` written out. The RHS only has to *contain* a scale
+/// literal, not be one bare, because a reciprocal or any other expression
+/// built from the same literal is still the same constant in disguise.
+fn scale_aliases(statements: &[String]) -> Vec<String> {
+    statements
+        .iter()
+        .filter_map(|stmt| binding(stmt))
+        .filter(|(_, rhs)| SCALES.iter().any(|c| rhs.contains(c)))
+        .map(|(name, _)| name)
+        .collect()
+}
+
+/// Whether a token names a millisecond-flavoured value: `ms` itself,
+/// `duration_ms`, `ms_to_sec`, `msec`, `milliseconds`, `duration`, and so on.
+/// Word-bounded (via [`tokens`]) so it does not fire on `params` or `comment`,
+/// which merely contain the letters `ms`.
+fn is_duration_token(token: &str) -> bool {
+    token == "ms"
+        || token.ends_with("_ms")
+        || token.starts_with("ms_")
+        || token.contains("msec")
+        || token.contains("milli")
+        || token.contains("duration")
+}
+
+/// Identifier-ish tokens in a lowercased statement, splitting on anything that
+/// cannot appear inside a Rust identifier.
+fn tokens(s: &str) -> impl Iterator<Item = &str> {
+    s.split(|c: char| !c.is_alphanumeric() && c != '_')
+        .filter(|t| !t.is_empty())
+}
+
+/// Identifiers whose right-hand side already names a duration — directly
+/// (`let raw = f32::from(ms);`) or transitively through an earlier alias
+/// (`let alt = s(raw * 0.001);`, once `raw` is known) — so a value can be
+/// renamed away from its `ms`-bearing source without the scan losing track of
+/// it. Statements are walked in file order, which is also binding order:
+/// Rust cannot use a local before it is declared, so one pass is enough to
+/// carry an alias forward through a chain of renames.
+fn duration_aliases(statements: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for stmt in statements {
+        let Some((name, rhs)) = binding(stmt) else {
+            continue;
+        };
+        let lower = rhs.to_ascii_lowercase();
+        if tokens(&lower).any(|t| is_duration_token(t) || out.iter().any(|a| a == t)) {
+            out.push(name);
+        }
+    }
+    out
+}
+
+/// The other half of "and nowhere else": a second site could be written without
+/// naming `seconds_from_millis` at all, by open-coding Q3's `msec * 0.001` —
+/// directly, through a line split, or through a renamed alias of the constant.
+///
+/// The scan is for the *shape* of that defect — a millisecond-named value
+/// multiplied by a thousandth, in the same statement — rather than for the
+/// literal alone. `0.001` and `1000.0` are ordinary numbers that appear as
+/// coordinates, hull sizes and tolerances all over the crate; flagging every
+/// one of them would produce a check that has to be suppressed, and a check
+/// that is routinely suppressed protects nothing.
 #[test]
 fn no_module_open_codes_the_millisecond_conversion() {
-    const SCALES: [&str; 4] = ["0.001", "1000.0", "1e-3", "1_000.0"];
-    const DURATIONS: [&str; 5] = ["_ms", "ms ", "msec", "milli", "duration"];
-
     let mut offenders = Vec::new();
     for (name, source) in rust_sources() {
-        if name == "num.rs" {
+        if is_permitted_home(&name) {
             continue; // the one permitted home for the conversion
         }
-        for line in code_lines(&source) {
-            let lower = line.to_ascii_lowercase();
-            if SCALES.iter().any(|c| line.contains(c))
-                && DURATIONS.iter().any(|d| lower.contains(d))
-            {
-                offenders.push(format!("  {name}: {line}"));
+        let stmts = statements(&source);
+        let scale_al = scale_aliases(&stmts);
+        let duration_al = duration_aliases(&stmts);
+        for stmt in &stmts {
+            let lower = stmt.to_ascii_lowercase();
+            let has_scale = SCALES.iter().any(|c| stmt.contains(c))
+                || tokens(&lower).any(|t| scale_al.iter().any(|a| a == t));
+            let has_duration =
+                tokens(&lower).any(|t| is_duration_token(t) || duration_al.iter().any(|a| a == t));
+            if has_scale && has_duration {
+                offenders.push(format!("  {name}: {stmt}"));
             }
         }
     }
@@ -180,14 +343,32 @@ fn no_module_open_codes_the_millisecond_conversion() {
         offenders.join("\n")
     );
 
-    // The scan has to be able to fail, or it is decorative. This is the line a
-    // second conversion site would look like, and the matcher must catch it.
-    let planted = "let dt = ms as f32 * 0.001;";
-    let lower = planted.to_ascii_lowercase();
-    assert!(
-        SCALES.iter().any(|c| planted.contains(c)) && DURATIONS.iter().any(|d| lower.contains(d)),
-        "the scan would not notice a second conversion site"
-    );
+    // The scan has to be able to fail, or it is decorative. These are the
+    // shapes a second conversion site could take — direct, line-split,
+    // aliased by a bare-equal constant, aliased by an expression that only
+    // *contains* the scale (a folded reciprocal), and aliased by renaming the
+    // duration itself through an intermediate local — and the matcher must
+    // catch all of them.
+    for planted in [
+        "let dt = ms as f32 * 0.001;",
+        "let dt = ms as f32\n    * 0.001;",
+        "const MS_TO_SEC: Scalar = s(0.001);\nlet dt = s(f32::from(ms)) * MS_TO_SEC;",
+        "const INV_THOUSAND: Scalar = s(1.0 / 1000.0);\nlet dt = s(f32::from(ms)) * INV_THOUSAND;",
+        "let raw = f32::from(ms);\nlet dt = s(raw * 0.001);",
+    ] {
+        let stmts = statements(planted);
+        let scale_al = scale_aliases(&stmts);
+        let duration_al = duration_aliases(&stmts);
+        let caught = stmts.iter().any(|stmt| {
+            let lower = stmt.to_ascii_lowercase();
+            let has_scale = SCALES.iter().any(|c| stmt.contains(c))
+                || tokens(&lower).any(|t| scale_al.iter().any(|a| a == t));
+            has_scale
+                && tokens(&lower)
+                    .any(|t| is_duration_token(t) || duration_al.iter().any(|a| a == t))
+        });
+        assert!(caught, "the scan would not notice: {planted}");
+    }
 }
 
 /// The rest of the criterion: durations stay integers everywhere they are
