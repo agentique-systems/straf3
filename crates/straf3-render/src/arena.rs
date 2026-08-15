@@ -255,17 +255,25 @@ static BOXES: &[Box3] = &[
     // without jumping. The other side of the same coin as `crate`, which you
     // cannot.
     Box3 {
-        mins: vec3(s(-320.0), s(-704.0), FLOOR_TOP),
-        maxs: vec3(s(-192.0), s(-576.0), s(16.0)),
+        mins: vec3(s(-448.0), s(-704.0), FLOOR_TOP),
+        maxs: vec3(s(-320.0), s(-576.0), s(16.0)),
         surface: SurfaceFlags::NONE,
         color: SAND,
         label: "step",
     },
     // 64 tall, above both the step height and a standing jump (≈45 units at
     // 270 ups against 800 gravity): needs a run-up or a double jump.
+    //
+    // It used to end at x=0, which is [`SPAWN`]'s x — and since the hull is ±15
+    // wide, a player who spawned and pressed forward walked 49 units and stopped
+    // dead against it, on their very first impression of the game. Both this and
+    // `step` sit 128 further west now, which keeps their pairing and the 64-unit
+    // gap between them while leaving the arena's centre lane (x ∈ [-128, 128])
+    // clear from the spawn to the north wall. `the_lane_the_spawn_faces_is_open`
+    // is what keeps it that way.
     Box3 {
-        mins: vec3(s(-128.0), s(-704.0), FLOOR_TOP),
-        maxs: vec3(s(0.0), s(-576.0), s(64.0)),
+        mins: vec3(s(-256.0), s(-704.0), FLOOR_TOP),
+        maxs: vec3(s(-128.0), s(-576.0), s(64.0)),
         surface: SurfaceFlags::NONE,
         color: RUST,
         label: "crate",
@@ -338,6 +346,13 @@ pub static ARENA: Arena = Arena {
 
 /// Where the player starts: open floor, south of everything, facing north up
 /// the length of the arena.
+///
+/// "Facing north up the length of the arena" is a promise about the geometry,
+/// not just about the numbers: the lane the spawn looks down must be *empty*, so
+/// that holding forward accelerates for a couple of thousand units instead of
+/// stopping against something 49 units in. Nothing in [`BOXES`] or [`RAMPS`]
+/// enters x ∈ [-128, 128] north of here, and
+/// `tests::the_lane_the_spawn_faces_is_open` fails if that stops being true.
 ///
 /// Z is `24.125`, not `24`: 24 is where the standing hull's feet sit exactly on
 /// the floor plane, and *exactly on* counts as inside a brush, so the very
@@ -568,6 +583,52 @@ mod tests {
             vec3(s(0.0), s(-1200.0), s(24.125)),
         ));
         assert!(!t.hit(), "nothing is between spawn and the south wall");
+    }
+
+    /// How far the spawn must be able to see down its own facing direction.
+    ///
+    /// 1024 units is about 1.7 seconds of ground running, or two strafe jumps:
+    /// enough that the first thing the player does is accelerate rather than
+    /// stop. The clear run is actually ~2280, to the north wall.
+    const SPAWN_SIGHTLINE: Scalar = s(1024.0);
+
+    #[test]
+    fn the_lane_the_spawn_faces_is_open() {
+        // The direction the *player* will actually walk, derived from SPAWN_YAW
+        // rather than assumed to be north — the defect this replaces was
+        // survivable precisely because `open_floor_at_head_height_is_clear`
+        // traced south, the one direction nobody walks from a spawn that faces
+        // north.
+        let yaw = SPAWN_YAW.to_radians();
+        let ahead = vec3(yaw.cos(), yaw.sin(), s(0.0));
+        let t = ARENA.trace(&sweep(SPAWN, SPAWN + ahead * SPAWN_SIGHTLINE));
+        assert!(
+            !t.hit(),
+            "the player holds forward from the spawn and stops {} units in, \
+             against a surface with normal {:?} — the spawn faces into geometry",
+            t.fraction * SPAWN_SIGHTLINE,
+            t.normal,
+        );
+    }
+
+    #[test]
+    fn the_spawn_lane_is_open_at_every_height_the_hull_occupies() {
+        // The forward sweep above uses the standing hull, which reaches 32 above
+        // the origin. A crouched player, and a player mid-jump, occupy different
+        // slices of the same lane, and a solid that cleared the standing hull by
+        // sitting low would still be a wall to walk into.
+        for feet in [s(0.0), s(16.0), s(45.0)] {
+            let from = SPAWN + vec3(s(0.0), s(0.0), feet);
+            let yaw = SPAWN_YAW.to_radians();
+            let ahead = vec3(yaw.cos(), yaw.sin(), s(0.0));
+            let t = ARENA.trace(&sweep(from, from + ahead * SPAWN_SIGHTLINE));
+            assert!(
+                !t.hit(),
+                "with the feet {feet} above the floor the spawn lane is blocked \
+                 after {} units",
+                t.fraction * SPAWN_SIGHTLINE,
+            );
+        }
     }
 
     #[test]

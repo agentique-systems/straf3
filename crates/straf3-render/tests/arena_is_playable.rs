@@ -210,6 +210,57 @@ fn the_steep_ramp_slides_and_the_gentle_one_does_not() {
 }
 
 #[test]
+fn holding_forward_from_the_spawn_goes_somewhere() {
+    // Criterion 1 in miniature: the operator opens the window and presses W.
+    // The arena shipped with `crate` ending at exactly SPAWN.x, so this fixture
+    // used to travel 49 units and stop dead — a trace-level test never caught
+    // it because the only forward-facing trace in the suite pointed south, away
+    // from the direction a spawn facing north actually walks.
+    //
+    // No jumping, no strafing, no view movement: this is the plainest input
+    // there is, and if it does not work nothing else about the arena matters.
+    let rate = TickRate::DEFAULT;
+    let profile = PhysicsProfile::cpm();
+    let mut state = SimState::spawned_at(SPAWN, SPAWN_YAW);
+
+    for _ in 0..125 {
+        let cmd = UserCmd {
+            duration_ms: rate.command_millis(),
+            forward_move: 127,
+            right_move: 0,
+            up_move: 0,
+            buttons: Buttons::NONE,
+            view: ViewAngles {
+                pitch: s(0.0),
+                yaw: SPAWN_YAW,
+                roll: s(0.0),
+            },
+        };
+        step_in_place(&mut state, &cmd, &ARENA, &profile);
+    }
+
+    let travelled = (state.player.origin - SPAWN).truncate().length();
+    let speed = state.player.velocity.truncate().length();
+    eprintln!("one second of forward: {travelled:.1} units, {speed:.1} ups, ending at {:?}", state.player.origin);
+
+    // A second of ground running against the 320 ups cap covers ~300 units
+    // after the acceleration ramp. Anything much under that means the player
+    // met something.
+    assert!(
+        travelled > s(280.0),
+        "a second of holding forward moved the player {travelled} units — \
+         the spawn is facing into geometry"
+    );
+    // Travelled-but-stopped is the other failure shape: sliding along a wall
+    // covers ground while going nowhere the player asked to go.
+    assert!(
+        speed > s(280.0),
+        "the player travelled {travelled} units but is down to {speed} ups — \
+         they are scraping along something"
+    );
+}
+
+#[test]
 fn the_spawn_point_is_not_inside_anything() {
     assert!(
         inside_any_solid(SPAWN).is_none(),
