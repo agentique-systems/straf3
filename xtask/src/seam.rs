@@ -103,12 +103,19 @@ const FORBIDDEN_THIRD_PARTY: &[(&str, &str)] = &[
     ("rayon", "nondeterministic parallelism"),
 ];
 
-/// Source patterns banned inside `straf3-sim` specifically.
+/// Source paths banned inside `straf3-sim` specifically.
 ///
 /// `cargo tree` cannot see this: `std` is always present, so a crate can reach
 /// the filesystem and the wall clock without any dependency edge at all. The
 /// tree check alone would miss `std::fs::read("map.bsp")` sitting in the
 /// middle of the simulation.
+///
+/// These are matched against *normalised* source (see [`strip_comments_and_literals`])
+/// and against *expanded* `use` declarations (see [`expanded_use_paths`]), not
+/// against raw lines. That distinction is the whole point: an earlier version
+/// of this check compared raw lines with `contains`, and
+/// `use std::{fs as sneaky, io};` slipped straight through it because the text
+/// `std::fs` never appears on that line.
 const FORBIDDEN_SIM_SOURCE: &[(&str, &str)] = &[
     ("std::fs", "filesystem access"),
     ("std::net", "network access"),
@@ -271,10 +278,103 @@ pub fn check() -> Result<Report, String> {
 /// and future RL environments all rest on (spec section 4). It is opt-in, not
 /// a default — this check exists to keep it that way, because the day someone
 /// enables it for a frame-time win, nothing will fail loudly.
-const FORBIDDEN_FEATURES: &[(&str, &str)] = &[(
-    "fast-math",
-    "permits float reassociation, which breaks bit-identical replay",
-)];
+const FORBIDDEN_FEATURES: &[(&str, &str)] = &[
+    (
+        "fast-math",
+        "permits float reassociation, which breaks bit-identical replay",
+    ),
+    (
+        "scalar-math",
+        "replaces glam's SIMD paths with scalar ones, changing float results",
+    ),
+];
+
+/// glam's libm-family features, which swap its float math for `libm`'s.
+///
+/// These are handled separately from [`FORBIDDEN_FEATURES`] because they are
+/// **conditional**, and getting that wrong would either break the build or
+/// pretend to guard something it does not:
+///
+/// `libm` and `nostd-libm` both resolve to `dep:libm`, but glam only *uses*
+/// libm when its `std` feature is off — with `std` on, std's math wins and the
+/// libm dependency is inert. Right now `nostd-libm` **is** enabled in this
+/// workspace, pulled in transitively via
+/// `straf3-collision → parry3d → glamx → glam` feature unification, and it is
+/// harmless purely because `glam/std` is also on.
+///
+/// So flagging it unconditionally would fail a clean tree. Instead this fires
+/// exactly when the hazard is real: libm-family enabled *and* `glam/std` gone.
+/// If someone makes the workspace `no_std`, this becomes a violation the same
+/// day, which is the point.
+const GLAM_LIBM_FEATURES: &[&str] = &["libm", "nostd-libm"];
+
+/// What glam's libm-family features mean for a given resolved tree.
+#[derive(Debug, PartialEq, Eq)]
+enum LibmVerdict {
+    /// No libm-family feature on glam at all.
+    NotEnabled,
+    /// Enabled, but `glam/std` is on, so std's math is used regardless.
+    Inert(Vec<String>),
+    /// Enabled with no `glam/std` — glam's float results actually change.
+    Live(Vec<String>),
+}
+
+/// Decide whether glam's libm features are actually changing float behaviour.
+fn libm_verdict(edges: &[FeatureEdge]) -> LibmVerdict {
+    let on: Vec<String> = edges
+        .iter()
+        .filter(|e| e.krate == "glam" && GLAM_LIBM_FEATURES.contains(&e.feature.as_str()))
+        .map(|e| e.feature.clone())
+        .collect();
+    if on.is_empty() {
+        return LibmVerdict::NotEnabled;
+    }
+    if edges
+        .iter()
+        .any(|e| e.krate == "glam" && e.feature == "std")
+    {
+        LibmVerdict::Inert(on)
+    } else {
+        LibmVerdict::Live(on)
+    }
+}
+
+/// One `crate feature "name"` edge from `cargo tree --edges features`.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct FeatureEdge {
+    krate: String,
+    feature: String,
+}
+
+/// Pull `crate feature "name"` nodes out of `cargo tree --edges features`.
+///
+/// Parsed structurally rather than by substring, because the feature name and
+/// a package name routinely collide: `libm v0.2.16` (a package) and
+/// `glam feature "nostd-libm"` (a feature) both contain "libm", and a
+/// `contains("libm")` guard would report a dozen phantom violations on a tree
+/// that is perfectly fine.
+fn parse_feature_edges(tree: &str) -> Vec<FeatureEdge> {
+    let mut edges = Vec::new();
+    for line in tree.lines() {
+        let line = line.trim_start_matches(['│', '├', '└', '─', ' ', '\t']);
+        let Some((krate, rest)) = line.split_once(" feature \"") else {
+            continue;
+        };
+        let Some((feature, _)) = rest.split_once('"') else {
+            continue;
+        };
+        if krate.is_empty() || krate.contains(' ') {
+            continue;
+        }
+        edges.push(FeatureEdge {
+            krate: krate.to_string(),
+            feature: feature.to_string(),
+        });
+    }
+    edges.sort();
+    edges.dedup();
+    edges
+}
 
 /// Assert no determinism-breaking cargo feature is enabled in the workspace.
 ///
@@ -290,12 +390,10 @@ fn check_float_determinism(root: &Path, report: &mut Report) -> Result<(), Strin
             "default features"
         };
 
+        let edges = parse_feature_edges(&tree);
+
         for (feature, reason) in FORBIDDEN_FEATURES {
-            let hits: Vec<&str> = tree
-                .lines()
-                .map(str::trim)
-                .filter(|line| line.contains(feature))
-                .collect();
+            let hits: Vec<&FeatureEdge> = edges.iter().filter(|e| e.feature == *feature).collect();
 
             if hits.is_empty() {
                 report
@@ -307,11 +405,34 @@ fn check_float_determinism(root: &Path, report: &mut Report) -> Result<(), Strin
                         crate_name: "workspace".to_string(),
                         offender: (*feature).to_string(),
                         reason: (*reason).to_string(),
-                        how: format!(
-                            "{} ({scope})",
-                            hit.trim_start_matches(['│', '├', '└', '─', ' '])
-                        ),
+                        how: format!("{} feature \"{}\" ({scope})", hit.krate, hit.feature),
                         is_source: true, // per-occurrence; do not collapse
+                    });
+                }
+            }
+        }
+
+        // The conditional libm rule. See GLAM_LIBM_FEATURES for why this is not
+        // just another entry in FORBIDDEN_FEATURES.
+        match libm_verdict(&edges) {
+            LibmVerdict::NotEnabled => report.notes.push(format!(
+                "workspace: glam libm-family features not enabled ({scope})"
+            )),
+            LibmVerdict::Inert(on) => report.notes.push(format!(
+                "workspace: glam `{}` enabled but inert — `glam/std` is on, so std math wins ({scope})",
+                on.join("`, `")
+            )),
+            LibmVerdict::Live(on) => {
+                for feature in on {
+                    report.violations.push(Violation {
+                        crate_name: "workspace".to_string(),
+                        offender: format!("glam/{feature}"),
+                        reason:
+                            "routes glam's float math through libm, changing results, because \
+                             `glam/std` is not enabled"
+                                .to_string(),
+                        how: format!("glam feature \"{feature}\" with no `glam/std` ({scope})"),
+                        is_source: true,
                     });
                 }
             }
@@ -468,26 +589,343 @@ fn check_sim_source(root: &Path, report: &mut Report) {
         let Ok(text) = std::fs::read_to_string(&file) else {
             continue;
         };
-        for (lineno, line) in text.lines().enumerate() {
-            // Crude but predictable: whole-line comments are exempt so the
-            // rule can be discussed in prose without tripping itself.
-            if line.trim_start().starts_with("//") {
-                continue;
-            }
+        let rel = file
+            .strip_prefix(root)
+            .unwrap_or(&file)
+            .display()
+            .to_string();
+
+        // Comments and string literals are blanked first, so prose about the
+        // rule cannot trip the rule, and a `"std::fs"` inside a string cannot
+        // either. Line structure is preserved, so line numbers stay true.
+        let code = strip_comments_and_literals(&text);
+
+        // (line number, pattern) — one finding per line per pattern, so an
+        // inline path and its expanded `use` do not report twice.
+        let mut hits: Vec<(usize, &str, &str, String)> = Vec::new();
+
+        // 1. Paths written inline: `std::fs::read(..)`, `std :: fs` included.
+        for (idx, line) in code.lines().enumerate() {
+            let normalised = collapse_path_spaces(line);
             for (pattern, reason) in FORBIDDEN_SIM_SOURCE {
-                if line.contains(pattern) {
-                    let rel = file.strip_prefix(root).unwrap_or(&file);
-                    report.violations.push(Violation {
-                        crate_name: "straf3-sim".to_string(),
-                        offender: (*pattern).to_string(),
-                        reason: (*reason).to_string(),
-                        how: format!("{}:{}", rel.display(), lineno + 1),
-                        is_source: true,
-                    });
+                if normalised.contains(pattern) {
+                    hits.push((idx + 1, pattern, reason, format!("{rel}:{}", idx + 1)));
                 }
             }
         }
+
+        // 2. `use` declarations with their brace groups expanded and aliases
+        //    resolved, which is what raw-line matching could not see.
+        for (path, lineno) in expanded_use_paths(&code) {
+            for (pattern, reason) in FORBIDDEN_SIM_SOURCE {
+                if path.contains(pattern) {
+                    hits.push((
+                        lineno,
+                        pattern,
+                        reason,
+                        format!("{rel}:{lineno} (`use` resolves to `{path}`)"),
+                    ));
+                }
+            }
+        }
+
+        hits.sort_by(|a, b| (a.0, a.1, a.3.len()).cmp(&(b.0, b.1, b.3.len())));
+        hits.dedup_by(|a, b| a.0 == b.0 && a.1 == b.1);
+
+        for (_, pattern, reason, how) in hits {
+            report.violations.push(Violation {
+                crate_name: "straf3-sim".to_string(),
+                offender: pattern.to_string(),
+                reason: reason.to_string(),
+                how,
+                is_source: true,
+            });
+        }
     }
+}
+
+/// Blank out comments and the contents of string/char literals, preserving
+/// every newline so line numbers survive.
+///
+/// Handles line comments, nested block comments, raw strings (`r#"..."#`),
+/// byte strings, and escapes. Lifetimes (`'a`) are distinguished from char
+/// literals (`'a'`) by lookahead, so a lifetime does not swallow the rest of
+/// the file.
+fn strip_comments_and_literals(text: &str) -> String {
+    let c: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+
+    // Keep newlines, blank everything else, so offsets stay line-accurate.
+    let blank = |out: &mut String, ch: char| out.push(if ch == '\n' { '\n' } else { ' ' });
+
+    while i < c.len() {
+        // line comment
+        if c[i] == '/' && i + 1 < c.len() && c[i + 1] == '/' {
+            while i < c.len() && c[i] != '\n' {
+                blank(&mut out, c[i]);
+                i += 1;
+            }
+            continue;
+        }
+        // block comment, nested
+        if c[i] == '/' && i + 1 < c.len() && c[i + 1] == '*' {
+            let mut depth = 0usize;
+            loop {
+                if i >= c.len() {
+                    break;
+                }
+                if c[i] == '/' && i + 1 < c.len() && c[i + 1] == '*' {
+                    depth += 1;
+                    blank(&mut out, c[i]);
+                    blank(&mut out, c[i + 1]);
+                    i += 2;
+                    continue;
+                }
+                if c[i] == '*' && i + 1 < c.len() && c[i + 1] == '/' {
+                    depth -= 1;
+                    blank(&mut out, c[i]);
+                    blank(&mut out, c[i + 1]);
+                    i += 2;
+                    if depth == 0 {
+                        break;
+                    }
+                    continue;
+                }
+                blank(&mut out, c[i]);
+                i += 1;
+            }
+            continue;
+        }
+        // raw string: optional `b`, then `r`, then `#`*, then `"`
+        let prev_is_ident = i > 0 && (c[i - 1].is_alphanumeric() || c[i - 1] == '_');
+        if !prev_is_ident && (c[i] == 'r' || c[i] == 'b') {
+            let mut j = i;
+            if c[j] == 'b' {
+                j += 1;
+            }
+            if j < c.len() && c[j] == 'r' {
+                j += 1;
+                let mut hashes = 0;
+                while j < c.len() && c[j] == '#' {
+                    hashes += 1;
+                    j += 1;
+                }
+                if j < c.len() && c[j] == '"' {
+                    // blank the prefix and opening quote
+                    while i <= j {
+                        blank(&mut out, c[i]);
+                        i += 1;
+                    }
+                    // scan for the closing `"` followed by `hashes` `#`
+                    while i < c.len() {
+                        if c[i] == '"' {
+                            let closed = (1..=hashes).all(|k| c.get(i + k) == Some(&'#'));
+                            if closed {
+                                for _ in 0..=hashes {
+                                    if i < c.len() {
+                                        blank(&mut out, c[i]);
+                                        i += 1;
+                                    }
+                                }
+                                break;
+                            }
+                        }
+                        blank(&mut out, c[i]);
+                        i += 1;
+                    }
+                    continue;
+                }
+            }
+        }
+        // normal string
+        if c[i] == '"' {
+            blank(&mut out, c[i]);
+            i += 1;
+            while i < c.len() {
+                if c[i] == '\\' {
+                    blank(&mut out, c[i]);
+                    if i + 1 < c.len() {
+                        blank(&mut out, c[i + 1]);
+                    }
+                    i += 2;
+                    continue;
+                }
+                let end = c[i] == '"';
+                blank(&mut out, c[i]);
+                i += 1;
+                if end {
+                    break;
+                }
+            }
+            continue;
+        }
+        // char literal vs lifetime: `'x'` and `'\n'` are literals, `'a` is not
+        if c[i] == '\'' {
+            let escaped = c.get(i + 1) == Some(&'\\');
+            let short = c.get(i + 2) == Some(&'\'');
+            if escaped || short {
+                blank(&mut out, c[i]);
+                i += 1;
+                while i < c.len() {
+                    if c[i] == '\\' {
+                        blank(&mut out, c[i]);
+                        if i + 1 < c.len() {
+                            blank(&mut out, c[i + 1]);
+                        }
+                        i += 2;
+                        continue;
+                    }
+                    let end = c[i] == '\'';
+                    blank(&mut out, c[i]);
+                    i += 1;
+                    if end {
+                        break;
+                    }
+                }
+                continue;
+            }
+        }
+        out.push(c[i]);
+        i += 1;
+    }
+    out
+}
+
+/// Collapse whitespace around `::`, so `std :: fs` reads as `std::fs`.
+fn collapse_path_spaces(line: &str) -> String {
+    let c: Vec<char> = line.chars().collect();
+    let mut out = String::with_capacity(line.len());
+    let mut i = 0;
+    while i < c.len() {
+        if c[i].is_whitespace() {
+            let mut j = i;
+            while j < c.len() && c[j].is_whitespace() {
+                j += 1;
+            }
+            let next_is_sep = j + 1 < c.len() && c[j] == ':' && c[j + 1] == ':';
+            if next_is_sep || out.ends_with("::") {
+                i = j;
+                continue;
+            }
+            out.push(' ');
+            i = j;
+            continue;
+        }
+        out.push(c[i]);
+        i += 1;
+    }
+    out
+}
+
+/// Expand every `use` declaration into the full paths it actually imports.
+///
+/// `use std::{fs as sneaky, io};` yields `std::fs` and `std::io`. That is the
+/// bypass this check exists to close: the text `std::fs` never appears on that
+/// line, so line-wise `contains` reported the file clean while the sim read
+/// the filesystem through `sneaky::read_to_string`.
+///
+/// Returns `(path, line number)` pairs.
+fn expanded_use_paths(code: &str) -> Vec<(String, usize)> {
+    let lines: Vec<&str> = code.lines().collect();
+    let mut out = Vec::new();
+    let mut i = 0;
+
+    while i < lines.len() {
+        let mut head = lines[i].trim_start();
+        head = head.strip_prefix("pub").map_or(head, str::trim_start);
+        if head.starts_with('(') {
+            head = head.split_once(')').map_or(head, |(_, r)| r.trim_start());
+        }
+        let Some(rest) = head
+            .strip_prefix("use ")
+            .or_else(|| head.strip_prefix("use\t"))
+        else {
+            i += 1;
+            continue;
+        };
+
+        // A `use` may wrap across lines; gather to the terminating `;`.
+        let start = i + 1;
+        let mut stmt = rest.to_string();
+        while !stmt.contains(';') && i + 1 < lines.len() {
+            i += 1;
+            stmt.push(' ');
+            stmt.push_str(lines[i]);
+        }
+        let stmt = stmt.split(';').next().unwrap_or_default().to_string();
+        let normalised = collapse_path_spaces(&stmt);
+        expand_use_tree("", normalised.trim(), &mut |p| out.push((p, start)));
+        i += 1;
+    }
+    out
+}
+
+/// Recursively flatten one use-tree, resolving `{}` groups, `as` aliases and
+/// trailing `self`.
+fn expand_use_tree(prefix: &str, tree: &str, emit: &mut impl FnMut(String)) {
+    let tree = tree.trim();
+    if tree.is_empty() {
+        return;
+    }
+    let Some(open) = tree.find('{') else {
+        let mut path = format!("{prefix}{tree}");
+        if let Some(at) = path.find(" as ") {
+            path.truncate(at);
+        }
+        let path = path.trim().trim_end_matches("::self").trim().to_string();
+        if !path.is_empty() {
+            emit(path);
+        }
+        return;
+    };
+
+    let new_prefix = format!("{prefix}{}", &tree[..open]);
+    let mut depth = 0i32;
+    let mut close = None;
+    for (idx, ch) in tree.char_indices().skip(open) {
+        match ch {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    close = Some(idx);
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let Some(close) = close else { return };
+
+    for part in split_top_level_commas(&tree[open + 1..close]) {
+        expand_use_tree(&new_prefix, &part, emit);
+    }
+}
+
+/// Split on commas that are not inside a nested `{}` group.
+fn split_top_level_commas(s: &str) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut depth = 0i32;
+    let mut current = String::new();
+    for ch in s.chars() {
+        match ch {
+            '{' => {
+                depth += 1;
+                current.push(ch);
+            }
+            '}' => {
+                depth -= 1;
+                current.push(ch);
+            }
+            ',' if depth == 0 => parts.push(std::mem::take(&mut current)),
+            _ => current.push(ch),
+        }
+    }
+    if !current.trim().is_empty() {
+        parts.push(current);
+    }
+    parts
 }
 
 /// Collect `.rs` files under `dir`, recursively.
@@ -546,6 +984,178 @@ mod tests {
             offender.chain.join(" → "),
             "straf3-sim → straf3-collision → wgpu"
         );
+    }
+
+    /// Expand a use-tree the way `check_sim_source` does, for assertions.
+    fn uses(src: &str) -> Vec<String> {
+        let code = strip_comments_and_literals(src);
+        expanded_use_paths(&code)
+            .into_iter()
+            .map(|(p, _)| p)
+            .collect()
+    }
+
+    /// Does the scanner flag this source at all?
+    fn flags(src: &str) -> bool {
+        let code = strip_comments_and_literals(src);
+        let inline = code.lines().any(|l| {
+            let n = collapse_path_spaces(l);
+            FORBIDDEN_SIM_SOURCE.iter().any(|(p, _)| n.contains(p))
+        });
+        let imported = expanded_use_paths(&code)
+            .iter()
+            .any(|(path, _)| FORBIDDEN_SIM_SOURCE.iter().any(|(p, _)| path.contains(p)));
+        inline || imported
+    }
+
+    /// The exact bypass that reached main: an aliased brace-group import.
+    /// Raw-line `contains("std::fs")` reported this clean while the sim read
+    /// the filesystem through the alias.
+    #[test]
+    fn the_aliased_brace_group_bypass_is_caught() {
+        assert!(flags("use std::{fs as sneaky, io};"));
+        assert!(flags("use std::{io, fs as sneaky};"));
+        assert!(flags("use std::{env as e};"));
+        assert!(flags("use std::{collections::HashMap, process::Command};"));
+        assert!(flags("use std :: fs :: read_to_string;"));
+    }
+
+    #[test]
+    fn brace_groups_expand_to_real_paths() {
+        assert_eq!(
+            uses("use std::{fs as sneaky, io};"),
+            vec!["std::fs", "std::io"]
+        );
+        assert_eq!(
+            uses("use std::collections::{HashMap, BTreeMap};"),
+            vec!["std::collections::HashMap", "std::collections::BTreeMap"]
+        );
+        // nested groups
+        assert_eq!(
+            uses("use std::{fs::{self, File}, io};"),
+            vec!["std::fs", "std::fs::File", "std::io"]
+        );
+        // a `use` split across lines
+        assert_eq!(
+            uses("use std::{\n    fs as sneaky,\n    io,\n};"),
+            vec!["std::fs", "std::io"]
+        );
+    }
+
+    /// The scanner must not fire on prose or strings, or nobody will keep it.
+    #[test]
+    fn comments_and_strings_do_not_trip_the_scanner() {
+        assert!(!flags("//! no `std::fs` allowed here"));
+        assert!(!flags("// std::env::var is banned"));
+        assert!(!flags("/* std::process::Command */"));
+        assert!(!flags("/* nested /* std::net */ still a comment */"));
+        assert!(!flags(r#"let s = "std::fs::read";"#));
+        assert!(!flags("let s = r#\"std::env\"#;"));
+        assert!(flags("let x = 1; // ok\nuse std::fs;"));
+    }
+
+    /// A lifetime must not be mistaken for a char literal and swallow the file.
+    #[test]
+    fn lifetimes_do_not_swallow_following_code() {
+        assert!(flags("struct S<'a>(&'a str);\nuse std::fs;"));
+        assert!(!flags("let c = '\\'';"));
+    }
+
+    #[test]
+    fn ordinary_sim_code_stays_clean() {
+        assert!(!flags(
+            "use core::f32;\nuse crate::profile::PhysicsProfile;\npub fn step(dt_ms: u32) {}"
+        ));
+    }
+
+    /// `libm v0.2.16` (a package) and `glam feature \"nostd-libm\"` (a feature)
+    /// both contain \"libm\". Only the second is a feature edge.
+    #[test]
+    fn feature_edges_are_not_confused_with_package_names() {
+        let tree = "\
+straf3-collision v0.1.0
+├── libm v0.2.16
+├── glam feature \"nostd-libm\"
+│   └── glam feature \"std\"
+└── num-traits feature \"libm\"
+";
+        let edges = parse_feature_edges(tree);
+        assert!(
+            !edges
+                .iter()
+                .any(|e| e.krate == "libm" && e.feature.is_empty())
+        );
+        assert!(
+            edges
+                .iter()
+                .any(|e| e.krate == "glam" && e.feature == "nostd-libm")
+        );
+        assert!(
+            edges
+                .iter()
+                .any(|e| e.krate == "glam" && e.feature == "std")
+        );
+        assert!(
+            edges
+                .iter()
+                .any(|e| e.krate == "num-traits" && e.feature == "libm")
+        );
+        // The package line contributed no edge at all.
+        assert_eq!(edges.len(), 3);
+    }
+
+    fn edges(pairs: &[(&str, &str)]) -> Vec<FeatureEdge> {
+        pairs
+            .iter()
+            .map(|(k, f)| FeatureEdge {
+                krate: k.to_string(),
+                feature: f.to_string(),
+            })
+            .collect()
+    }
+
+    /// The conditional guard must fire when the hazard is real and stay quiet
+    /// when it is not — otherwise it is either a false alarm on every clean
+    /// tree, or a guard that never fires at all.
+    #[test]
+    fn libm_is_a_violation_only_when_glam_std_is_absent() {
+        // Today's tree: nostd-libm on, std on -> inert, must not fail.
+        assert_eq!(
+            libm_verdict(&edges(&[("glam", "nostd-libm"), ("glam", "std")])),
+            LibmVerdict::Inert(vec!["nostd-libm".into()])
+        );
+        // Someone drops std (a no_std push) -> the hazard is now real.
+        assert_eq!(
+            libm_verdict(&edges(&[("glam", "nostd-libm")])),
+            LibmVerdict::Live(vec!["nostd-libm".into()])
+        );
+        assert_eq!(
+            libm_verdict(&edges(&[("glam", "libm")])),
+            LibmVerdict::Live(vec!["libm".into()])
+        );
+        // num-traits' own libm feature is not glam's and must not fire.
+        assert_eq!(
+            libm_verdict(&edges(&[("num-traits", "libm"), ("simba", "libm")])),
+            LibmVerdict::NotEnabled
+        );
+    }
+
+    #[test]
+    fn fast_math_and_scalar_math_are_both_forbidden() {
+        for f in ["fast-math", "scalar-math"] {
+            assert!(
+                FORBIDDEN_FEATURES.iter().any(|(n, _)| *n == f),
+                "{f} must be forbidden outright"
+            );
+        }
+        // libm is deliberately NOT unconditional: it is inert while glam/std
+        // is on, and it IS on today via parry3d → glamx → glam.
+        for f in GLAM_LIBM_FEATURES {
+            assert!(
+                !FORBIDDEN_FEATURES.iter().any(|(n, _)| n == f),
+                "{f} is conditional, not unconditional"
+            );
+        }
     }
 
     #[test]

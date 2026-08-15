@@ -28,9 +28,14 @@ usage: cargo xtask <command>
                    crate above it (straf3-platform, -render, -devtools,
                    -game), at any depth.
                  - straf3-sim reaches no window, GPU or filesystem, by
-                   dependency edge or by std call.
-                 - no determinism-breaking cargo feature (glam/fast-math) is
-                   enabled anywhere in the workspace.
+                   dependency edge or by std call. Sources are scanned with
+                   comments and string literals blanked and `use` groups
+                   expanded, so `use std::{{fs as sneaky, io}};` is caught.
+                 - no determinism-breaking cargo feature is enabled anywhere
+                   in the workspace: glam's fast-math and scalar-math are
+                   forbidden outright, and its libm-family features are
+                   forbidden when `glam/std` is absent (only then do they
+                   change float results).
 "
     );
 }
