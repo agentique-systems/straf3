@@ -71,6 +71,21 @@ egui-wgpu = "0.36.1"
 egui-winit = "0.36.1"
 gltf = "1.4.1"           # render meshes; loading is above the line
 
+# Logging. Above the line only — the simulation prints nothing, ever.
+log = "0.4.33"
+env_logger = "0.11.11"   # native only
+
+# Web. Versions are exactly the ones probes/wasm-render measured its 132 KiB
+# bundle with, and `wasm-bindgen` must stay in lockstep with the installed
+# `wasm-bindgen-cli` (0.2.127 here) or the generated glue refuses to load.
+# Each crate adds the `web-sys` features it needs on top of this line.
+wasm-bindgen = "0.2.127"
+wasm-bindgen-futures = "0.4.77"
+web-sys = "0.3.104"
+js-sys = "0.3.104"
+console_error_panic_hook = "0.1.7"
+console_log = "1.1.0"
+
 [profile.dev]
 opt-level = 1        # the simulation is unusable to feel at opt-level 0
 
@@ -80,3 +95,28 @@ opt-level = 3
 [profile.release]
 lto = "thin"
 codegen-units = 1
+
+# What the browser build actually ships. Separate from `release` because the
+# two have opposite objectives: a native release wants the fastest code, a web
+# release wants the smallest download, and `opt-level = "z"` trades one for the
+# other.
+#
+# Measured on the real stage-D bundle rather than assumed, and the honest
+# number is smaller than the folklore: the same bundle is 168 597 B gzipped
+# under plain `release` and 160 622 B here — 7 975 B, 4.7 % of the wasm. Worth
+# keeping because it costs a visitor nothing and costs us only a build profile,
+# but it is not where the bundle's weight is. `wasm-opt -Oz` runs afterwards
+# either way and is doing most of the work these settings are usually credited
+# with.
+#
+# `panic = "abort"` removes the unwinding tables; `console_error_panic_hook`
+# still reports the panic to the console first, because a panic hook runs
+# before the abort. `strip` drops the symbol names, which are what wasm-opt
+# cannot remove and what a browser never reads.
+[profile.web-release]
+inherits = "release"
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true

@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>straf3</title>
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden;
+                   background: #0b0d10; color: #c8ccd2;
+                   font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; }
+      canvas { display: block; width: 100vw; height: 100vh; outline: none; }
+      #straf3-status { position: fixed; inset: 0; display: grid; place-items: center;
+                       text-align: center; padding: 2rem; pointer-events: none;
+                       white-space: pre-wrap; text-shadow: 0 0 4px #000; }
+      #straf3-help { position: fixed; left: 10px; bottom: 8px; opacity: .55; }
+    </style>
+  </head>
+  <body>
+    <canvas id="straf3-canvas" tabindex="0"></canvas>
+    <div id="straf3-status">starting…</div>
+    <div id="straf3-help">
+      WASD move · mouse look · Space jump · Ctrl crouch · click to capture · Esc to release · R respawn
+    </div>
+
+    <script type="module">
+      const status = document.getElementById("straf3-status");
+      const canvas = document.getElementById("straf3-canvas");
+      const say = (text) => { status.textContent = text; };
+
+      // The canvas is sized here, in device pixels, and re-sized on every
+      // window resize. winit reports the change as a Resized event, which the
+      // game forwards to the renderer's surface configuration.
+      function fitCanvas() {
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = Math.max(1, Math.round(window.innerWidth * dpr));
+        canvas.height = Math.max(1, Math.round(window.innerHeight * dpr));
+      }
+      fitCanvas();
+      window.addEventListener("resize", fitCanvas);
+
+      // ── the backend decision, made here and not inside wasm ──────────────
+      //
+      // Spec rev 6 §Q2, measured rather than assumed: wgpu does NOT fall back
+      // from WebGPU to WebGL2. With `navigator.gpu` present but
+      // `requestAdapter()` returning null it crashes *inside* the WebGPU
+      // backend. straf3 ships WebGPU-only — the WebGL2 translation layer is
+      // 595 KiB the majority of visitors would never touch — so the page has
+      // to establish that an adapter really exists before entering wasm, and
+      // tell the module what it found.
+      async function pickBackend() {
+        const forced = new URLSearchParams(location.search).get("backend");
+        if (forced) return forced;
+        if (!navigator.gpu) return "none";
+        try {
+          const adapter = await navigator.gpu.requestAdapter();
+          return adapter ? "webgpu" : "none";
+        } catch {
+          return "none";
+        }
+      }
+
+      const backend = await pickBackend();
+      if (backend === "none") {
+        say(
+          "straf3 needs WebGPU, and this browser did not offer an adapter.\n\n" +
+          "Chrome 113+, Edge 113+ or Firefox with WebGPU enabled will run it.\n" +
+          "On a software-only machine, launch Chrome with\n" +
+          "  --enable-unsafe-webgpu --use-angle=swiftshader"
+        );
+      } else {
+        say("loading…");
+        try {
+          const module = await import("./pkg/straf3_game.js");
+          await module.default();
+          // From here the module owns this status line — it clears it once it
+          // has actually started, and writes its own message if it refuses.
+          // Clearing it here instead would erase that message, and would not
+          // run reliably anyway: winit's web backend never returns normally.
+          module.start_web(backend);
+        } catch (e) {
+          // winit throws a sentinel exception to unwind out of spawn_app.
+          // That is its normal control flow on this platform, not a failure.
+          const text = `${e}`;
+          if (!text.includes("Using exceptions for control flow")) {
+            say(`straf3 failed to start:\n${text}`);
+            console.error(e);
+          }
+        }
+      }
+
+      // Pointer lock needs a user gesture; winit asks for it when the game
+      // sees a click, and this focuses the canvas so keystrokes reach it.
+      canvas.addEventListener("pointerdown", () => canvas.focus());
+    </script>
+  </body>
+</html>
