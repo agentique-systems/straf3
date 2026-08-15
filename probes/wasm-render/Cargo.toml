@@ -1,0 +1,82 @@
+# STANDALONE. The empty [workspace] table below detaches this crate from the
+# root workspace on purpose: Wave 2 is still merging in crates/ and this probe
+# must not perturb the root Cargo.toml, Cargo.lock, or target/ dir.
+[workspace]
+
+[package]
+name = "straf3-wasm-render-probe"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.87"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Versions pinned to exactly what the root workspace declares, so the numbers
+# this probe produces are numbers for straf3's actual stack.
+winit = "0.30.13"
+wgpu = "30.0.0"
+log = "0.4"
+
+# --- optional stages, selected by feature -----------------------------------
+egui = { version = "0.36.1", optional = true }
+egui-wgpu = { version = "0.36.1", optional = true }
+egui-winit = { version = "0.36.1", default-features = false, optional = true }
+gltf = { version = "1.4.1", optional = true }
+
+# The real crates, by relative path. Read-only: we depend on them, we never
+# edit them.
+straf3-render = { path = "../../crates/straf3-render", optional = true }
+straf3-platform = { path = "../../crates/straf3-platform", optional = true }
+straf3-devtools = { path = "../../crates/straf3-devtools", optional = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2.127"
+wasm-bindgen-futures = "0.4.77"
+web-sys = { version = "0.3.104", features = [
+    "Document",
+    "Window",
+    "Element",
+    "HtmlCanvasElement",
+] }
+console_error_panic_hook = "0.1"
+console_log = "1"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+pollster = "1.0.1"
+env_logger = "0.11"
+
+[features]
+default = []
+# Stage B: WebGL2 backend compiled in alongside WebGPU.
+webgl = ["wgpu/webgl"]
+# Stage C: the immediate-mode overlay stack, WITHOUT egui-winit — see the
+# report: egui-winit 0.36.1 does not compile for wasm32 at all.
+ui = ["dep:egui", "dep:egui-wgpu"]
+# Stage C2: adds egui-winit. Expected to fail; kept so the failure is
+# reproducible rather than remembered.
+ui-winit = ["ui", "dep:egui-winit"]
+# Stage D: straf3's own above-the-line crates + glTF asset loading.
+# straf3-devtools is NOT here: it depends on egui-winit, which depends on
+# arboard 3.6.1, which has no wasm32 backend. See stage D2.
+game = ["dep:straf3-render", "dep:straf3-platform", "dep:gltf"]
+# Stage D2: adds straf3-devtools. Expected to fail; kept reproducible.
+game-devtools = ["game", "dep:straf3-devtools"]
+
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+
+# For the apples-to-apples comparison against the root workspace's own
+# release profile (opt-level 3, thin LTO).
+[profile.release-speed]
+inherits = "release"
+opt-level = 3
+lto = "thin"
+panic = "abort"
+strip = true
