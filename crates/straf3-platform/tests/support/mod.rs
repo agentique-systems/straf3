@@ -39,6 +39,8 @@
 
 #![allow(dead_code)] // Each test binary links only the parts it uses.
 
+pub mod pacing;
+
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -520,8 +522,15 @@ fn airborne_turn_empty() -> Run {
 // ---------------------------------------------------------------------------
 
 /// `crates/straf3-platform/tests/fixtures`.
+///
+/// Resolved through [`workspace_root`] rather than `CARGO_MANIFEST_DIR` so this
+/// module can be included from `crates/straf3-game/tests/` too — corner C of
+/// criterion 4 must compare the windowed build against *the same* recorded
+/// inputs, and a second copy of the fixtures would be a second thing to drift.
 pub fn fixtures_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
+    workspace_root()
+        .join("crates")
+        .join("straf3-platform")
         .join("tests")
         .join("fixtures")
 }
