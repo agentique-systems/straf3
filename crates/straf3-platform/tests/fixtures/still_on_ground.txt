@@ -1,0 +1,14 @@
+# still_on_ground — no input for 2 s: catches an injected, dropped or misordered command
+#
+# GENERATED from crates/straf3-platform/tests/support/mod.rs (`runs()`).
+# Do not hand-edit: `fixtures_match_their_definitions` will fail.
+# Regenerate with STRAF3_BLESS_FIXTURES=1 cargo test -p straf3-platform.
+
+rate 125
+profile cpm
+world flat 0
+spawn 0 0 64
+yaw 0
+
+# cmd <repeat> <fwd> <right> <up> <buttons> <pitch> <yaw> <roll>
+cmd 250 0 0 0 - 0 0 0
