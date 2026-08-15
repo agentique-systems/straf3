@@ -12,5 +12,53 @@ publish.workspace = true
 straf3-sim.workspace = true
 straf3-map.workspace = true
 straf3-platform.workspace = true
+# winit is named in this crate's public API (`Renderer::new` takes platform's
+# window). Declaring it directly rather than reaching through straf3-platform
+# is what makes the two crates agree on one winit version — the same crate,
+# so the types unify.
+winit.workspace = true
+# NOTE: wgpu's default features are deliberate. The `webgl` feature is NOT
+# enabled: spec rev 6 Q2 says the browser build is WebGPU-only, the backend is
+# chosen in JS before entering wasm, and wgpu does not degrade from WebGPU to
+# WebGL2 on its own — it panics inside the WebGPU backend instead.
 wgpu.workspace = true
 gltf.workspace = true
+glam.workspace = true
+bytemuck = { workspace = true, features = ["derive"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+pollster.workspace = true
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2.127"
+wasm-bindgen-futures = "0.4.77"
+
+# ── examples ───────────────────────────────────────────────────────────────
+# Two drivers over the same shared flythrough, so this crate can be seen to
+# work without waiting on straf3-platform's window/input path. They are not
+# the game: `straf3-game` owns that. They exist so the renderer's own slice is
+# demonstrable and measurable on its own.
+[dev-dependencies]
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+console_error_panic_hook = "0.1"
+web-sys = { version = "0.3.104", features = [
+    "Document",
+    "Window",
+    "Element",
+    "HtmlCanvasElement",
+    "Performance",
+    "console",
+] }
+
+[[example]]
+name = "window"
+path = "examples/window/main.rs"
+
+# cdylib so wasm-bindgen has a module to process. This target is also the
+# stage-D bundle criterion 2 asks for: the real renderer, straf3-platform,
+# gltf, and parry3d arriving transitively through straf3-map.
+[[example]]
+name = "web-demo"
+path = "examples/web-demo/main.rs"
+crate-type = ["cdylib"]
