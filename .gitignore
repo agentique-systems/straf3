@@ -1,4 +1,28 @@
-node_modules/
+# straf3 — Rust workspace
+
+# Cargo build output. Written as `target/` (not `/target`) so a stray
+# crate-local target dir is ignored too, not just the workspace root one.
+target/
+
+# Cargo.lock is deliberately NOT ignored. This workspace produces a binary
+# (straf3-game), and the spec's determinism guarantees depend on everyone
+# resolving the same dependency versions. Commit it.
+
+# rustfmt backups
+**/*.rs.bk
+
+# Debug info from the Windows cross-build (spec rev 2 §A)
+*.pdb
+
+# Coverage / profiling instrumentation
+*.profraw
+*.profdata
+
+# Local environment and editor state
 .env
-dist/
+.vscode/
+.idea/
+*.swp
+
+# macOS
 .DS_Store
