@@ -235,10 +235,8 @@ fn binding(stmt: &str) -> Option<(String, &str)> {
         rest
     } else if let Some(rest) = head.strip_prefix("let mut ") {
         rest
-    } else if let Some(rest) = head.strip_prefix("let ") {
-        rest
     } else {
-        return None;
+        head.strip_prefix("let ")?
     }
     .split(':')
     .next()
