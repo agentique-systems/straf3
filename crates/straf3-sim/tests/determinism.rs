@@ -7,8 +7,11 @@
 //! 2. across independent OS processes, via the headless runner
 //!    (`a_fresh_process_reproduces_the_same_run`) — the one that would catch a
 //!    dependency on address-space layout, hash seeding or environment;
-//! 3. sensitivity: the checks would actually notice a change
-//!    (`a_single_changed_input_bit_changes_the_result`).
+//! 3. sensitivity: the checks would actually notice a change — one test per
+//!    input, so a failure names which one stopped reaching the physics
+//!    (`a_single_changed_input_bit_changes_the_result` for duration,
+//!    `a_one_ulp_change_in_view_yaw_changes_the_trajectory` for the view, and
+//!    `a_changed_movement_axis_changes_the_trajectory` for the axes).
 //!
 //! These live in `tests/` rather than `src/` for the same reason the runner
 //! lives in `bin/`: a determinism test wants to spawn a process and write a
@@ -109,10 +112,9 @@ fn a_single_changed_input_bit_changes_the_result() {
     // Guards against the tests above passing for the boring reason that the
     // simulation ignores its input.
     //
-    // The perturbation is a command *duration*, because that is the input the
-    // placeholder physics genuinely consumes today. See
-    // `movement_axes_are_still_ignored_by_the_placeholder` below for the
-    // stronger version of this test, and why it cannot be written yet.
+    // Duration is the weakest of the three inputs to perturb, and it is kept
+    // separate from the view-angle and movement-axis checks below so that a
+    // failure names which input stopped reaching the physics.
     let rate = TickRate::HZ_125;
     let world = FlatGround::at(s(0.0));
     let profile = PhysicsProfile::cpm();
@@ -126,21 +128,21 @@ fn a_single_changed_input_bit_changes_the_result() {
     assert_ne!(a.checksum(), b.checksum());
 }
 
-/// A tripwire, not a specification.
+/// The real sensitivity property: a strafejump run must diverge from a one-bit
+/// change in a mouse angle.
 ///
-/// The placeholder [`step`] integrates velocity under gravity and does not yet
-/// read the movement axes or the view angles, so perturbing them mid-run
-/// changes nothing. That means the sensitivity check above is currently weaker
-/// than it should be — it can only perturb a duration.
+/// One ULP of yaw, once, 500 commands into a 2000-command run. Nothing else
+/// differs. If acceleration reads the view — which is the whole of
+/// strafejumping — the trajectories separate and never rejoin.
 ///
-/// This test asserts that limitation explicitly so it is impossible to forget.
-/// **When Wave 2 implements acceleration, this test will start failing.** That
-/// is the intended signal: delete it, and strengthen
-/// `a_single_changed_input_bit_changes_the_result` to perturb `view.yaw` at
-/// command 500 instead, which is the real property — a strafejump run must
-/// diverge from a one-bit change in a mouse angle.
+/// The assertion is on `origin` and `velocity`, not on the checksum, because
+/// the checksum also folds `player.view`. Comparing checksums would let this
+/// test pass for the boring reason that the perturbed angle was *stored*,
+/// rather than the real one that it was *used*. (As it happens the run's last
+/// command overwrites `view` in both runs, so the checksum would work today —
+/// but that is an accident of the fixture, not a property worth resting on.)
 #[test]
-fn movement_axes_are_still_ignored_by_the_placeholder() {
+fn a_one_ulp_change_in_view_yaw_changes_the_trajectory() {
     let world = FlatGround::at(s(0.0));
     let profile = PhysicsProfile::cpm();
     let cmds = interesting_commands(TickRate::HZ_125);
@@ -148,17 +150,42 @@ fn movement_axes_are_still_ignored_by_the_placeholder() {
     let mut perturbed = cmds.clone();
     let yaw = perturbed[500].view.yaw;
     perturbed[500].view.yaw = f32::from_bits(yaw.to_bits() + 1);
+
+    let a = run(&spawn_state(), &cmds, &world, &profile);
+    let b = run(&spawn_state(), &perturbed, &world, &profile);
+
+    assert!(
+        a.player.origin != b.player.origin || a.player.velocity != b.player.velocity,
+        "one ULP of yaw at command 500 changed nothing: the view does not reach \
+         the movement physics. origin {:?} velocity {:?}",
+        a.player.origin,
+        a.player.velocity
+    );
+}
+
+/// The same property for the movement axes, which are the other half of the
+/// input a strafejump is made of.
+///
+/// Held apart from the yaw check so that a regression says which one broke:
+/// air control reading the view but not `right_move` is a real and plausible
+/// bug, and one combined test would report it as "input ignored".
+#[test]
+fn a_changed_movement_axis_changes_the_trajectory() {
+    let world = FlatGround::at(s(0.0));
+    let profile = PhysicsProfile::cpm();
+    let cmds = interesting_commands(TickRate::HZ_125);
+
+    let mut perturbed = cmds.clone();
     perturbed[500].forward_move = -127;
     perturbed[500].right_move = 0;
 
     let a = run(&spawn_state(), &cmds, &world, &profile);
     let b = run(&spawn_state(), &perturbed, &world, &profile);
-    assert_eq!(
-        a.checksum(),
-        b.checksum(),
-        "movement input now affects the simulation — Wave 2 has landed. \
-         Delete this test and strengthen a_single_changed_input_bit_changes_the_result \
-         to perturb view.yaw."
+
+    assert!(
+        a.player.origin != b.player.origin || a.player.velocity != b.player.velocity,
+        "reversing forward_move at command 500 changed nothing: the movement \
+         axes do not reach the physics"
     );
 }
 
