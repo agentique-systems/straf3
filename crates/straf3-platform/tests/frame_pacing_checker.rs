@@ -22,9 +22,7 @@
 
 mod support;
 
-use support::pacing::{
-    Sequence, drive, reference_accumulator, sequences, violations,
-};
+use support::pacing::{Sequence, drive, reference_accumulator, sequences, violations};
 
 /// 125 Hz — 8 ms commands, the spec D2 default.
 const PERIOD: u32 = 8;
@@ -103,7 +101,12 @@ fn checker_rejects_an_accumulator_that_discards_its_remainder() {
     assert_rejected(
         "discards remainder",
         broken,
-        &["fast_1ms", "just_under_7ms", "just_over_9ms", "coprime_13ms"],
+        &[
+            "fast_1ms",
+            "just_under_7ms",
+            "just_over_9ms",
+            "coprime_13ms",
+        ],
     );
 }
 
@@ -269,11 +272,7 @@ fn checker_rejects_drops_on_a_sequence_with_no_long_frame() {
 /// Run a broken accumulator and require the checker to reject it on every
 /// sequence named — and to produce a non-empty explanation, since a violation
 /// with no message is not actionable.
-fn assert_rejected(
-    what: &str,
-    mut accumulator: impl FnMut(u32) -> u32,
-    must_fail_on: &[&str],
-) {
+fn assert_rejected(what: &str, mut accumulator: impl FnMut(u32) -> u32, must_fail_on: &[&str]) {
     let all = sequences();
     for name in must_fail_on {
         let seq: &Sequence = all

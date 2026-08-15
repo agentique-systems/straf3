@@ -146,12 +146,12 @@ fn windowed_build_replays_identically_to_headless_at_every_tick() {
 #[test]
 fn hostile_frame_schedules_do_not_change_the_command_stream() {
     let schedules: [&[u64]; 6] = [
-        &[1],                                          // 1000 fps: 7 of 8 frames emit nothing
-        &[7],                                          // just under one command
-        &[9],                                          // just over one command
-        &[13, 17, 19],                                 // coprime to the 8 ms period
-        &[16, 16, 17],                                 // what a 60 Hz display really delivers
-        &[1, 0, 200, 3, 37, 0, 0, 61, 8, 5, 17, 16],   // stalls and zero-length frames
+        &[1],                                        // 1000 fps: 7 of 8 frames emit nothing
+        &[7],                                        // just under one command
+        &[9],                                        // just over one command
+        &[13, 17, 19],                               // coprime to the 8 ms period
+        &[16, 16, 17],                               // what a 60 Hz display really delivers
+        &[1, 0, 200, 3, 37, 0, 0, 61, 8, 5, 17, 16], // stalls and zero-length frames
     ];
 
     for run in runs() {
@@ -246,11 +246,7 @@ fn an_all_zero_frame_schedule_is_refused_rather_than_hanging() {
 /// independent check of it.
 #[test]
 fn pacing_flags_are_rejected_without_replay() {
-    for args in [
-        vec!["--trace"],
-        vec!["--csv"],
-        vec!["--frame-ms", "8,8,8"],
-    ] {
+    for args in [vec!["--trace"], vec!["--csv"], vec!["--frame-ms", "8,8,8"]] {
         let out = Command::new(straf3())
             .args(&args)
             .output()

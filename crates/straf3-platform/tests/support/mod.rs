@@ -60,13 +60,29 @@ pub enum WorldChoice {
     Empty,
     /// An infinite horizontal plane at this height.
     Flat(Scalar),
+    /// The hardcoded arena with ramps, which lives in `straf3-render`.
+    ///
+    /// **Not comparable against `straf3-headless`.** Headless's fixture format
+    /// has no spelling for this world, and `crates/straf3-sim` is off-limits
+    /// this wave, so a run in the arena can only ever be compared against
+    /// *itself* — see [`arena_runs`].
+    Arena,
 }
 
 impl WorldChoice {
+    /// Whether `straf3-headless` can build this world.
+    ///
+    /// The whole reason criterion 4 splits into a flat-ground half and an arena
+    /// half.
+    pub fn is_comparable_to_headless(self) -> bool {
+        !matches!(self, Self::Arena)
+    }
+
     fn render(self) -> String {
         match self {
             Self::Empty => "world empty".to_string(),
             Self::Flat(h) => format!("world flat {}", render_scalar(h)),
+            Self::Arena => "world arena".to_string(),
         }
     }
 }
@@ -222,9 +238,19 @@ impl Run {
         let mut out = Vec::with_capacity(self.cmds.len() + 1);
         out.push(state.checksum());
 
+        assert!(
+            self.world.is_comparable_to_headless(),
+            "{}: runs in the arena, which lives in straf3-render and cannot be \
+             built here. An arena run has no in-process reference and no \
+             headless reference — it is only ever compared against itself \
+             under different frame schedules. Use arena_runs(), not runs().",
+            self.name,
+        );
+
         // The two arms differ only in the world's concrete type, which `World`
         // being a trait with a generic `step_in_place` forces to be two calls.
         match self.world {
+            WorldChoice::Arena => unreachable!("refused above"),
             WorldChoice::Empty => {
                 let world = EmptyWorld;
                 for cmd in &self.cmds {
@@ -246,6 +272,14 @@ impl Run {
     /// Run this run's checked-in fixture through the `straf3-headless` binary
     /// and return one checksum per tick.
     pub fn headless_digests(&self) -> Vec<u64> {
+        assert!(
+            self.world.is_comparable_to_headless(),
+            "{}: straf3-headless cannot build the arena world — its fixture \
+             format has no spelling for it, and crates/straf3-sim is off-limits \
+             this wave. Comparing an arena run against headless is not a test \
+             that can be made to pass; it is a category error.",
+            self.name,
+        );
         let path = self.fixture_path();
         let bin = headless_binary();
         let out = Command::new(&bin)
@@ -372,16 +406,107 @@ pub fn runs() -> Vec<Run> {
     ]
 }
 
+/// Runs that happen in the **arena**, and therefore only the windowed build can
+/// execute.
+///
+/// # Why these are separate from [`runs`]
+///
+/// Criterion 4 names `straf3-headless` as its reference, and headless's fixture
+/// format can spell `empty` and `flat <z>` and nothing else. The playable build
+/// runs the hardcoded arena with ramps — and ramps are, in the spec's own
+/// words, *"where CPM and VQ3 diverge most, and the discrete branches the
+/// 1-ULP finding warns about."* So the geometry that matters most is the
+/// geometry the named reference structurally cannot run.
+///
+/// Rather than pretend otherwise, criterion 4's evidence splits in two
+/// (coordinator-approved):
+///
+/// 1. **Flat ground, three corners.** [`runs`] — the windowed build against
+///    `straf3-headless` against the in-process simulation, per tick.
+/// 2. **Arena, self-consistency.** These runs — the same recorded input through
+///    the windowed build under wildly different *frame schedules*, required to
+///    produce byte-identical per-tick digests. `straf3-headless` has no frame
+///    loop at all, so the flat-ground half already pins the absolute answer;
+///    this half pins that ramp geometry is not perturbed by frame pacing, which
+///    is what "the renderer changes nothing below the seam" means on the
+///    geometry it is hardest to be sure about.
+///
+/// Neither half alone is criterion 4. Together they are.
+pub fn arena_runs() -> Vec<Run> {
+    let rate = TickRate::HZ_125;
+    let ms = rate.command_millis();
+    let mut cmds = Vec::new();
+
+    // Settle onto whatever is underfoot.
+    for _ in 0..30 {
+        cmds.push(UserCmd::still_at(rate));
+    }
+    // Run forward into the arena, so the run meets geometry rather than air.
+    for _ in 0..80 {
+        cmds.push(UserCmd {
+            duration_ms: ms,
+            forward_move: 127,
+            ..UserCmd::still_at(rate)
+        });
+    }
+    // Jump and strafe with a sweeping view: ramps, walls and edges get hit
+    // while airborne, which is where the multi-plane slide solver and step-up
+    // actually branch.
+    cmds.push(UserCmd {
+        duration_ms: ms,
+        forward_move: 127,
+        buttons: Buttons::JUMP,
+        ..UserCmd::still_at(rate)
+    });
+    for i in 0..260 {
+        let t = i as f32;
+        cmds.push(UserCmd {
+            duration_ms: ms,
+            forward_move: 127,
+            right_move: if i % 64 < 32 { 127 } else { -127 },
+            up_move: 0,
+            buttons: if i % 53 == 0 {
+                Buttons::JUMP
+            } else {
+                Buttons::NONE
+            },
+            view: ViewAngles {
+                pitch: s(0.0),
+                yaw: s(0.9) * t,
+                roll: s(0.0),
+            },
+        });
+    }
+
+    vec![Run {
+        name: "arena_ramp_run",
+        intent: "run, jump and strafe across the arena's ramps — geometry straf3-headless cannot build",
+        rate,
+        profile: Profile::Cpm,
+        world: WorldChoice::Arena,
+        spawn: vec3(s(0.0), s(0.0), s(64.0)),
+        yaw: s(0.0),
+        cmds,
+    }]
+}
+
 /// One run by name.
 ///
 /// # Panics
 ///
 /// If no run has that name.
 pub fn run_named(name: &str) -> Run {
-    runs()
+    all_runs()
         .into_iter()
         .find(|r| r.name == name)
         .unwrap_or_else(|| panic!("no run named {name:?}"))
+}
+
+/// Every run that has a checked-in fixture, comparable to headless or not.
+pub fn all_runs() -> Vec<Run> {
+    let mut all = runs();
+    all.extend(arena_runs());
+    all
 }
 
 /// The degenerate run: no input at all. If the platform layer injects a
