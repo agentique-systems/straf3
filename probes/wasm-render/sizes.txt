@@ -2,3 +2,27 @@ stage-a-wgpu-winit-webgpu profile=release raw=1362514 bindgen=361639 wasmopt=n/a
 stage-b-webgl2-fallback profile=release raw=3411522 bindgen=2049044 wasmopt=n/a gzip=718125 brotli=n/a js=125597 jsgz=17731
 stage-c-egui-webgpu profile=release raw=9595414 bindgen=7965670 wasmopt=7301146 gzip=2616729 brotli=n/a js=151148 jsgz=22021
 stage-a-wgpu-winit-webgpu profile=release raw=1362990 bindgen=362019 wasmopt=323161 gzip=134829 brotli=n/a js=70853 jsgz=11728
+stage-d-straf3-render-webgpu profile=release(--profile-of-record) raw=1933641 bindgen=745672 wasmopt=434182 gzip=171490 brotli=n/a js=89663 jsgz=14908
+stage-b-webgl2-fallback profile=release raw=3411522 bindgen=2049044 wasmopt=1839969 gzip=744395 brotli=n/a js=125597 jsgz=17731  # RECONCILED post-opt: the original line's gzip=718125 was measured on the PRE-opt bindgen output (wasmopt=n/a). Not a regression and not backwards: -Oz shrank the module 2049044->1839969 but cost compressibility, so post-opt gzip is LARGER. The probe report's 727 KiB figure was the post-opt one and was correct.
+stage-d-straf3-render-webgpu-probe-equivalent profile=release(--probe-equivalent) raw=1313403 bindgen=324622 wasmopt=302152 gzip=131369 brotli=n/a js=87512 jsgz=14262
+# ── stage D, read against stage A ──────────────────────────────────────────
+# Comparable only on the --probe-equivalent line: stages A/B/C were built with
+# the probe's own [profile.release] (opt-level z, fat LTO, panic=abort, strip),
+# and the root workspace's release profile is opt-level 3 / thin LTO / unwind /
+# unstripped. Same wasm-bindgen, same wasm-opt -Oz flags, same gzip -9.
+#
+#   stage A (clear-to-a-colour skeleton) gzip  134829  + js 11728  = 146557
+#   stage D (the whole game)             gzip  131369  + js 14262  = 145631
+#
+# The complete renderer — arena, brush collision, camera, mesh, pipeline, the
+# simulation, straf3-platform — is 3460 bytes SMALLER gzipped than the empty
+# skeleton. Not a mistake: the probe linked the `log` facade plus `console_log`
+# and their formatting machinery, and straf3-render deliberately does not (see
+# gfx.rs::log_line). Browser play costs 128.3 KiB of wasm, under rev 6 §P2's
+# headline 132 KiB for a bundle that did nothing.
+#
+# parry3d and gltf contribute ~0 bytes to either number: both are declared
+# dependencies that nothing calls (straf3-collision contains no `parry`
+# reference and straf3-map::compile is unimplemented), so the linker drops
+# them. Rev 6 §P2's "stage D including parry3d" is therefore still unmeasured,
+# and stays open until straf3-collision stops being a stub.

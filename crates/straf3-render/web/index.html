@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>straf3 — arena flythrough</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #0e1319; color: #ddd;
+                   font: 13px/1.5 ui-monospace, monospace; overflow: hidden; }
+      canvas { display: block; width: 100vw; height: 100vh; }
+      #log { position: fixed; left: 8px; top: 8px; z-index: 1;
+             white-space: pre-wrap; text-shadow: 0 0 3px #000; pointer-events: none; }
+    </style>
+  </head>
+  <body>
+    <div id="log"></div>
+    <canvas id="straf3-canvas" width="1280" height="720"></canvas>
+    <script type="module">
+      // Everything the module logs is mirrored into the DOM, so a headless
+      // `chrome --dump-dom` run can read it back without a devtools client.
+      // The probe established this pattern; it is reused rather than reinvented.
+      const el = document.getElementById("log");
+      const say = (s) => { el.textContent += s + "\n"; };
+      for (const k of ["log", "info", "warn", "error"]) {
+        const orig = console[k].bind(console);
+        console[k] = (...a) => { say(`[${k}] ${a.join(" ")}`); orig(...a); };
+      }
+      window.addEventListener("error", (e) => say(`[uncaught] ${e.message}`));
+
+      // ── backend selection, here, before entering wasm ────────────────────
+      //
+      // Spec rev 6 Q2: this bundle is WebGPU-only, and wgpu does NOT fall back
+      // from WebGPU to WebGL2 on its own — with no adapter it panics inside its
+      // own WebGPU backend rather than degrading. So the host asks first, and
+      // refuses to start rather than entering wasm to crash there.
+      say(`STRAF3 navigator.gpu=${!!navigator.gpu}`);
+      let adapter = null;
+      try {
+        adapter = navigator.gpu ? await navigator.gpu.requestAdapter() : null;
+      } catch (e) { say(`STRAF3 requestAdapter threw: ${e}`); }
+      say(`STRAF3 webgpu_adapter=${adapter ? "yes" : "null"}`);
+
+      if (!adapter) {
+        say("STRAF3 unsupported=this build needs WebGPU (Chrome/Edge 113+, Firefox 141+)");
+        document.title = "STRAF3-UNSUPPORTED";
+      } else {
+        const t0 = performance.now();
+        import("./web_demo.js")
+          .then((m) => m.default().then(() => m.start("webgpu")))
+          .then(() => say(`STRAF3 started t=${(performance.now() - t0) | 0}ms`))
+          .catch((e) => {
+            // winit's web backend throws a sentinel to unwind out of
+            // `spawn_app`. That is this platform's normal control flow, not a
+            // failure — the probe hit the same thing.
+            const s = `${e}`;
+            if (s.includes("Using exceptions for control flow")) {
+              say(`STRAF3 started t=${(performance.now() - t0) | 0}ms (winit control-flow unwind)`);
+            } else {
+              say(`STRAF3 failed ${s}`);
+              document.title = "STRAF3-FAILED";
+            }
+          });
+
+        // Read the pixels the GPU actually produced, so "it rendered" is an
+        // observation rather than an inference — and check two of them, in the
+        // upper and lower half, because a frame that is all sky is a frame with
+        // no arena in it.
+        setTimeout(() => {
+          const cv = document.getElementById("straf3-canvas");
+          say(`STRAF3 canvas=${cv.width}x${cv.height}`);
+          try {
+            const off = document.createElement("canvas");
+            off.width = cv.width; off.height = cv.height;
+            const g = off.getContext("2d");
+            g.drawImage(cv, 0, 0);
+            const at = (x, y) => Array.from(g.getImageData(x, y, 1, 1).data).join(",");
+            say(`STRAF3 sky_pixel=${at(cv.width >> 1, cv.height >> 3)}`);
+            say(`STRAF3 floor_pixel=${at(cv.width >> 1, (cv.height * 7) >> 3)}`);
+
+            // How much of the frame is not the clear colour. Sampled on a grid
+            // rather than per-pixel: this runs on the main thread next to the
+            // renderer and should not be the thing that costs a frame.
+            const img = g.getImageData(0, 0, cv.width, cv.height).data;
+            let geom = 0, n = 0;
+            for (let y = 0; y < cv.height; y += 4) {
+              for (let x = 0; x < cv.width; x += 4) {
+                const i = (y * cv.width + x) * 4;
+                const isSky = Math.abs(img[i] - 39) < 8 && Math.abs(img[i + 1] - 45) < 8
+                           && Math.abs(img[i + 2] - 53) < 8;
+                if (!isSky) geom++;
+                n++;
+              }
+            }
+            say(`STRAF3 geometry_coverage=${(100 * geom / n).toFixed(1)}%`);
+          } catch (e) { say(`STRAF3 readback_failed ${e}`); }
+          say("STRAF3 done");
+          document.title = "STRAF3-DONE";
+        }, 6000);
+      }
+    </script>
+  </body>
+</html>

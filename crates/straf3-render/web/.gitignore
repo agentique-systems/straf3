@@ -1,0 +1,6 @@
+# Build output from measure.sh. Deliberately not committed: this repo already
+# carries an operator-level problem with build artifacts in git history (spec
+# §F, the history-slim decision), and a stage-D bundle is ~2 MB per run. The
+# numbers live in probes/wasm-render/sizes.txt, which is the durable record;
+# `./measure.sh <label>` reproduces the bundle itself in a couple of minutes.
+pkg/
