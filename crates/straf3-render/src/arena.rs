@@ -743,8 +743,8 @@ mod tests {
 
     #[test]
     fn starting_inside_a_solid_reports_it() {
-        // Dead centre of the crate.
-        let inside = vec3(s(-64.0), s(-640.0), s(32.0));
+        // Dead centre of the crate, x ∈ [-256, -128] and y ∈ [-704, -576].
+        let inside = vec3(s(-192.0), s(-640.0), s(32.0));
         let t = ARENA.trace(&sweep(inside, inside));
         assert!(t.start_solid);
         assert!(t.all_solid);
@@ -757,11 +757,23 @@ mod tests {
         // Walking west into the step at floor height: the step's top (16) is
         // under the 18-unit step height, so the mover steps up. What the trace
         // must report is simply that the hull is blocked at floor level.
-        let t = ARENA.trace(&sweep(
-            vec3(s(-160.0), s(-640.0), s(24.125)),
-            vec3(s(-260.0), s(-640.0), s(24.125)),
-        ));
+        //
+        // Starting at x = -64, east of the crate's -128 face: start the sweep
+        // inside the crate and `hit()` is answered by `start_solid`, which
+        // would pass this test while proving nothing about either obstacle.
+        let start = vec3(s(-64.0), s(-640.0), s(24.125));
+        let t = ARENA.trace(&sweep(start, vec3(s(-500.0), s(-640.0), s(24.125))));
+        assert!(!t.start_solid, "the sweep must begin on open floor");
         assert!(t.hit(), "the crate is in the way before the step is");
+        // 15 units of hull plus the 49 units of floor between x = -64 and the
+        // crate's east face: the crate is what stops it, not the step further
+        // west.
+        let travelled = t.fraction * s(436.0);
+        assert!(
+            (travelled - s(49.0)).abs() < s(0.01),
+            "stopped after {travelled} units, expected 49 — something other than \
+             the crate answered"
+        );
         // The crate (top 64) is what it hits first, and 64 is well over the
         // step height — this is the obstacle you must jump.
         assert!(s(64.0) > profile.step_height);

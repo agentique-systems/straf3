@@ -241,7 +241,10 @@ fn holding_forward_from_the_spawn_goes_somewhere() {
 
     let travelled = (state.player.origin - SPAWN).truncate().length();
     let speed = state.player.velocity.truncate().length();
-    eprintln!("one second of forward: {travelled:.1} units, {speed:.1} ups, ending at {:?}", state.player.origin);
+    eprintln!(
+        "one second of forward: {travelled:.1} units, {speed:.1} ups, ending at {:?}",
+        state.player.origin
+    );
 
     // A second of ground running against the 320 ups cap covers ~300 units
     // after the acceleration ramp. Anything much under that means the player
