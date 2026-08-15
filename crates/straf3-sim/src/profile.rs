@@ -11,9 +11,9 @@ use crate::num::{Scalar, Vec3, s, vec3};
 ///
 /// - **The two profiles differ in constants, not in structure.** Where CPM
 ///   genuinely adds behaviour — air control, air-stop acceleration, double
-///   jumps — the honest encoding is a parameter that VQ3 sets to zero or
-///   `false`, because that *is* the relationship between them. One code path
-///   with values that switch it off means VQ3 and CPM cannot drift into two
+///   jumps — the honest encoding is a parameter that VQ3 sets to zero, because
+///   that *is* the relationship between them. One code path with values that
+///   switch it off means VQ3 and CPM cannot drift into two
 ///   separately-maintained implementations of strafejumping.
 /// - **These numbers will be tuned.** The VQ3 values are verified against id's
 ///   GPL source; the CPM values are community-reconstructed and will need
@@ -105,9 +105,9 @@ pub struct PhysicsProfile {
 
     // ── CPM extensions (spec D1) ───────────────────────────────────────
     //
-    // VQ3 sets these to zero or false. They are fields rather than a separate
-    // profile type precisely so that "VQ3 is CPM with air control off" is
-    // expressible, and so the two share one implementation of everything else.
+    // VQ3 sets these to zero. They are fields rather than a separate profile
+    // type precisely so that "VQ3 is CPM with air control off" is expressible,
+    // and so the two share one implementation of everything else.
     /// Strength of forward/back air control (`cpm_aircontrol`). Zero disables
     /// it, which is VQ3.
     ///
@@ -128,11 +128,15 @@ pub struct PhysicsProfile {
     ///
     /// TODO(wave2): community-reconstructed. Expected around 30 for CPM.
     pub air_control_wish_speed_cap: Scalar,
-    /// Whether a second jump shortly after landing gains extra height.
-    pub double_jump_enabled: bool,
-    /// How long after landing a double jump remains available, in
+    /// How long after landing a second jump still gains extra height, in
     /// milliseconds — an integer, because every timer in the simulation is
     /// (see [`crate::UserCmd::duration_ms`]).
+    ///
+    /// Zero disables double jumping, which is VQ3. There is deliberately no
+    /// separate `double_jump_enabled` flag: a zero-length window already means
+    /// "never available", and a bool alongside it would be a second source of
+    /// truth the movement code could read instead of — or inconsistently with
+    /// — this value.
     ///
     /// TODO(wave2): community-reconstructed. Expected around 400 ms for CPM.
     pub double_jump_window_ms: u16,
@@ -177,7 +181,6 @@ impl PhysicsProfile {
             air_stop_accelerate: s(0.0),
             strafe_accelerate: s(0.0),
             air_control_wish_speed_cap: s(0.0),
-            double_jump_enabled: false,
             double_jump_window_ms: 0,
             double_jump_boost: s(0.0),
         }
@@ -199,7 +202,6 @@ impl PhysicsProfile {
             air_stop_accelerate: s(2.5),
             strafe_accelerate: s(70.0),
             air_control_wish_speed_cap: s(30.0),
-            double_jump_enabled: true,
             double_jump_window_ms: 400,
             double_jump_boost: s(100.0),
             ..Self::vq3()
@@ -243,7 +245,9 @@ mod tests {
         let vq3 = PhysicsProfile::vq3();
         assert_eq!(vq3.air_control, s(0.0));
         assert_eq!(vq3.air_stop_accelerate, s(0.0));
-        assert!(!vq3.double_jump_enabled);
+        // A zero-length window is how "no double jump" is spelled; there is no
+        // separate flag to keep in sync with it.
+        assert_eq!(vq3.double_jump_window_ms, 0);
 
         // The shared base really is shared: the profiles differ only in the
         // CPM extension fields, so there is one set of movement constants
@@ -253,7 +257,6 @@ mod tests {
             air_stop_accelerate: s(0.0),
             strafe_accelerate: s(0.0),
             air_control_wish_speed_cap: s(0.0),
-            double_jump_enabled: false,
             double_jump_window_ms: 0,
             double_jump_boost: s(0.0),
             ..PhysicsProfile::cpm()
