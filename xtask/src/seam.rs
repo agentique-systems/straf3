@@ -131,6 +131,16 @@ const FORBIDDEN_SIM_SOURCE: &[(&str, &str)] = &[
     ),
     ("include_str!", "compile-time filesystem access"),
     ("include_bytes!", "compile-time filesystem access"),
+    // Renaming the root defeats every other entry in this table: after
+    // `use std as sneaky;` the call site reads `sneaky::fs::read(..)`, so the
+    // raw-line scan never sees `std::fs`, and the use-tree scan emits only
+    // `std` (the ` as ` alias is truncated in `expand_use_tree`). Both passes
+    // miss it. Nothing legitimate needs to rename the standard library, so the
+    // import itself is the violation.
+    (
+        "std as ",
+        "aliasing the `std` root, which hides every path in this table",
+    ),
 ];
 
 /// A single seam violation, phrased so the fix is obvious.
@@ -1018,6 +1028,34 @@ mod tests {
         assert!(flags("use std::{env as e};"));
         assert!(flags("use std::{collections::HashMap, process::Command};"));
         assert!(flags("use std :: fs :: read_to_string;"));
+    }
+
+    /// The remaining bypass after the brace-group one was closed: rename the
+    /// root itself. Both scanner passes are blind to it — the raw-line scan
+    /// sees `sneaky::fs`, and the use-tree scan emits only `std` because
+    /// `expand_use_tree` truncates at ` as `. Caught on the import line, which
+    /// is the one place the string `std` still appears.
+    #[test]
+    fn aliasing_the_std_root_is_caught() {
+        assert!(flags(
+            "use std as sneaky;\npub fn load() { sneaky::fs::read(\"m\"); }"
+        ));
+        assert!(flags("use std as s;"));
+        assert!(flags("use std as _;"));
+
+        // The pass that used to miss it still does; the table entry is what
+        // catches it. This documents *why* the entry exists, so nobody
+        // "simplifies" it away later.
+        assert_eq!(uses("use std as sneaky;"), vec!["std"]);
+    }
+
+    /// The entry above is a substring match on `std as `, so these must not
+    /// trip it. `use std::fmt::Write as _;` is in this very file.
+    #[test]
+    fn aliasing_a_std_item_is_not_confused_with_aliasing_the_root() {
+        assert!(!flags("use std::fmt::Write as _;"));
+        assert!(!flags("use std::io::Read as _;"));
+        assert!(!flags("use crate::thing as std_as_name;"));
     }
 
     #[test]
