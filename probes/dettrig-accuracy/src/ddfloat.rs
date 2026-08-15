@@ -284,6 +284,17 @@ fn reduce(x: Dd) -> (i64, Dd) {
 /// libm and independently of `dettrig`'s own reduction code (this module was
 /// written without reference to `dettrig.rs`'s branch tables beyond the
 /// shared, textbook quadrant identity below).
+///
+/// Known gap, harmless to every result this probe reports: `sin_cos_dd(-0.0)`
+/// returns `(+0.0, 1.0)`, not IEEE-754's `(-0.0, 1.0)` — the sign of zero
+/// gets lost somewhere in `reduce`/`sin_taylor`'s chain of exact `Dd`
+/// operations. This has zero effect here because (a) `-0.0` never appears in
+/// the exhaustive sweep's domain (`spot_check_tiny` is the only caller that
+/// evaluates it, and it only checks magnitude, not sign — see `ord()` in
+/// `main.rs`, which maps `+0.0`/`-0.0` to the same ordinal), and (b) both
+/// candidate libms get `sin(-0.0) = -0.0` right regardless. It would matter
+/// if this reference were ever asked to substantiate a signed-zero claim, or
+/// reused somewhere that cares about the sign of zero — it can't, today.
 #[must_use]
 pub fn sin_cos_dd(x: f64) -> (Dd, Dd) {
     let (q, r) = reduce(Dd::from_f64(x));
@@ -316,19 +327,38 @@ pub fn dd_to_f32(d: Dd) -> f32 {
     if residual == 0.0 {
         return y;
     }
+    // `residual`'s only job from here is to pick which of `y`'s two
+    // neighbours is even in contention -- the true value can only be within
+    // one ULP of `y`, so this pair is always right even if `residual` itself
+    // loses precision right at a tie (see below).
     let neighbour = if residual > 0.0 {
         next_f32_up(y)
     } else {
         next_f32_up(-y).neg_f32()
     };
-    let mid = (y64 + f64::from(neighbour)) / 2.0;
-    let true_val = d.hi + d.lo;
-    match true_val.partial_cmp(&mid) {
+    // Decide `y` vs `neighbour` by subtracting the exact midpoint in full
+    // `Dd` precision (`Dd::sub`, built from `two_sum`/`quick_two_sum`, is
+    // exact here), not by collapsing `d.hi + d.lo` to a single `f64` first
+    // and comparing *that* against the midpoint. `d.lo` is by construction
+    // at most half an ULP of `d.hi`, so plain `f64` addition rounds
+    // `d.hi + d.lo` straight back to `d.hi` and `d.lo` never gets a vote --
+    // exactly the double-rounding this routine exists to avoid, and (unlike
+    // comparing `residual` against half the `y`-to-`neighbour` gap) this
+    // stays correct no matter how much smaller than `d.hi`'s own ULP `d.lo`
+    // is, because `Dd::sub` never rounds `d.lo` away to reach a common scale.
+    let mid = Dd::from_f64((y64 + f64::from(neighbour)) / 2.0);
+    let diff = d.sub(mid);
+    let cmp = if diff.hi != 0.0 {
+        diff.hi.partial_cmp(&0.0)
+    } else {
+        diff.lo.partial_cmp(&0.0)
+    };
+    match cmp {
         Some(std::cmp::Ordering::Greater) if residual > 0.0 => neighbour,
         Some(std::cmp::Ordering::Less) if residual < 0.0 => neighbour,
         Some(std::cmp::Ordering::Equal) => {
             // Exact tie: round to even, as IEEE-754 nearest-even requires.
-            if neighbour.to_bits() % 2 == 0 {
+            if neighbour.to_bits().is_multiple_of(2) {
                 neighbour
             } else {
                 y
@@ -439,5 +469,46 @@ mod tests {
             let d = Dd::from_f64(x);
             assert_eq!(dd_to_f32(d), x as f32, "x={x}");
         }
+    }
+
+    /// Regression for the double-rounding bug this fixed: a `Dd` sitting
+    /// exactly on the midpoint between two adjacent `f32`s (`1.0` and its
+    /// successor), nudged off that midpoint only by `lo`, at a magnitude
+    /// (`2^-140`) far below `f64`'s own resolution at that scale -- so
+    /// naively collapsing `d.hi + d.lo` to a single `f64` before comparing
+    /// against the midpoint rounds `lo` away entirely and answers as if it
+    /// were an exact tie. `Dd::sub`-based comparison must not.
+    #[test]
+    fn dd_to_f32_resolves_far_subnormal_lo_across_exact_midpoint() {
+        let y = 1.0f32;
+        let up = f32::from_bits(y.to_bits() + 1);
+        let mid = (f64::from(y) + f64::from(up)) / 2.0;
+        let tiny = 2f64.powi(-140);
+
+        let nudged_up = Dd { hi: mid, lo: tiny };
+        assert_eq!(
+            dd_to_f32(nudged_up).to_bits(),
+            up.to_bits(),
+            "hi exactly on the midpoint, lo > 0 must round up"
+        );
+
+        let nudged_down = Dd { hi: mid, lo: -tiny };
+        assert_eq!(
+            dd_to_f32(nudged_down).to_bits(),
+            y.to_bits(),
+            "hi exactly on the midpoint, lo < 0 must round down"
+        );
+
+        let exact_tie = Dd { hi: mid, lo: 0.0 };
+        let want = if up.to_bits().is_multiple_of(2) {
+            up
+        } else {
+            y
+        };
+        assert_eq!(
+            dd_to_f32(exact_tie).to_bits(),
+            want.to_bits(),
+            "lo == 0 is a genuine tie: round to even"
+        );
     }
 }

@@ -11,15 +11,20 @@ glibc's `sinf`/`cosf`, and musl's `sinf`/`cosf` all against *that*, over an
 exhaustive sweep, not the ±720° sample the original probe used.
 
 **Headline result: own-trig is not uniformly at least as accurate as libm.**
-It matches both libms (0–1 ULP) for `|degrees| < 16384`, comfortably covering
-any plausible view angle in normal play. Beyond that it degrades — 12 ULP by
-~16,384°, 41 ULP by ~131,000°, up to **1131 ULP (sin) / 1185 ULP (cos)** by a
-few million degrees — while **both glibc's and musl's `sinf`/`cosf` stay
-within 1 ULP of ground truth across the entire swept domain**, right up to
-`f32`'s integer-exactness ceiling. Whether this matters depends on whether
-`ViewAngles::yaw` can actually accumulate that large in practice — see
-"Does this matter for the game" below; nothing in `crates/` was read closely
-enough to answer that here, and nothing in `crates/` was touched.
+It matches both libms (0–1 ULP) for `|degrees| < 8192` on *both* `sin` and
+`cos`, comfortably covering any plausible view angle in normal play. **The
+safe threshold is 8192, not 16384** — `own_sin` only starts degrading at the
+16,384° octave, but `own_cos` degrades one octave earlier, at 8192° (12 ULP
+in `[8192, 16384)`, exhaustively confirmed — see the per-function table
+below), so a single combined threshold has to use the tighter of the two.
+Beyond 8192° it degrades — 12 ULP by ~8,192° (cos) / ~16,384° (sin), 41 ULP by
+~131,000°, up to **1131 ULP (sin) / 1185 ULP (cos)** by a few million degrees
+— while **both glibc's and musl's `sinf`/`cosf` stay within 1 ULP of ground
+truth across the entire swept domain**, right up to `f32`'s integer-exactness
+ceiling. Whether this matters depends on whether `ViewAngles::yaw` can
+actually accumulate that large in practice — see "Does this matter for the
+game" below, which also resolves whether yaw is wrapped anywhere before it
+reaches `angle_vectors` (it is not, currently).
 
 ## What exactly was measured
 
@@ -66,15 +71,27 @@ availability in this sandbox was never verified.
 
 Nothing here is a hardcoded double-double constant taken on faith: π is
 parsed from its well-known decimal digits by a from-scratch digit-by-digit
-parser (`dd_from_decimal`), and three unit tests (`cargo test --release`)
-check the result transitively — `reduce(π)` and `reduce(π/2)` land within
-`1e-29` of the exact quadrant identities, `sin²+cos²==1` to `1e-30` at a
-non-special angle, `π`'s high limb is bit-identical to `std::f64::consts::PI`
-— entirely independent of how π was constructed, so a mistyped digit or a
-broken parser fails loudly before any sweep runs. `Dd -> f32` conversion
-(`dd_to_f32`) is a careful correctly-rounded conversion, not a naive
-`as f32` cast, specifically to avoid double-rounding at exactly the ULP
-boundaries this probe exists to check.
+parser (`dd_from_decimal`), and the `self_check`/`dd_arithmetic_sanity` unit
+tests (`cargo test --release`) check the result transitively —
+`reduce(π)` and `reduce(π/2)` land within `1e-29` of the exact quadrant
+identities, `sin²+cos²==1` to `1e-30` at a non-special angle, `π`'s high limb
+is bit-identical to `std::f64::consts::PI` — entirely independent of how π
+was constructed, so a mistyped digit or a broken parser fails loudly before
+any sweep runs. `Dd -> f32` conversion (`dd_to_f32`) is a careful
+correctly-rounded conversion, not a naive `as f32` cast, specifically to
+avoid double-rounding at exactly the ULP boundaries this probe exists to
+check — it resolves the nearest-`f32` decision (including exact ties, round
+to even) in full `Dd` precision via `Dd::sub` against the midpoint, not by
+collapsing `d.hi + d.lo` into one `f64` first, which is regression-tested
+(`dd_to_f32_resolves_far_subnormal_lo_across_exact_midpoint`) with a `Dd`
+sitting exactly on an `f32` midpoint and nudged only by a `lo` far below
+`f64`'s own resolution at that scale.
+
+One known, harmless gap: `sin_cos_dd(-0.0)` returns `(+0.0, 1.0)`, not
+IEEE-754's `(-0.0, 1.0)` — documented on `sin_cos_dd` itself. It doesn't
+affect any figure in this report: `-0.0` is outside the exhaustive sweep's
+domain, `spot_check_tiny` (the only caller that evaluates it) only checks
+magnitude, and both libms get the sign right regardless.
 
 Argument reduction reuses the ordinary `f64` division to pick the integer
 quadrant `q` (not a double-double 2/π constant) — this is deliberate and
@@ -137,25 +154,47 @@ sweep; every ULP-≥-2 disagreement in the dataset is own-trig alone).
 ### Error vs magnitude — where it actually comes from
 
 The single global "max ULP" figure above hides the real shape of the result,
-which is the useful part. Per-octave worst-case ULP (full table in
+which is the useful part. Per-octave worst-case ULP, **sin and cos given
+separately since their cliffs are one octave apart** (full table in
 `results/*.json`, `octaves_sin`/`octaves_cos`):
 
-| `\|degrees\|` up to | own-trig max ULP (sin) | glibc max ULP (sin) |
-|---:|---:|---:|
-| 4,096 | 1 | 1 |
-| **8,192** | **1** | 1 |
-| **16,384** | **12** | 1 |
-| 65,536 | 12 | 1 |
-| 131,072 | 41 | 1 |
-| 2,097,152 | 41 | 1 |
-| 4,194,304 | **1131** | 1 |
-| 8,388,608 | 1131 | 1 |
-| 16,777,216 (ceiling) | 1131 | 1 |
+Each cell is the worst ULP seen **anywhere from 0° up to that row** (running
+max across all finer octaves below it, not just the single octave starting
+there — cos in particular is not monotonic octave-to-octave, e.g. its raw
+per-octave max at exactly 16,384° is only 2, *lower* than the 12 it already
+hit at 8,192°, so a non-cumulative table would misleadingly suggest recovery):
 
-The transition is sharp and lands on an exact octave boundary:
-`own_sin` max ULP is **1 for every degree magnitude below 16,384°**, and
-**12 or more for every octave from 16,384° up**. This is not sampling noise —
-every one of those octaves is exhaustively swept (16,777,216 samples each).
+| `\|degrees\|` up to | own-trig max ULP (sin) | own-trig max ULP (cos) | glibc max ULP (both) |
+|---:|---:|---:|---:|
+| 4,096 | 1 | 1 | 1 |
+| **8,192** | **1** | **12** | 1 |
+| 16,384 | 12 | 12 | 1 |
+| 65,536 | 12 | 41 | 1 |
+| 131,072 | 41 | 41 | 1 |
+| 2,097,152 | 41 | 1131 | 1 |
+| 4,194,304 | 1131 | 1131 | 1 |
+| 8,388,608 | 1131 | **1185** | 1 |
+| 16,777,216 (ceiling) | 1131 | 1185 | 1 |
+
+The first crossing is sharp and lands on an exact octave boundary, but not
+the *same* boundary for both functions: `own_sin` max ULP is **1 for every
+degree magnitude below 16,384°**, first exceeding 1 (reaching 12) in the
+`[16,384, 32,768)` octave. `own_cos` breaks one octave earlier — max ULP is
+**1 for every degree magnitude below 8,192°**, first exceeding 1 (reaching
+12) in the `[8,192, 16,384)` octave (single exhaustively-confirmed
+counterexample there: `deg = 14490`, `own_cos` 12 ULP against 0 ULP for both
+libms). Past that first crossing, per-octave error is **not** monotonic for
+either function (`own_cos`'s raw per-octave max actually drops back to 2 in
+`[16,384, 32,768)` before climbing again later — see `results/*.json`
+`octaves_cos` for the un-smoothed, non-cumulative numbers), which is exactly
+why the table above reports a running max rather than the raw per-octave
+figure: a non-cumulative reading of "12 ULP at 8,192°, only 2 ULP at 16,384°"
+would wrongly suggest own-trig recovers accuracy as `|x|` grows, when what's
+actually happening is *which* octaves get unlucky is scattered, not that the
+degraded region shrinks. This is not sampling noise — every one of the
+octaves quoted here is exhaustively swept (16,777,216 samples each).
+**Anything quoting one safe threshold for "own-trig" without saying which
+function is being asked to account for both, and should use 8192.**
 
 This is the expected signature of `dettrig::reduce`'s specific technique:
 Cody–Waite range reduction with a two-limb `PIO2_HI`/`PIO2_LO` split
@@ -176,7 +215,7 @@ not remediation).
 
 ### Does it show up inside plausible gameplay range too?
 
-Yes, rarely, well before the 16,384° cliff. The smallest-magnitude example in
+Yes, rarely, well before the 8,192° cliff. The smallest-magnitude example in
 the sweep where own-trig is strictly worse than glibc:
 
 ```
@@ -194,22 +233,31 @@ applies here too, not just to the large-magnitude findings.
 
 ### Does this matter for the game
 
-Depends on something this probe deliberately did not investigate, because it
-required reading `crates/` for behaviour, not just the one constant this
-probe needed to reproduce: **whether `ViewAngles::yaw`/`pitch`/`roll` ever get
-wrapped to a bounded range** before reaching `angle_vectors`. `cmd.rs`'s doc
-comment on `ViewAngles` describes them as absolute angles sent every command,
-with no documented bound. If yaw is wrapped (mod 360, or similar) before it
-reaches `angle_vectors`, own-trig's degradation past 16,384° is unreachable
-and this finding is moot for gameplay, though still real for any other future
-caller of `dettrig`. If it is not wrapped, unbounded mouse-look accumulation
-over a long session (competitive players circle-strafe continuously; 16,384°
-is only ~45.5 full turns) would eventually cross into the degraded region,
-and it would do so *silently* — nothing about the checksums or determinism
-guarantees would flag it, since own-trig stays internally consistent
-(bit-identical across platforms) even while it drifts from ground truth. This
-is the "reopens the decision" scenario the assignment asked to surface if
-found, not resolve.
+Resolved (read-only, `crates/straf3-sim` untouched): **`ViewAngles::yaw` is
+not wrapped anywhere.** `step.rs:274` passes `cmd.view.yaw` straight into
+`angle_vectors`; there is no `wrap`/`angle_mod`/`rem_euclid`/`%360`/
+normalisation anywhere in `cmd.rs` or `step.rs` (the only `clamp` in that
+path is unrelated, on `wishspeed`), and `ViewAngles`'s own doc comment
+(`cmd.rs:141-151`) describes unbounded absolute angles, justified by
+absolute-over-delta being needed for replay fidelity. So whether own-trig's
+degradation past 8,192° is reachable is entirely a property of the Wave 3
+input layer, which does not exist yet — nothing in the current simulation
+bounds it. Unbounded mouse-look accumulation over a long session
+(competitive players circle-strafe continuously; 8,192° is only ~22.8 full
+turns) would eventually cross into the degraded region, and it would do so
+*silently* — nothing about the checksums or determinism guarantees would flag
+it, since own-trig stays internally consistent (bit-identical across
+platforms) even while it drifts from ground truth. This is the "reopens the
+decision" scenario the assignment asked to surface if found, not resolve.
+
+Worth noting for Wave 3's input layer: vanilla Q3 bounds this implicitly,
+because `usercmd_t` angles are 16-bit packed (`ANGLE2SHORT`/`SHORT2ANGLE`),
+so a Q3 angle is inherently wrapped into one turn by the wire format itself.
+straf3 uses `f32` absolutes with no such encoding, so it has no equivalent
+implicit bound. Wrapping yaw into `[0, 360)` at the `UserCmd` seam would make
+this finding unreachable by construction, mirror Q3's own behaviour, and
+cost nothing — a cheap mitigation if Wave 3's input layer wants to close this
+off rather than merely note it.
 
 ## What was not measured
 
@@ -221,8 +269,12 @@ found, not resolve.
   the wasm-determinism probe raised this concern for the 1-ULP glibc/musl gap
   and never measured it either; this probe doesn't either. It would require
   running the sim, which lives in `crates/`, out of this probe's scope.
-- **Whether `yaw`/`pitch`/`roll` are actually reachable at the magnitudes
-  where own-trig degrades**, per the previous section.
+- **Whether `yaw`/`pitch`/`roll` will actually reach the magnitudes where
+  own-trig degrades in a real play session.** The previous section resolves
+  the part this probe *can* answer read-only (the current simulation applies
+  no bound), but reachability in practice is a property of a Wave 3 input
+  layer that doesn't exist yet, and of session length/player behaviour —
+  neither is measurable from `probes/`.
 
 ## Running it
 
