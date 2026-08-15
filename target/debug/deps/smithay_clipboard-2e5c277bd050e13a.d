@@ -1,0 +1,10 @@
+/home/cairon/.agentique-console/worktrees/as_6062018a83204a2c8da1/seat-sim-seam-0-e6832b/target/debug/deps/smithay_clipboard-2e5c277bd050e13a.d: /home/cairon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/smithay-clipboard-0.7.3/src/lib.rs /home/cairon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/smithay-clipboard-0.7.3/src/mime.rs /home/cairon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/smithay-clipboard-0.7.3/src/state.rs /home/cairon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/smithay-clipboard-0.7.3/src/worker.rs
+
+/home/cairon/.agentique-console/worktrees/as_6062018a83204a2c8da1/seat-sim-seam-0-e6832b/target/debug/deps/libsmithay_clipboard-2e5c277bd050e13a.rlib: /home/cairon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/smithay-clipboard-0.7.3/src/lib.rs /home/cairon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/smithay-clipboard-0.7.3/src/mime.rs /home/cairon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/smithay-clipboard-0.7.3/src/state.rs /home/cairon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/smithay-clipboard-0.7.3/src/worker.rs
+
+/home/cairon/.agentique-console/worktrees/as_6062018a83204a2c8da1/seat-sim-seam-0-e6832b/target/debug/deps/libsmithay_clipboard-2e5c277bd050e13a.rmeta: /home/cairon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/smithay-clipboard-0.7.3/src/lib.rs /home/cairon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/smithay-clipboard-0.7.3/src/mime.rs /home/cairon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/smithay-clipboard-0.7.3/src/state.rs /home/cairon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/smithay-clipboard-0.7.3/src/worker.rs
+
+/home/cairon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/smithay-clipboard-0.7.3/src/lib.rs:
+/home/cairon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/smithay-clipboard-0.7.3/src/mime.rs:
+/home/cairon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/smithay-clipboard-0.7.3/src/state.rs:
+/home/cairon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/smithay-clipboard-0.7.3/src/worker.rs:
