@@ -71,6 +71,21 @@ egui-wgpu = "0.36.1"
 egui-winit = "0.36.1"
 gltf = "1.4.1"           # render meshes; loading is above the line
 
+# Logging. Above the line only — the simulation prints nothing, ever.
+log = "0.4.33"
+env_logger = "0.11.11"   # native only
+
+# Web. Versions are exactly the ones probes/wasm-render measured its 132 KiB
+# bundle with, and `wasm-bindgen` must stay in lockstep with the installed
+# `wasm-bindgen-cli` (0.2.127 here) or the generated glue refuses to load.
+# Each crate adds the `web-sys` features it needs on top of this line.
+wasm-bindgen = "0.2.127"
+wasm-bindgen-futures = "0.4.77"
+web-sys = "0.3.104"
+js-sys = "0.3.104"
+console_error_panic_hook = "0.1.7"
+console_log = "1.1.0"
+
 [profile.dev]
 opt-level = 1        # the simulation is unusable to feel at opt-level 0
 

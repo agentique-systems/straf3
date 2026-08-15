@@ -11,3 +11,18 @@ publish.workspace = true
 [dependencies]
 straf3-sim.workspace = true
 winit.workspace = true
+log.workspace = true
+
+# The wall clock is the one thing that genuinely differs between the two
+# targets: `std::time::Instant` panics on `wasm32-unknown-unknown`, so the web
+# build reads `performance.now()` instead. Everything else in this crate is
+# the same code on both.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen.workspace = true
+web-sys = { workspace = true, features = [
+    "Document",
+    "Element",
+    "HtmlCanvasElement",
+    "Performance",
+    "Window",
+] }

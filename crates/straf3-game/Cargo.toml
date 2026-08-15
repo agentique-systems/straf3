@@ -7,16 +7,54 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+# `rlib` so `harness` can test the glue as a library with no window and no GPU
+# in the process — the same shape `straf3-headless` has over `straf3-sim`.
+# `cdylib` because that is the only crate type `wasm-bindgen` can turn into a
+# browser module.
+[lib]
+name = "straf3_game"
+path = "src/lib.rs"
+crate-type = ["rlib", "cdylib"]
+
 [[bin]]
 name = "straf3"
 path = "src/main.rs"
 
 # TOP OF THE STACK. Everything may be depended on from here; nothing may
 # depend on here.
+#
+# `straf3-map` and `straf3-replay` are deliberately absent: Wave 3 is the
+# hardcoded arena (spec rev 6 §T-a) and neither is used yet. `straf3-devtools`
+# is absent for a harder reason — it depends on `egui-winit`, which depends on
+# `arboard`, which has no `wasm32` backend at all, so declaring it here would
+# make the web build impossible (spec rev 6 §Q2). All three are still built by
+# `cargo build --workspace`; they are just not linked into the game yet.
 [dependencies]
 straf3-sim.workspace = true
-straf3-map.workspace = true
-straf3-replay.workspace = true
 straf3-platform.workspace = true
-straf3-render.workspace = true
-straf3-devtools.workspace = true
+winit.workspace = true
+log.workspace = true
+
+# Optional so the window, the input path and the fixed-tick loop can be built
+# and tested with no GPU stack in the process at all — `--no-default-features`
+# gives a window you can move in that draws nothing. That is what makes this
+# crate's own tests runnable in CI on a machine with no adapter.
+straf3-render = { workspace = true, optional = true }
+# Only to name `wgpu::Backends::BROWSER_WEBGPU` when handing the web build's
+# backend choice to the renderer. No wgpu object is ever created here.
+wgpu = { workspace = true, optional = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+env_logger.workspace = true
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen.workspace = true
+console_error_panic_hook.workspace = true
+console_log.workspace = true
+web-sys = { workspace = true, features = ["Document", "Element", "Window"] }
+
+[features]
+default = ["render"]
+# Draw the arena. Also selects the arena as the collision world, so what is
+# drawn and what is collided with are the same geometry by construction.
+render = ["dep:straf3-render", "dep:wgpu"]
