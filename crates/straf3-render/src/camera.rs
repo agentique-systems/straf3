@@ -187,8 +187,14 @@ mod tests {
         let b = player(vec3(s(100.0), s(0.0), s(0.0)), s(0.0), s(0.0));
         // The accumulator should never produce these, but a camera that
         // extrapolates on a hitch would put the eye inside a wall.
-        assert_eq!(Camera::between(&a, &b, InterpolationAlpha(4.0)).eye.x, s(100.0));
-        assert_eq!(Camera::between(&a, &b, InterpolationAlpha(-2.0)).eye.x, s(0.0));
+        assert_eq!(
+            Camera::between(&a, &b, InterpolationAlpha(4.0)).eye.x,
+            s(100.0)
+        );
+        assert_eq!(
+            Camera::between(&a, &b, InterpolationAlpha(-2.0)).eye.x,
+            s(0.0)
+        );
     }
 
     #[test]

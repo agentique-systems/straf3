@@ -200,9 +200,9 @@ const WALL_TOP: Scalar = s(512.0);
 const OUTER: Scalar = FLOOR_HALF + WALL_THICK;
 
 const GREY: Rgb = [0.42, 0.44, 0.47];
-const DARK: Rgb = [0.22, 0.23, 0.26];
-const RUST: Rgb = [0.55, 0.30, 0.20];
-const TEAL: Rgb = [0.16, 0.42, 0.44];
+const DARK: Rgb = [0.30, 0.31, 0.34];
+const RUST: Rgb = [0.62, 0.34, 0.22];
+const TEAL: Rgb = [0.20, 0.48, 0.50];
 const SAND: Rgb = [0.62, 0.55, 0.36];
 const PLUM: Rgb = [0.40, 0.24, 0.42];
 
@@ -611,7 +611,9 @@ mod tests {
         assert!((n(&RAMP_GENTLE).z - s(0.894_427_2)).abs() < s(1e-6));
         assert!(n(&RAMP_GENTLE).z > walk, "gentle ramp must be walkable");
 
-        assert!((n(&RAMP_45).z - s(0.707_106_8)).abs() < s(1e-6));
+        // A 1:1 slope's normal Z is exactly 1/√2, so say that rather than a
+        // decimal approximation of it.
+        assert!((n(&RAMP_45).z - core::f32::consts::FRAC_1_SQRT_2).abs() < s(1e-6));
         assert!(
             n(&RAMP_45).z > walk,
             "the 45° ramp must be walkable — barely, which is the point"

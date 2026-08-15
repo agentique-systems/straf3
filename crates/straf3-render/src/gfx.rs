@@ -36,9 +36,12 @@ pub const CLEAR: wgpu::Color = wgpu::Color {
     a: 1.0,
 };
 
-/// How quickly fog closes in, per unit. `1/2600` puts the far wall of the
-/// arena in visible haze while leaving the near geometry untouched.
-const FOG_DENSITY: f32 = 1.0 / 2600.0;
+/// How quickly fog closes in, per unit. Tuned against the arena's own size:
+/// at `1/5200` the far wall of a 3072-unit arena is lightly hazed and nothing
+/// nearer is touched. Denser than this and the arena reads as a fog bank; the
+/// first pass at it was, which is why this number is measured against the
+/// rendered image rather than picked.
+const FOG_DENSITY: f32 = 1.0 / 5200.0;
 
 /// The uniform block, matching `shader.wgsl`'s `Globals`.
 #[repr(C)]
@@ -220,12 +223,7 @@ impl Scene {
         let globals = Globals {
             view_proj: camera.view_proj(aspect).to_cols_array_2d(),
             eye: [camera.eye.x, camera.eye.y, camera.eye.z, FOG_DENSITY],
-            fog_color: [
-                CLEAR.r as f32,
-                CLEAR.g as f32,
-                CLEAR.b as f32,
-                s(1.0),
-            ],
+            fog_color: [CLEAR.r as f32, CLEAR.g as f32, CLEAR.b as f32, s(1.0)],
         };
         self.queue
             .write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));
@@ -387,8 +385,7 @@ impl Gfx {
         }
         self.config.width = width;
         self.config.height = height;
-        self.surface
-            .configure(self.scene.device(), &self.config);
+        self.surface.configure(self.scene.device(), &self.config);
     }
 
     /// Draw one frame from `camera` and present it.

@@ -196,7 +196,12 @@ fn quad(out: &mut Vec<Vertex>, origin: Vec3, u: Vec3, v: Vec3, normal: Vec3, col
     let rows = (lv / TILE).ceil().max(s(1.0)) as usize;
 
     if cols == 1 && rows == 1 {
-        polygon(out, &[origin, origin + u, origin + u + v, origin + v], normal, color);
+        polygon(
+            out,
+            &[origin, origin + u, origin + u + v, origin + v],
+            normal,
+            color,
+        );
         return;
     }
 

@@ -48,19 +48,25 @@ const LIGHT: vec3<f32> = vec3<f32>(0.371, 0.557, 0.743);
 
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
+    // Vertex colours are authored the way they should look on screen, and the
+    // surface is an sRGB format — the hardware encodes on write. So the first
+    // thing to do is get out of display space and into linear, where lighting
+    // and fog are the only place they mean anything. Doing this at the end
+    // instead (the obvious-looking arrangement) fogs geometry towards a black
+    // that does not match the sky, and the horizon comes out as a dark band.
+    let base = pow(in.color, vec3<f32>(2.2));
+
     let n = normalize(in.normal);
-    // Ambient is brighter on upward faces: a cheap stand-in for sky light that
-    // keeps floors legible without a second light.
-    let ambient = 0.34 + 0.16 * max(n.z, 0.0);
-    let diffuse = 0.62 * max(dot(n, LIGHT), 0.0);
-    let lit = in.color * (ambient + diffuse);
+    // A hemisphere ambient — brighter facing up, dimmer facing down — plus one
+    // directional light. Two terms, because with one the walls facing away
+    // from the light go to near-black and the arena reads as a cave.
+    let ambient = 0.45 + 0.25 * n.z;
+    let diffuse = 0.55 * max(dot(n, LIGHT), 0.0);
+    let lit = base * (ambient + diffuse);
 
-    // Exponential-squared fog, so near geometry is untouched and the far wall
-    // fades rather than being cut off by the far plane.
+    // Exponential-squared fog, in linear space and towards the same colour the
+    // pass clears to, so geometry at the far wall meets the sky rather than
+    // ending at a visible edge.
     let f = clamp(exp(-pow(in.eye_distance * globals.eye.w, 2.0)), 0.0, 1.0);
-    let shaded = mix(globals.fog_color.rgb, lit, f);
-
-    // The vertex colours are authored the way they look on screen, so the
-    // final step back into the sRGB surface's linear space happens here.
-    return vec4<f32>(pow(shaded, vec3<f32>(2.2)), 1.0);
+    return vec4<f32>(mix(globals.fog_color.rgb, lit, f), 1.0);
 }

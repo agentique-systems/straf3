@@ -52,6 +52,10 @@ web-sys = { version = "0.3.104", features = [
 ] }
 
 [[example]]
+name = "offscreen"
+path = "examples/offscreen/main.rs"
+
+[[example]]
 name = "window"
 path = "examples/window/main.rs"
 
