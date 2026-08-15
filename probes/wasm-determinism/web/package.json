@@ -1,0 +1,5 @@
+{
+  "name": "wasm-determinism-probe-web",
+  "private": true,
+  "type": "module"
+}

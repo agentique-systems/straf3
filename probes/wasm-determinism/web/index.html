@@ -1,0 +1,29 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>straf3 determinism probe</title>
+<!--
+  Ground truth for the probe: the same det_probe.wasm the Node runner uses,
+  instantiated by a real browser with no wasm-bindgen and no JS shim between
+  the sim's floats and the numbers reported.
+
+  Headless Chrome is pointed at this page over http://; when the report is
+  ready it is written into #out and #status flips to "done", which the driver
+  script picks up with --dump-dom.
+-->
+<body>
+  <p id="status">running</p>
+  <pre id="out"></pre>
+  <script type="module">
+    import { buildReport } from "./report.js";
+    try {
+      const src = await fetch("./det_probe.wasm");
+      const { instance } = await WebAssembly.instantiateStreaming(src, {});
+      const report = buildReport(instance, `browser-${navigator.userAgent}`);
+      report.wasm_imports = [];
+      document.getElementById("out").textContent = JSON.stringify(report);
+      document.getElementById("status").textContent = "done";
+    } catch (err) {
+      document.getElementById("status").textContent = "error: " + err;
+    }
+  </script>
+</body>
