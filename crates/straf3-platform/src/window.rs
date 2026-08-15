@@ -46,8 +46,14 @@ impl WindowConfig {
         let attributes =
             attributes.with_inner_size(winit::dpi::LogicalSize::new(self.size.0, self.size.1));
 
+        // Both arms rebind `attributes` and the tail returns it unconditionally,
+        // rather than each arm returning early. An early `return` here reads
+        // fine on native and is a `clippy::needless_return` on wasm32, where it
+        // *is* the last expression because the native tail is cfg'd away — so
+        // the shape below is what keeps `-D warnings` green on both targets
+        // from one body.
         #[cfg(target_arch = "wasm32")]
-        {
+        let attributes = {
             use wasm_bindgen::JsCast as _;
             use winit::platform::web::WindowAttributesExtWebSys;
 
@@ -65,10 +71,9 @@ impl WindowConfig {
             }
             // `prevent_default` keeps the browser from scrolling the page or
             // opening a context menu while the player is strafing.
-            return attributes.with_canvas(canvas).with_prevent_default(true);
-        }
+            attributes.with_canvas(canvas).with_prevent_default(true)
+        };
 
-        #[cfg(not(target_arch = "wasm32"))]
         attributes
     }
 }

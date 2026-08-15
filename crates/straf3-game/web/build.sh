@@ -21,19 +21,22 @@ set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="$(cd "$here/../../.." && pwd)"
-profile="release"
+# `web-release` and not `release`: see the profile's comment in the root
+# Cargo.toml. Plain `release` is tuned for a native binary and costs 22 % more
+# download for nothing the browser can use.
+profile="web-release"
 [[ "${1:-}" == "--debug" ]] && profile="debug"
 
 target_dir="${CARGO_TARGET_DIR:-$repo/target}"
 out="$here/pkg"
 
 echo "==> cargo build (${profile}, wasm32-unknown-unknown)"
-if [[ "$profile" == "release" ]]; then
-    cargo build --manifest-path "$repo/Cargo.toml" -p straf3-game \
-        --target wasm32-unknown-unknown --release
-else
+if [[ "$profile" == "debug" ]]; then
     cargo build --manifest-path "$repo/Cargo.toml" -p straf3-game \
         --target wasm32-unknown-unknown
+else
+    cargo build --manifest-path "$repo/Cargo.toml" -p straf3-game \
+        --target wasm32-unknown-unknown --profile "$profile"
 fi
 
 wasm="$target_dir/wasm32-unknown-unknown/$profile/straf3_game.wasm"
@@ -43,7 +46,7 @@ echo "==> wasm-bindgen"
 rm -rf "$out"
 wasm-bindgen --target web --no-typescript --out-dir "$out" "$wasm"
 
-if command -v wasm-opt >/dev/null 2>&1 && [[ "$profile" == "release" ]]; then
+if command -v wasm-opt >/dev/null 2>&1 && [[ "$profile" != "debug" ]]; then
     echo "==> wasm-opt -Oz"
     wasm-opt -Oz --enable-bulk-memory --enable-nontrapping-float-to-int \
         -o "$out/straf3_game_bg.wasm" "$out/straf3_game_bg.wasm"
