@@ -1,0 +1,11 @@
+/home/cairon/.agentique-console/worktrees/as_6062018a83204a2c8da1/seat-sim-seam-0-e6832b/target/debug/deps/naga_types-3dfb53f5e5a92a58.d: /home/cairon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/naga-types-30.0.0/src/lib.rs /home/cairon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/naga-types-30.0.0/src/glsl.rs /home/cairon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/naga-types-30.0.0/src/hlsl.rs /home/cairon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/naga-types-30.0.0/src/msl.rs /home/cairon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/naga-types-30.0.0/src/spv.rs
+
+/home/cairon/.agentique-console/worktrees/as_6062018a83204a2c8da1/seat-sim-seam-0-e6832b/target/debug/deps/libnaga_types-3dfb53f5e5a92a58.rlib: /home/cairon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/naga-types-30.0.0/src/lib.rs /home/cairon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/naga-types-30.0.0/src/glsl.rs /home/cairon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/naga-types-30.0.0/src/hlsl.rs /home/cairon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/naga-types-30.0.0/src/msl.rs /home/cairon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/naga-types-30.0.0/src/spv.rs
+
+/home/cairon/.agentique-console/worktrees/as_6062018a83204a2c8da1/seat-sim-seam-0-e6832b/target/debug/deps/libnaga_types-3dfb53f5e5a92a58.rmeta: /home/cairon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/naga-types-30.0.0/src/lib.rs /home/cairon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/naga-types-30.0.0/src/glsl.rs /home/cairon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/naga-types-30.0.0/src/hlsl.rs /home/cairon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/naga-types-30.0.0/src/msl.rs /home/cairon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/naga-types-30.0.0/src/spv.rs
+
+/home/cairon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/naga-types-30.0.0/src/lib.rs:
+/home/cairon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/naga-types-30.0.0/src/glsl.rs:
+/home/cairon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/naga-types-30.0.0/src/hlsl.rs:
+/home/cairon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/naga-types-30.0.0/src/msl.rs:
+/home/cairon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/naga-types-30.0.0/src/spv.rs:

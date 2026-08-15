@@ -1,0 +1,5 @@
+rate 125
+profile vq3
+world flat 0
+spawn 0 0 100
+cmd 200 0 0 0 - 0 0
