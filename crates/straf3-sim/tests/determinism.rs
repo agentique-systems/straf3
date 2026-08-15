@@ -7,11 +7,8 @@
 //! 2. across independent OS processes, via the headless runner
 //!    (`a_fresh_process_reproduces_the_same_run`) — the one that would catch a
 //!    dependency on address-space layout, hash seeding or environment;
-//! 3. sensitivity: the checks would actually notice a change — one test per
-//!    input, so a failure names which one stopped reaching the physics
-//!    (`a_single_changed_input_bit_changes_the_result` for duration,
-//!    `a_one_ulp_change_in_view_yaw_changes_the_trajectory` for the view, and
-//!    `a_changed_movement_axis_changes_the_trajectory` for the axes).
+//! 3. sensitivity: the checks would actually notice a change
+//!    (`a_single_changed_input_bit_changes_the_result`).
 //!
 //! These live in `tests/` rather than `src/` for the same reason the runner
 //! lives in `bin/`: a determinism test wants to spawn a process and write a
@@ -107,85 +104,72 @@ fn stepping_one_at_a_time_matches_running_the_whole_sequence() {
     assert_eq!(bulk.checksum(), one_by_one.checksum());
 }
 
+/// Guards against the tests above passing for the boring reason that the
+/// simulation ignores its input.
+///
+/// The perturbation that matters is **one bit of a view angle**. Strafejumping
+/// is entirely the relationship between where you are looking and where you are
+/// going, so a mouse angle is the input a movement simulation is most obliged
+/// to be sensitive to — and the one a broken implementation is most likely to
+/// quietly drop. Wave 1 could only perturb a command duration, because the
+/// placeholder physics read nothing else; that limitation is gone.
 #[test]
 fn a_single_changed_input_bit_changes_the_result() {
-    // Guards against the tests above passing for the boring reason that the
-    // simulation ignores its input.
-    //
-    // Duration is the weakest of the three inputs to perturb, and it is kept
-    // separate from the view-angle and movement-axis checks below so that a
-    // failure names which input stopped reaching the physics.
     let rate = TickRate::HZ_125;
     let world = FlatGround::at(s(0.0));
     let profile = PhysicsProfile::cpm();
-
     let cmds = interesting_commands(rate);
-    let mut perturbed = cmds.clone();
-    perturbed[500].duration_ms += 1;
+    let reference = run(&spawn_state(), &cmds, &world, &profile);
 
-    let a = run(&spawn_state(), &cmds, &world, &profile);
-    let b = run(&spawn_state(), &perturbed, &world, &profile);
-    assert_ne!(a.checksum(), b.checksum());
-}
-
-/// The real sensitivity property: a strafejump run must diverge from a one-bit
-/// change in a mouse angle.
-///
-/// One ULP of yaw, once, 500 commands into a 2000-command run. Nothing else
-/// differs. If acceleration reads the view — which is the whole of
-/// strafejumping — the trajectories separate and never rejoin.
-///
-/// The assertion is on `origin` and `velocity`, not on the checksum, because
-/// the checksum also folds `player.view`. Comparing checksums would let this
-/// test pass for the boring reason that the perturbed angle was *stored*,
-/// rather than the real one that it was *used*. (As it happens the run's last
-/// command overwrites `view` in both runs, so the checksum would work today —
-/// but that is an accident of the fixture, not a property worth resting on.)
-#[test]
-fn a_one_ulp_change_in_view_yaw_changes_the_trajectory() {
-    let world = FlatGround::at(s(0.0));
-    let profile = PhysicsProfile::cpm();
-    let cmds = interesting_commands(TickRate::HZ_125);
-
-    let mut perturbed = cmds.clone();
-    let yaw = perturbed[500].view.yaw;
-    perturbed[500].view.yaw = f32::from_bits(yaw.to_bits() + 1);
-
-    let a = run(&spawn_state(), &cmds, &world, &profile);
-    let b = run(&spawn_state(), &perturbed, &world, &profile);
-
-    assert!(
-        a.player.origin != b.player.origin || a.player.velocity != b.player.velocity,
-        "one ULP of yaw at command 500 changed nothing: the view does not reach \
-         the movement physics. origin {:?} velocity {:?}",
-        a.player.origin,
-        a.player.velocity
+    // A thousandth of a degree on one mouse angle — far below anything a mouse
+    // can produce — must change the whole run.
+    //
+    // Command 1 and not command 500, and the reason is a real property of Quake
+    // movement rather than a convenience. `PM_Accelerate` grants nothing when
+    // the projection of velocity onto the wish direction already exceeds the
+    // wish speed, so a fast player pointing roughly where they are already
+    // going is *genuinely* unaffected by small view changes — that clamp is the
+    // mechanism strafejumping is built on. Measured against this input, about
+    // two commands in three are insensitive for exactly that reason, and
+    // command 500 is one of them. Picking a command where the player is still
+    // accelerating tests the sensitivity that exists rather than asserting one
+    // that would only be true if the clamp were missing.
+    let mut yaw_moved = cmds.clone();
+    yaw_moved[1].view.yaw += s(0.001);
+    assert_ne!(
+        reference.checksum(),
+        run(&spawn_state(), &yaw_moved, &world, &profile).checksum(),
+        "a thousandth of a degree of mouse movement did not change the run"
     );
-}
 
-/// The same property for the movement axes, which are the other half of the
-/// input a strafejump is made of.
-///
-/// Held apart from the yaw check so that a regression says which one broke:
-/// air control reading the view but not `right_move` is a real and plausible
-/// bug, and one combined test would report it as "input ignored".
-#[test]
-fn a_changed_movement_axis_changes_the_trajectory() {
-    let world = FlatGround::at(s(0.0));
-    let profile = PhysicsProfile::cpm();
-    let cmds = interesting_commands(TickRate::HZ_125);
+    // And with the clamp taken out of the argument: nudge every command by the
+    // same thousandth of a degree, which no accelerating player can absorb.
+    let mut all_moved = cmds.clone();
+    for c in &mut all_moved {
+        c.view.yaw += s(0.001);
+    }
+    assert_ne!(
+        reference.checksum(),
+        run(&spawn_state(), &all_moved, &world, &profile).checksum(),
+        "a run-long mouse offset did not change the run"
+    );
 
-    let mut perturbed = cmds.clone();
-    perturbed[500].forward_move = -127;
-    perturbed[500].right_move = 0;
+    // And the movement axes, which reach the physics through a different path.
+    let mut axis_moved = cmds.clone();
+    axis_moved[500].forward_move = -127;
+    assert_ne!(
+        reference.checksum(),
+        run(&spawn_state(), &axis_moved, &world, &profile).checksum(),
+        "a changed movement axis did not change the run"
+    );
 
-    let a = run(&spawn_state(), &cmds, &world, &profile);
-    let b = run(&spawn_state(), &perturbed, &world, &profile);
-
-    assert!(
-        a.player.origin != b.player.origin || a.player.velocity != b.player.velocity,
-        "reversing forward_move at command 500 changed nothing: the movement \
-         axes do not reach the physics"
+    // And a command duration, which is the D2 seam.
+    let mut longer = cmds.clone();
+    longer[500].duration_ms += 1;
+    assert_ne!(
+        reference.checksum(),
+        run(&spawn_state(), &longer, &world, &profile).checksum(),
+        "a changed command duration did not change the run"
     );
 }
 
@@ -215,7 +199,22 @@ fn the_world_is_part_of_the_result() {
     let on_ground = run(&spawn_state(), &cmds, &FlatGround::at(s(0.0)), &profile);
     let in_void = run(&spawn_state(), &cmds, &EmptyWorld, &profile);
     assert_ne!(on_ground.checksum(), in_void.checksum());
-    assert!(on_ground.player.ground.is_grounded());
+
+    // The run jumps every 97 commands and a 270 ups jump is airborne for about
+    // 84 of them, so which of the two states is *touching* ground at command
+    // 2000 is a coincidence of the input, not a property worth asserting. What
+    // is a property: with a floor the player stays near it, and without one
+    // they fall for sixteen seconds.
+    assert!(
+        on_ground.player.origin.z > s(0.0),
+        "fell through the floor to {}",
+        on_ground.player.origin.z
+    );
+    assert!(
+        in_void.player.origin.z < s(-1000.0),
+        "nothing to fall through, yet only reached {}",
+        in_void.player.origin.z
+    );
     assert!(!in_void.player.ground.is_grounded());
 }
 

@@ -8,12 +8,30 @@ use crate::num::{Scalar, Vec3, s, to_bits};
 /// An enum rather than a `bool` plus a normal field, because "on the ground
 /// but with no ground normal" is not a state that should be representable —
 /// the ramp behaviour the game is about is entirely a function of that normal.
+///
+/// # Why there are three states and not two
+///
+/// Quake keeps two separate booleans, `pml.groundPlane` and `pml.walking`, and
+/// the gap between them is where ramp sliding lives. A plane steeper than
+/// [`crate::PhysicsProfile::min_walk_normal`] is touched — velocity is clipped
+/// to it, so the player follows its surface — but it is not walkable, so no
+/// ground friction is applied and the air rules govern acceleration. Collapsing
+/// that into a `bool` would delete the technique.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum GroundState {
-    /// Not touching walkable ground: gravity applies, air acceleration rules
-    /// apply.
+    /// Touching nothing: gravity applies, air acceleration rules apply.
     #[default]
     Airborne,
+    /// Touching a plane too steep to stand on — Q3's `groundPlane && !walking`.
+    ///
+    /// Velocity is clipped to this plane, but the player is *not* walking:
+    /// friction is not applied and jumping is not available. Only gravity's
+    /// component along the slope bleeds speed, which is why a steep ramp
+    /// preserves it.
+    Sliding {
+        /// Surface normal of the plane being slid along.
+        normal: Vec3,
+    },
     /// Standing on walkable ground.
     Grounded {
         /// Surface normal underfoot. Not assumed to be straight up: ramps are
@@ -23,17 +41,26 @@ pub enum GroundState {
 }
 
 impl GroundState {
-    /// Whether the player is on walkable ground.
+    /// Whether the player is on *walkable* ground — Q3's `pml.walking`.
+    ///
+    /// [`Self::Sliding`] is deliberately not included: a player on a steep ramp
+    /// is touching geometry but is under air rules.
     #[must_use]
     pub const fn is_grounded(&self) -> bool {
         matches!(self, Self::Grounded { .. })
     }
 
-    /// The ground normal, or `None` when airborne.
+    /// Whether there is a plane underfoot at all — Q3's `pml.groundPlane`.
+    #[must_use]
+    pub const fn is_on_plane(&self) -> bool {
+        !matches!(self, Self::Airborne)
+    }
+
+    /// The ground normal, or `None` when touching nothing.
     #[must_use]
     pub const fn normal(&self) -> Option<Vec3> {
         match self {
-            Self::Grounded { normal } => Some(*normal),
+            Self::Grounded { normal } | Self::Sliding { normal } => Some(*normal),
             Self::Airborne => None,
         }
     }
@@ -51,11 +78,18 @@ pub struct Timers {
     /// Time left in which movement is under scripted control rather than
     /// player control — Q3's `pm_time`, used by jump pads and knockback.
     pub movement_locked_ms: u16,
-    /// Time since the player last landed. Drives the CPM double-jump window
-    /// (see [`crate::PhysicsProfile::double_jump_window_ms`]).
+    /// Time since the player last landed.
     pub since_landed_ms: u16,
     /// Time since the player last jumped.
     pub since_jumped_ms: u16,
+    /// Time left in which a jump would count as a CPM double jump.
+    ///
+    /// Armed to [`crate::PhysicsProfile::double_jump_window_ms`] on landing
+    /// from a jump, counted down, and consumed by the jump that uses it. A
+    /// countdown rather than a "time since landed" comparison because the
+    /// window has to be *spent*: two jumps in one window must not both be
+    /// boosted, and a comparison against an elapsed counter would allow that.
+    pub double_jump_ms: u16,
 }
 
 impl Timers {
@@ -66,6 +100,7 @@ impl Timers {
     /// briefly re-enables a technique.
     pub fn advance(&mut self, ms: u16) {
         self.movement_locked_ms = self.movement_locked_ms.saturating_sub(ms);
+        self.double_jump_ms = self.double_jump_ms.saturating_sub(ms);
         self.since_landed_ms = self.since_landed_ms.saturating_add(ms);
         self.since_jumped_ms = self.since_jumped_ms.saturating_add(ms);
     }
@@ -91,11 +126,22 @@ pub struct PlayerState {
     pub timers: Timers,
     /// Whether the crouch button was held at the end of the last command.
     pub crouched: bool,
-    /// Whether the jump button was held at the end of the last command.
+    /// Whether a jump has been taken and the jump input not yet released —
+    /// Q3's `PMF_JUMP_HELD`.
     ///
     /// Needed because jumping is edge-triggered: holding jump must not
-    /// re-trigger, which is what makes bunny-hop timing a skill.
+    /// re-trigger, which is what makes bunny-hop timing a skill. Set by the
+    /// jump itself, cleared the moment the input goes away, exactly as
+    /// `PmoveSingle` does.
     pub jump_held: bool,
+    /// Whether the player left the ground by jumping rather than by walking
+    /// off an edge.
+    ///
+    /// The CPM double-jump window opens on landing, but only for a landing
+    /// that ended a jump — stepping off a crate and jumping on contact is not a
+    /// double jump. This is that one bit of provenance, and it lives in state
+    /// because [`crate::step`] may not consult anything else.
+    pub left_ground_by_jumping: bool,
 }
 
 /// The timer: where the run is, between the start line and the finish.
@@ -255,12 +301,18 @@ impl SimState {
                 fold_u32(1, &mut h);
                 fold_vec(normal, &mut h);
             }
+            GroundState::Sliding { normal } => {
+                fold_u32(2, &mut h);
+                fold_vec(normal, &mut h);
+            }
         }
         fold_u32(u32::from(self.player.timers.movement_locked_ms), &mut h);
         fold_u32(u32::from(self.player.timers.since_landed_ms), &mut h);
         fold_u32(u32::from(self.player.timers.since_jumped_ms), &mut h);
+        fold_u32(u32::from(self.player.timers.double_jump_ms), &mut h);
         fold_u32(u32::from(self.player.crouched), &mut h);
         fold_u32(u32::from(self.player.jump_held), &mut h);
+        fold_u32(u32::from(self.player.left_ground_by_jumping), &mut h);
         match self.run {
             RunState::NotStarted => fold_u32(0, &mut h),
             RunState::Running { started_at_ms } => {
@@ -310,10 +362,39 @@ mod tests {
             movement_locked_ms: 5,
             since_landed_ms: u16::MAX - 1,
             since_jumped_ms: 0,
+            double_jump_ms: 5,
         };
         t.advance(10);
         assert_eq!(t.movement_locked_ms, 0);
+        assert_eq!(t.double_jump_ms, 0);
         assert_eq!(t.since_landed_ms, u16::MAX);
+    }
+
+    #[test]
+    fn the_checksum_covers_the_state_a_technique_depends_on() {
+        // Every field the movement code branches on has to be in the digest,
+        // or a replay could diverge with a matching checksum — which is worse
+        // than diverging visibly.
+        let base = SimState::default();
+
+        let mut armed = base;
+        armed.player.timers.double_jump_ms = 400;
+        assert_ne!(base.checksum(), armed.checksum());
+
+        let mut jumped = base;
+        jumped.player.left_ground_by_jumping = true;
+        assert_ne!(base.checksum(), jumped.checksum());
+
+        // Sliding and Grounded on the same plane are different states.
+        let n = vec3(s(0.0), s(0.6), s(0.8));
+        let mut sliding = base;
+        sliding.player.ground = GroundState::Sliding { normal: n };
+        let mut grounded = base;
+        grounded.player.ground = GroundState::Grounded { normal: n };
+        assert_ne!(sliding.checksum(), grounded.checksum());
+        assert!(!sliding.player.ground.is_grounded());
+        assert!(sliding.player.ground.is_on_plane());
+        assert_eq!(sliding.player.ground.normal(), Some(n));
     }
 
     #[test]
