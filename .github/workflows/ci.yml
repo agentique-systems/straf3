@@ -1,0 +1,66 @@
+name: CI
+
+# Everything here runs headlessly: no GPU, no display server, no window is
+# ever opened (spec criterion 14). The simulation is testable without any of
+# them, which is the point of the dependency seam.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  check:
+    name: build / test / clippy / seam
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        # winit and wgpu need these to *link* on Linux. They do not need a GPU
+        # or a display to build, and nothing in this workflow opens a window.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config clang libx11-dev libxkbcommon-dev libwayland-dev
+
+      - name: Install Rust
+        # The toolchain is pinned by rust-toolchain.toml; rustup honours it.
+        run: |
+          rustup show
+          rustup component add clippy rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Formatting
+        run: cargo fmt --all -- --check
+
+      - name: Build
+        run: cargo build --workspace --all-targets
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace
+
+      # Runs again on its own, separately from `cargo test`, so a broken seam
+      # is legible in the job list rather than buried in test output.
+      - name: Dependency seam and float determinism
+        run: cargo xtask check-seam
+
+  seam-only:
+    # A fast gate that needs no system libraries and compiles nothing but
+    # xtask: the architectural rule and the determinism rule are the things
+    # most worth learning about within seconds rather than after a full build.
+    name: seam + determinism (fast gate)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo xtask check-seam

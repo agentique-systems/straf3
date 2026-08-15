@@ -1,0 +1,14 @@
+[package]
+name = "xtask"
+description = "Workspace automation. Chiefly: enforcing the dependency seam."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# Deliberately zero dependencies. This check has to be runnable on a cold
+# registry, before anything else in the workspace resolves, so it reads
+# `cargo tree` output rather than pulling in serde_json to parse
+# `cargo metadata`.
+[dependencies]

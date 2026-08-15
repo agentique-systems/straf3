@@ -1,0 +1,18 @@
+# Pinned to an exact version, not "stable", on purpose.
+#
+# Float codegen shifts between compiler releases: the same source can produce
+# different last-bit results on a different rustc. Determinism is a spec
+# requirement (section 4 — same binary, same machine, bit-identical), so the
+# compiler version is part of the contract, not an incidental detail.
+# Bumping this is a deliberate act that should be accompanied by re-recording
+# or re-verifying reference replays.
+[toolchain]
+channel = "1.97.1"
+components = ["rustfmt", "clippy"]
+targets = [
+    # Play-and-tune target. Cross-links from WSL with no extra linker config,
+    # and the resulting .exe reaches the real GPU through WSL interop —
+    # which WSLg itself cannot do (spec section 2).
+    "x86_64-pc-windows-gnu",
+]
+profile = "default"
