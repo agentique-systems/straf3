@@ -105,6 +105,22 @@ impl Renderer {
     /// The web host page uses this to pass the backend it picked in JS before
     /// entering wasm. See the crate docs for why that decision cannot be left
     /// to wgpu.
+    ///
+    /// # The host page must confirm an adapter exists first
+    ///
+    /// On the web, do not call this until `navigator.gpu.requestAdapter()` has
+    /// resolved to something non-null. If it resolves to `null`, wgpu's WebGPU
+    /// backend reads `.info` off that null and the module dies with a
+    /// `TypeError` from inside its own glue, before any error this crate could
+    /// return or any message it could print.
+    ///
+    /// That is not a guess. It was reproduced here, in Chrome 146, against
+    /// wgpu 30 with only the WebGPU backend compiled in — independently
+    /// confirming what spec rev 6 Q2 recorded for the two-backend case. There
+    /// is no recovering from it on this side of the boundary; the host page
+    /// asking first is the whole mitigation, which is why
+    /// `crates/straf3-render/web/index.html` refuses to enter wasm at all when
+    /// the adapter comes back null.
     #[must_use]
     pub fn with_backends(window: Arc<Window>, backends: wgpu::Backends) -> Self {
         let gfx: Rc<RefCell<Option<gfx::Gfx>>> = Rc::new(RefCell::new(None));
