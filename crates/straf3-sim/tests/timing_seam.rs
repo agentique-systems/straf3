@@ -353,6 +353,7 @@ fn no_module_open_codes_the_millisecond_conversion() {
         "const MS_TO_SEC: Scalar = s(0.001);\nlet dt = s(f32::from(ms)) * MS_TO_SEC;",
         "const INV_THOUSAND: Scalar = s(1.0 / 1000.0);\nlet dt = s(f32::from(ms)) * INV_THOUSAND;",
         "let raw = f32::from(ms);\nlet dt = s(raw * 0.001);",
+        "let raw = f32::from(ms);\nlet hop = raw;\nlet dt = s(hop * 0.001);",
     ] {
         let stmts = statements(planted);
         let scale_al = scale_aliases(&stmts);
