@@ -1,0 +1,4 @@
+stage-a-wgpu-winit-webgpu profile=release raw=1362514 bindgen=361639 wasmopt=n/a gzip=134978 brotli=n/a js=70702 jsgz=11684
+stage-b-webgl2-fallback profile=release raw=3411522 bindgen=2049044 wasmopt=n/a gzip=718125 brotli=n/a js=125597 jsgz=17731
+stage-c-egui-webgpu profile=release raw=9595414 bindgen=7965670 wasmopt=7301146 gzip=2616729 brotli=n/a js=151148 jsgz=22021
+stage-a-wgpu-winit-webgpu profile=release raw=1362990 bindgen=362019 wasmopt=323161 gzip=134829 brotli=n/a js=70853 jsgz=11728

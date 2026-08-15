@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+    <meta charset="utf-8">
+    <title>PROBE-DONE</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #111; color: #ddd;
+                   font: 13px/1.5 ui-monospace, monospace; }
+      canvas { display: block; width: 100vw; height: 100vh; }
+      #log { position: fixed; left: 8px; top: 8px; z-index: 1;
+             white-space: pre-wrap; text-shadow: 0 0 3px #000; }
+    </style>
+  </head>
+  <body>
+    <div id="log">PROBE navigator.gpu=true
+PROBE webgl2=true
+PROBE webgpu_adapter=null
+PROBE init_returned t=20ms
+[uncaught] Uncaught TypeError: Cannot read properties of null (reading 'info')
+PROBE canvas=1280x720
+PROBE done
+</div>
+    <canvas id="straf3-canvas" width="1280" height="720" tabindex="0" alt="straf3 wasm render probe"></canvas>
+    <script type="module">
+      // Mirror everything into the DOM so `chrome --headless --dump-dom` can
+      // read it back without a devtools-protocol client.
+      const el = document.getElementById("log");
+      const say = (s) => { el.textContent += s + "\n"; };
+      for (const k of ["log", "info", "warn", "error"]) {
+        const orig = console[k].bind(console);
+        console[k] = (...a) => { say(`[${k}] ${a.join(" ")}`); orig(...a); };
+      }
+      window.addEventListener("error", (e) => say(`[uncaught] ${e.message}`));
+
+      say(`PROBE navigator.gpu=${!!navigator.gpu}`);
+      try {
+        const c = document.createElement("canvas");
+        say(`PROBE webgl2=${!!c.getContext("webgl2")}`);
+      } catch (e) { say(`PROBE webgl2=err ${e}`); }
+
+      if (navigator.gpu) {
+        try {
+          const a = await navigator.gpu.requestAdapter();
+          say(`PROBE webgpu_adapter=${a ? "yes" : "null"}`);
+        } catch (e) { say(`PROBE webgpu_adapter=err ${e}`); }
+      }
+
+      const t0 = performance.now();
+      import("./straf3_wasm_render_probe.js")
+        .then((m) => m.default())
+        .then(() => say(`PROBE init_returned t=${(performance.now() - t0) | 0}ms`))
+        .catch((e) => {
+          // winit's web backend throws a sentinel to unwind out of spawn_app.
+          // That is expected control flow on this platform, not a failure.
+          const s = `${e}`;
+          if (s.includes("Using exceptions for control flow")) {
+            say(`PROBE started_ok t=${(performance.now() - t0) | 0}ms (winit control-flow unwind)`);
+          } else {
+            say(`PROBE init_failed ${s}`);
+          }
+        });
+
+      // Give the async device request time to land, then report what rendered.
+      setTimeout(() => {
+        const cv = document.getElementById("straf3-canvas");
+        say(`PROBE canvas=${cv.width}x${cv.height}`);
+        say("PROBE done");
+        document.title = "PROBE-DONE";
+      }, 6000);
+    </script>
+  
+
+</body></html>
