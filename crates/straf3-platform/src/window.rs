@@ -33,9 +33,18 @@ impl WindowConfig {
     /// Turn this into winit's attributes for the current target.
     #[must_use]
     pub fn attributes(&self) -> winit::window::WindowAttributes {
-        let attributes = winit::window::Window::default_attributes()
-            .with_title(self.title.clone())
-            .with_inner_size(winit::dpi::LogicalSize::new(self.size.0, self.size.1));
+        let attributes = winit::window::Window::default_attributes().with_title(self.title.clone());
+
+        // Native only. On web, winit turns a requested inner size into an
+        // explicit CSS `width`/`height` on the canvas element, which overrides
+        // the host page's `100vw`/`100vh` and pins the game to a 1280×720 box
+        // in the corner of the viewport. Measured in headless Chrome, not
+        // reasoned about: the canvas came back `style="width: 1280px; height:
+        // 720px"` while its backing store was the viewport's real size. The
+        // page owns the canvas's size on web; we do not.
+        #[cfg(not(target_arch = "wasm32"))]
+        let attributes =
+            attributes.with_inner_size(winit::dpi::LogicalSize::new(self.size.0, self.size.1));
 
         #[cfg(target_arch = "wasm32")]
         {

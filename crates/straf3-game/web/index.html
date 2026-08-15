@@ -72,16 +72,16 @@
         try {
           const module = await import("./pkg/straf3_game.js");
           await module.default();
+          // From here the module owns this status line — it clears it once it
+          // has actually started, and writes its own message if it refuses.
+          // Clearing it here instead would erase that message, and would not
+          // run reliably anyway: winit's web backend never returns normally.
           module.start_web(backend);
-          say("");
-          // winit's web backend throws a sentinel exception to unwind out of
-          // spawn_app. That is its normal control flow on this platform, not
-          // a failure, so it is filtered rather than reported.
         } catch (e) {
+          // winit throws a sentinel exception to unwind out of spawn_app.
+          // That is its normal control flow on this platform, not a failure.
           const text = `${e}`;
-          if (text.includes("Using exceptions for control flow")) {
-            say("");
-          } else {
+          if (!text.includes("Using exceptions for control flow")) {
             say(`straf3 failed to start:\n${text}`);
             console.error(e);
           }

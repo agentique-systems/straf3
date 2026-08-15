@@ -91,6 +91,12 @@ pub fn start_web(backend: &str) {
     }
 
     log::info!("straf3 starting on WebGPU");
+    // Clear the page's "loading…" here and not in JS after `start_web`
+    // returns: winit's web backend never returns normally — it throws a
+    // sentinel to unwind out of `spawn_app` — so anything the host page tries
+    // to do afterwards runs in a `catch` block, if at all. Whoever is running
+    // owns the status line, and from this point that is us.
+    report_to_page("");
     run(Options::default());
 }
 

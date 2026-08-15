@@ -69,6 +69,19 @@ impl Clock {
         }
     }
 
+    /// Forget the time that has passed so far, without resetting elapsed time.
+    ///
+    /// Called once when the window first appears. Everything before that —
+    /// process start, and on web the several seconds of fetching, compiling
+    /// and instantiating the wasm module — is not gameplay, and charging it to
+    /// the simulation makes the very first frame try to run hundreds of ticks
+    /// at once. Measured in headless Chrome, where the first frame otherwise
+    /// arrived owing 3 064 ms of simulation and hit the per-frame tick cap
+    /// before a single command had been produced.
+    pub fn prime(&mut self) {
+        self.last_ms = self.inner.elapsed_ms();
+    }
+
     /// Read the clock and report how far it moved since the last call.
     ///
     /// `saturating_sub` rather than a subtraction: a clock that appears to go
@@ -164,6 +177,22 @@ mod tests {
         // Whatever the machine's speed, constructing a clock and reading it
         // cannot have taken a second.
         assert!(first.delta_ms < 1_000);
+    }
+
+    #[test]
+    fn priming_discards_what_came_before_it_but_not_elapsed_time() {
+        let mut clock = Clock::new();
+        // Stand in for a slow start-up: burn some real time.
+        let mut spun = 0u64;
+        while clock.now().elapsed_ms < 2 {
+            spun = spun.wrapping_add(1);
+        }
+        clock.prime();
+        let frame = clock.frame();
+        // The start-up interval is not charged to the simulation…
+        assert!(frame.delta_ms < 2, "delta {} ms", frame.delta_ms);
+        // …but the absolute clock still knows how long the process has run.
+        assert!(frame.timing.elapsed_ms >= 2);
     }
 
     #[test]

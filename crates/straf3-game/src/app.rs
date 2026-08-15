@@ -88,6 +88,8 @@ pub struct App {
     clock: Clock,
     game: Game<&'static dyn World>,
     grab: PointerGrab,
+    /// Whether the clock has been zeroed against the first frame yet.
+    primed: bool,
     last_telemetry_ms: u64,
     frames: u64,
     #[cfg(feature = "render")]
@@ -117,6 +119,7 @@ impl App {
             clock: Clock::new(),
             game,
             grab: PointerGrab::Released,
+            primed: false,
             last_telemetry_ms: 0,
             frames: 0,
             #[cfg(feature = "render")]
@@ -147,6 +150,10 @@ impl App {
 
     /// One frame: read the clock, run whatever ticks that buys, draw.
     fn frame(&mut self, event_loop: &ActiveEventLoop) {
+        if !self.primed {
+            self.primed = true;
+            self.clock.prime();
+        }
         let delta = self.clock.frame();
         self.game.advance(delta.delta_ms);
         self.frames += 1;
@@ -305,6 +312,16 @@ impl ApplicationHandler for App {
             self.options.rate.hz(),
             self.options.rate.command_millis(),
         );
+
+        // Startup is not gameplay, and the first frame has no previous frame
+        // to be measured against. Both are handled by priming the clock at the
+        // top of that first frame rather than here: on web there is a further
+        // gap between the window appearing and the first redraw — module
+        // instantiation, the async device request — and charging it to the
+        // simulation makes the very first frame try to run hundreds of ticks
+        // at once. Measured in headless Chrome: 651 ticks wanted in frame one.
+        self.primed = false;
+        self.last_telemetry_ms = self.clock.now().elapsed_ms;
 
         window.request_redraw();
     }
