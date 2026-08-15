@@ -1,0 +1,33 @@
+# Standalone on purpose, same reasoning as probes/wasm-determinism/Cargo.toml:
+# the empty [workspace] table excludes this crate from the root workspace, so
+# nothing here can collide with Wave 2/3 landing in crates/.
+[workspace]
+
+[package]
+name = "dettrig-accuracy"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "sweep"
+path = "src/main.rs"
+
+[dependencies]
+# The exact own-trig implementation under test, `det_sin`/`det_cos`/
+# `det_sin_cos` in probes/wasm-determinism/src/dettrig.rs, pulled in as a path
+# dependency on its rlib target rather than copied — so there is no risk of a
+# transcribed copy silently drifting from what the determinism probe actually
+# measured. The crate's `[lib] name` is `det_probe` (see that Cargo.toml), so
+# `use det_probe::dettrig` below resolves to that exact file.
+wasm-determinism-probe = { path = "../wasm-determinism" }
+
+# No other dependencies: the independent reference is a double-double
+# (Dekker/Knuth two-sum/two-product) sin/cos implemented from scratch in
+# src/ddfloat.rs, using only `+ - *` on `f64` — see README.md for why this was
+# chosen over an external arbitrary-precision crate.
+
+[profile.release]
+opt-level = 3
+lto = true
+panic = "abort"
