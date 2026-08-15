@@ -1,0 +1,34 @@
+# Standalone on purpose: the empty [workspace] table below excludes this crate
+# from the root workspace, so Wave 2's merges into crates/ and the root
+# Cargo.toml cannot collide with this probe. straf3-sim is depended on by
+# relative path, unmodified.
+[workspace]
+
+[package]
+name = "wasm-determinism-probe"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+name = "det_probe"
+# cdylib for wasm32-unknown-unknown (loaded by raw WebAssembly.instantiate in
+# the browser, no wasm-bindgen), rlib so the native binary can link it.
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "native-report"
+path = "src/main.rs"
+
+[dependencies]
+straf3-sim = { path = "../../crates/straf3-sim" }
+# Needed by the build-time patched copy of the sim (see build.rs); same
+# version the workspace pins, and never with the fast-math feature.
+glam = "0.33.3"
+
+# Release for both native and wasm so the comparison is between two builds of
+# the same optimisation level, not between debug and release codegen.
+[profile.release]
+opt-level = 3
+lto = false
+panic = "abort"

@@ -1,0 +1,9 @@
+target/
+web/det_probe.wasm
+results/*-dom.html
+# Full reports are ~300 KB each of per-command checksums and are regenerable
+# with ./run-all.sh; only digests.json and the comparisons are kept in git.
+results/native-glibc.json
+results/native-musl.json
+results/node.json
+results/chrome.json

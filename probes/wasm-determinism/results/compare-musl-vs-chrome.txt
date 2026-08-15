@@ -1,0 +1,45 @@
+A = native-x86_64-linux
+B = browser-Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/146.0.0.0 Safari/537.36
+spawn checksum:  A c0800ec9609f2adf  B c0800ec9609f2adf  MATCH
+grand checksum:  A 8264efaea027161e  B 8264efaea027161e  MATCH
+patched-sim grand (own trig in AngleVectors): A 9353a522e0a60466  B 9353a522e0a60466  MATCH — the fix closes the gap end to end
+
+── per-case ────────────────────────────────────────────────
+cpm-strafe-turn    final MATCH   A 675e9976a65a5a55 B 675e9976a65a5a55  — identical at all 1200 commands
+    patched: MATCH  675e9976a65a5a55 / 675e9976a65a5a55  — own trig moves this case on 47/1200 commands (A), 47/1200 (B)
+vq3-strafe-turn    final MATCH   A 4dfc6a880f2a324a B 4dfc6a880f2a324a  — identical at all 1200 commands
+    patched: MATCH  4dfc6a880f2a324a / 4dfc6a880f2a324a  — own trig moves this case on 1/1200 commands (A), 1/1200 (B)
+cpm-yaw-0          final MATCH   A bb37eb766040d1d5 B bb37eb766040d1d5  — identical at all 1200 commands
+    patched: MATCH  bb37eb766040d1d5 / bb37eb766040d1d5  — own trig moves this case on 0/1200 commands (A), 0/1200 (B)
+cpm-yaw-90         final MATCH   A 0d8e4c9e0a7bb86f B 0d8e4c9e0a7bb86f  — identical at all 1200 commands
+    patched: MATCH  0d8e4c9e0a7bb86f / 0d8e4c9e0a7bb86f  — own trig moves this case on 0/1200 commands (A), 0/1200 (B)
+cpm-still          final MATCH   A e9f6b392a6c63bf0 B e9f6b392a6c63bf0  — identical at all 1200 commands
+    patched: MATCH  e9f6b392a6c63bf0 / e9f6b392a6c63bf0  — own trig moves this case on 0/1200 commands (A), 0/1200 (B)
+cpm-fine-turn      final MATCH   A 7026ae91bc6aa27c B 7026ae91bc6aa27c  — identical at all 1200 commands
+    patched: MATCH  7026ae91bc6aa27c / 7026ae91bc6aa27c  — own trig moves this case on 0/1200 commands (A), 0/1200 (B)
+
+── raw operations, over 977 probe angles ──────────────
+sin_cos.sin      identical at every angle
+sin_cos.cos      identical at every angle
+sin              identical at every angle
+cos              identical at every angle
+sqrt             identical at every angle
+deg*DEG_TO_RAD   identical at every angle
+det_sin (fix)    identical at every angle
+det_cos (fix)    identical at every angle
+
+── f64 operations ──────────────────────────────────────────
+f64 sin          identical at every angle
+f64 cos          identical at every angle
+f64 sqrt         identical at every angle
+
+normalize (x/sqrt(len²)): identical at all 64 vectors
+trig digests: = = = = = = = =  (sin_cos.sin, sin_cos.cos, sin, cos, sqrt, deg*DEG_TO_RAD, det_sin (fix), det_cos (fix))
+
+── signed-zero / NaN edge cases (max, min, clamp, abs, div) ─
+    all 16 identical (incl. NaN bit payloads)
+
+── 200 000-angle sweep, -720°…+720° ────────────────────────
+libm sin/cos digest:  A e935a7fa1bbd2d37  B e935a7fa1bbd2d37  MATCH
+own-trig digest:      A ed430df756584863  B ed430df756584863  MATCH
+own trig vs this platform's libm: max ULP sin 1/1, cos 1/1; disagreeing angles 2.00% (A) vs 2.00% (B)
