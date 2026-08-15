@@ -16,21 +16,57 @@
 
 use std::path::{Path, PathBuf};
 
-fn src_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("src")
+fn workspace_root() -> PathBuf {
+    // `crates/straf3-sim` -> the workspace root two levels up.
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root above crates/straf3-sim")
+        .to_path_buf()
 }
 
+/// Every Rust source the criterion applies to, named relative to the workspace
+/// root.
+///
+/// Scope is the whole workspace, not just this crate's `src/`. The criterion
+/// says a float-seconds duration may not "appear in a recording", and
+/// `straf3-replay` is the crate that will own the recording format — so a scan
+/// that could not see it was checking the easy half. `bin/` is included for the
+/// same reason: the headless runner parses durations from a file, which is
+/// exactly where a second conversion would be convenient to write.
 fn rust_sources() -> Vec<(String, String)> {
+    let root = workspace_root();
+    let mut roots: Vec<PathBuf> = Vec::new();
+
+    let mut crate_dirs: Vec<PathBuf> = std::fs::read_dir(root.join("crates"))
+        .expect("read crates/")
+        .filter_map(|e| {
+            let p = e.ok()?.path();
+            p.is_dir().then_some(p)
+        })
+        .collect();
+    crate_dirs.push(root.join("xtask"));
+    crate_dirs.sort();
+
+    for dir in crate_dirs {
+        for sub in ["src", "bin"] {
+            let d = dir.join(sub);
+            if d.is_dir() {
+                roots.push(d);
+            }
+        }
+    }
+
     let mut out = Vec::new();
-    let mut stack = vec![src_dir()];
+    let mut stack = roots;
     while let Some(dir) = stack.pop() {
-        for entry in std::fs::read_dir(&dir).expect("read src/") {
+        for entry in std::fs::read_dir(&dir).expect("read source dir") {
             let path = entry.expect("dir entry").path();
             if path.is_dir() {
                 stack.push(path);
             } else if path.extension().is_some_and(|e| e == "rs") {
                 let name = path
-                    .strip_prefix(src_dir())
+                    .strip_prefix(&root)
                     .unwrap_or(&path)
                     .to_string_lossy()
                     .replace('\\', "/");
@@ -38,8 +74,28 @@ fn rust_sources() -> Vec<(String, String)> {
             }
         }
     }
-    assert!(out.len() >= 6, "found only {} sources", out.len());
+    out.sort();
+
+    // The scan is worthless if it silently finds nothing. Both bounds matter:
+    // the count, and the presence of the specific files the criterion is about.
+    assert!(out.len() >= 12, "found only {} sources", out.len());
+    for required in [
+        "crates/straf3-sim/src/step.rs",
+        "crates/straf3-sim/src/num.rs",
+        "crates/straf3-sim/bin/headless.rs",
+        "crates/straf3-replay/src/lib.rs",
+    ] {
+        assert!(
+            out.iter().any(|(n, _)| n == required),
+            "{required} was not scanned; the scan's scope has regressed"
+        );
+    }
     out
+}
+
+/// The one file allowed to hold the conversion.
+fn is_permitted_home(name: &str) -> bool {
+    name == "crates/straf3-sim/src/num.rs"
 }
 
 /// Lines that are code rather than documentation.
@@ -129,8 +185,7 @@ fn no_module_open_codes_the_millisecond_conversion() {
     let planted = "let dt = ms as f32 * 0.001;";
     let lower = planted.to_ascii_lowercase();
     assert!(
-        SCALES.iter().any(|c| planted.contains(c))
-            && DURATIONS.iter().any(|d| lower.contains(d)),
+        SCALES.iter().any(|c| planted.contains(c)) && DURATIONS.iter().any(|d| lower.contains(d)),
         "the scan would not notice a second conversion site"
     );
 }

@@ -152,9 +152,7 @@ impl World for Boxes {
             let lo = *bmins - sweep.half_extents;
             let hi = *bmaxs + sweep.half_extents;
 
-            let inside = |p: Vec3| {
-                (0..3).all(|a| p[a] > lo[a] && p[a] < hi[a])
-            };
+            let inside = |p: Vec3| (0..3).all(|a| p[a] > lo[a] && p[a] < hi[a]);
             if inside(start) {
                 start_solid = true;
                 all_solid |= inside(end);
@@ -306,7 +304,12 @@ fn flying_at(speed: Scalar) -> SimState {
 }
 
 /// Hold one direction in the air for `commands` commands without turning.
-fn hold_in_air(profile: &PhysicsProfile, start: &SimState, yaw: Scalar, commands: usize) -> SimState {
+fn hold_in_air(
+    profile: &PhysicsProfile,
+    start: &SimState,
+    yaw: Scalar,
+    commands: usize,
+) -> SimState {
     let cmd = UserCmd {
         forward_move: 127,
         view: ViewAngles {
@@ -316,7 +319,12 @@ fn hold_in_air(profile: &PhysicsProfile, start: &SimState, yaw: Scalar, commands
         },
         ..still()
     };
-    run(start, &vec![cmd; commands], &straf3_sim::world::EmptyWorld, profile)
+    run(
+        start,
+        &vec![cmd; commands],
+        &straf3_sim::world::EmptyWorld,
+        profile,
+    )
 }
 
 // ═══ criterion 1: the VQ3 numbers, observed rather than declared ═══════════
@@ -488,6 +496,23 @@ fn cpm_strafe_acceleration_keeps_paying_where_vq3_has_stopped() {
         "CPM gained only {}",
         horizontal_speed(&with) - s(400.0)
     );
+
+    // And an *upper* bound, which is the half that actually pins the model.
+    //
+    // `strafe_accelerate` and `strafe_wish_speed_cap` are a pair: a very large
+    // acceleration against a very small wish speed. A lower bound alone only
+    // says "faster than VQ3", which a run with the cap deleted satisfies by
+    // going 6.5x too fast — `wishspeed` would then be the full 320 rather than
+    // 30, and `PM_Accelerate`'s clamp would stay open far longer than CPM
+    // intends. Deleting the cap takes this fixture from 534 to 3474 ups, so the
+    // two-sided pin is what makes the constant load-bearing rather than
+    // merely present.
+    assert!(
+        (horizontal_speed(&with) - s(534.07)).abs() < s(2.0),
+        "CPM strafe run landed at {} ups, expected 534.07 — the wish-speed cap \
+         is the likely suspect: without it this fixture reaches about 3474",
+        horizontal_speed(&with)
+    );
 }
 
 // ═══ criterion 2: air control ══════════════════════════════════════════════
@@ -522,10 +547,23 @@ fn cpm_air_control_turns_velocity_without_spending_speed() {
     );
 
     // With air control the velocity swings most of the way to the view.
+    //
+    // The window is deliberately tight rather than "somewhere past 25 degrees".
+    // `k` carries a `dot * dot` term, and that squaring is what makes air
+    // control *steer* — the effect falls away sharply as the wish direction
+    // diverges from the current heading. A linear-`dot` version is a different
+    // feel entirely, but at this angle it is worth only 0.86 degrees
+    // (34.28 -> 35.14), so a wide acceptance band cannot see it. Pinning near
+    // the measured value is what makes the exponent load-bearing.
     let turned = heading_degrees(&steered);
     assert!(
-        turned > s(25.0) && turned <= turn_to + s(1.0),
-        "air control turned the player to {turned} degrees, wanted most of {turn_to}"
+        (turned - s(34.28)).abs() < s(0.5),
+        "air control turned the player to {turned} degrees, expected 34.28 \
+         (a linear-dot falloff instead of dot-squared gives about 35.14)"
+    );
+    assert!(
+        turned <= turn_to + s(1.0),
+        "air control overshot the view: {turned} degrees against a view of {turn_to}"
     );
     // Without it, barely at all.
     assert!(
@@ -540,6 +578,47 @@ fn cpm_air_control_turns_velocity_without_spending_speed() {
     assert!(
         gained.abs() < s(15.0),
         "air control changed speed by {gained}, which it must not"
+    );
+}
+
+/// Air control refuses to steer while the player is slowing down — CPM's
+/// `dot > 0` gate.
+///
+/// The other two air-control tests both live entirely in `dot > 0`: one steers
+/// 40 degrees off the velocity, and the air-stop test zeroes `air_control` in
+/// both profiles it compares (it has to — the normalise-and-rescale round trip
+/// is not bit-exact, which would break its checksum equality for a reason that
+/// has nothing to do with braking). So the negative-`dot` half of `air_control`
+/// had no assertion over it at all.
+///
+/// That gap is worth closing on its own terms. Removing the gate — letting the
+/// steer run while `dot < 0` — leaves the player pointing 63 degrees off
+/// instead of 6.5, because air control would be free to swing the velocity
+/// around while `air_stop_accelerate` is supposed to own that case. The two
+/// mechanisms would fight, and the one that is meant to make CPM's direction
+/// changes *sharp* would instead make them curved.
+#[test]
+fn air_control_refuses_to_steer_while_slowing_down() {
+    let cpm = PhysicsProfile::cpm();
+    let start = flying_at(s(400.0));
+
+    // Flying along +X, holding forward while looking back down the velocity at
+    // yaw 170 — the wish direction opposes the motion, so `dot` is negative and
+    // the gate must hold the heading nearly still while the player brakes.
+    let braking = hold_in_air(&cpm, &start, s(170.0), 25);
+
+    assert!(
+        (heading_degrees(&braking) - s(6.54)).abs() < s(1.0),
+        "expected the heading to stay near 6.54 degrees while braking, got {} \
+         — removing the `dot > 0` gate in air_control gives about 63.5",
+        heading_degrees(&braking)
+    );
+    // And the braking itself still happened: this is air-stop's regime, not a
+    // test that nothing occurred.
+    assert!(
+        (horizontal_speed(&braking) - s(244.02)).abs() < s(2.0),
+        "expected to brake from 400 to about 244 ups, got {}",
+        horizontal_speed(&braking)
     );
 }
 
@@ -846,6 +925,31 @@ fn a_steep_ramp_slides_without_friction() {
         "the steep ramp bled speed down to {}",
         slid.player.velocity.length()
     );
+
+    // The magnitude alone is not enough. Deleting the airborne ground-plane
+    // clip in `air_move` — the redirect this test exists to cover — makes the
+    // player *faster* (340 ups), so a lower bound sails straight past it. Pin
+    // the vector: the speed has to be pointing along the ramp, not through it.
+    let want = vec3(s(-199.59), s(0.0), s(-244.25));
+    assert!(
+        (slid.player.velocity - want).length() < s(2.0),
+        "expected to be redirected along the slope to {want:?}, got {:?}",
+        slid.player.velocity
+    );
+
+    // The sharpest form of the same property: drive *into* the hill. Correct
+    // behaviour turns the motion up the surface; without the clip the player
+    // keeps their horizontal velocity and sinks, i.e. travels through the ramp
+    // as though it were not there.
+    let mut uphill = base;
+    uphill.player.velocity = vec3(s(400.0), s(0.0), s(0.0));
+    let climbed = run(&uphill, &vec![still(); 1], &steep, &p);
+    assert!(
+        climbed.player.velocity.z > s(150.0),
+        "driving into a 50-degree slope at 400 ups should redirect upward; \
+         got {:?} (without the clip this is about (400, 0, -6.4))",
+        climbed.player.velocity
+    );
 }
 
 // ═══ the rest of the pipeline ══════════════════════════════════════════════
@@ -871,7 +975,10 @@ fn a_step_within_stepsize_is_climbed_and_a_taller_one_is_not() {
     // z = 24 and standing on an 18-unit step is z = 42, both plus the clip
     // epsilon the hull is held clear by.
     let (x_low, z_low) = climb(p.step_height);
-    assert!(x_low > s(0.0), "stopped short of an 18-unit step at x={x_low}");
+    assert!(
+        x_low > s(0.0),
+        "stopped short of an 18-unit step at x={x_low}"
+    );
     assert!(
         z_low > s(41.0),
         "did not end up on top of the 18-unit step, z={z_low}"
@@ -957,6 +1064,40 @@ fn slick_ground_removes_friction_and_ground_acceleration() {
         "normal ground did not apply friction: {} ups left",
         coast(&grippy)
     );
+
+    // The friction half is only half the claim. Coasting never asks for a wish
+    // direction, so `wishspeed` is zero and the acceleration branch is never
+    // reached — meaning "and ground acceleration" was untested. Replacing the
+    // whole slick test with `false` in `walk_move` leaves a coasting fixture
+    // completely unchanged, because `friction()` carries its own independent
+    // SLICK check that the substitution does not touch.
+    //
+    // So: hold forward from a standstill. On ice the player must accelerate at
+    // `air_accelerate` (1) rather than `accelerate` (10), which is the
+    // difference between crawling to 82 ups and reaching the full 320.
+    let push = |world: &straf3_sim::world::FlatGround| {
+        let st = settle_on(world, &p, vec3(s(0.0), s(0.0), s(64.0)));
+        let forward = UserCmd {
+            forward_move: 127,
+            ..still()
+        };
+        horizontal_speed(&run(&st, &vec![forward; 25], world, &p))
+    };
+
+    let accelerated_on_ice = push(&ice);
+    assert!(
+        (accelerated_on_ice - s(82.15)).abs() < s(2.0),
+        "holding forward on ice for 25 commands reached {accelerated_on_ice} ups, \
+         expected about 82 — ground acceleration is being applied on a slick \
+         surface, which would reach 320"
+    );
+    // The same input on normal ground reaches the full speed, so the number
+    // above is a property of the surface and not of the fixture being too short.
+    let accelerated_on_grip = push(&grippy);
+    assert!(
+        accelerated_on_grip > s(300.0),
+        "normal ground only reached {accelerated_on_grip} ups in 25 commands"
+    );
 }
 
 /// Crouching lowers the hull, and standing up is refused while something is in
@@ -992,3 +1133,4 @@ fn standing_up_is_refused_under_a_low_ceiling() {
         "stood up into a ceiling 20 units above the floor"
     );
 }
+

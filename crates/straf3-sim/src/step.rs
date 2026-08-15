@@ -957,11 +957,7 @@ fn angle_vectors(pitch: Scalar, yaw: Scalar, roll: Scalar) -> (Vec3, Vec3) {
     let (sr, cr) = (roll * DEG_TO_RAD).sin_cos();
 
     let forward = vec3(cp * cy, cp * sy, -sp);
-    let right = vec3(
-        -sr * sp * cy + cr * sy,
-        -sr * sp * sy - cr * cy,
-        -sr * cp,
-    );
+    let right = vec3(-sr * sp * cy + cr * sy, -sr * sp * sy - cr * cy, -sr * cp);
     (forward, right)
 }
 
@@ -1086,7 +1082,11 @@ mod tests {
         // Overclip means the result is not merely zeroed against the plane:
         // it retains a small outward component. This is the mechanism behind
         // overbounce, so it is asserted rather than assumed.
-        assert!(clipped.z > s(0.0), "expected outward push, got {}", clipped.z);
+        assert!(
+            clipped.z > s(0.0),
+            "expected outward push, got {}",
+            clipped.z
+        );
         // And the size of the push is exactly the overclip excess.
         assert!((clipped.z - s(100.0) * s(0.001)).abs() < s(0.001));
     }
