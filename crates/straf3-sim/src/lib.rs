@@ -64,14 +64,27 @@
 //! assert_eq!(a.time_ms, 2_000);                // exact integer time
 //! ```
 //!
+//! # The movement
+//!
+//! [`step`] is a transcription of Quake 3's `PmoveSingle`: friction,
+//! acceleration, the jump check, the multi-plane slide solver and step-up, in
+//! that order, against the [`World`] seam. VQ3's constants are id's, asserted
+//! numerically in [`PhysicsProfile`]'s tests; CPM's air control, air-stop,
+//! strafe acceleration and double jump are the *same* code path with different
+//! numbers, which is why [`PhysicsProfile`] is data and there is no profile
+//! branch anywhere in the physics.
+//!
 //! # What is not here yet
 //!
-//! The movement physics. [`step`] currently integrates velocity under gravity
-//! and stops at geometry — enough to prove the shape and to make the
-//! determinism tests mean something. Strafejumping, friction, acceleration,
-//! the slide solver, jumping and the CPM extensions are Wave 2's work and
-//! belong behind this same signature. Constants in [`PhysicsProfile`] marked
-//! `TODO(wave2)` still need checking against id's GPL source.
+//! - Sub-stepping a long command (`pmove_msec`), which must land before any
+//!   reference replay is recorded, because it changes results.
+//! - Everything scripted: jump pads, teleporters, knockback. The state and the
+//!   timer they need ([`Timers::movement_locked_ms`]) are here; the triggers
+//!   are not, because there is no map format yet.
+//! - Water, ladders and `SURF_LADDER`.
+//! - The CPM constants are community reconstructions, not id source. They are
+//!   pinned by a test so they cannot drift, but they are not *verified*, and
+//!   the operator tunes them on the Windows build.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
