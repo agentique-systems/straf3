@@ -1,0 +1,82 @@
+[workspace]
+resolver = "3"
+members = [
+    # ── below the line: no rendering, no windowing, no GPU ──────────────
+    "crates/straf3-sim",
+    "crates/straf3-collision",
+    "crates/straf3-map",
+    "crates/straf3-replay",
+    # ── above the line ──────────────────────────────────────────────────
+    "crates/straf3-platform",
+    "crates/straf3-render",
+    "crates/straf3-devtools",
+    "crates/straf3-game",
+    # ── automation ──────────────────────────────────────────────────────
+    "xtask",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+# 1.87 because wgpu 30.0.0 declares that MSRV. Cargo's MSRV-aware resolver
+# silently caps wgpu at 26.0.1 if this says 1.85 — verified, not guessed.
+rust-version = "1.87"
+license = "MIT OR Apache-2.0"
+publish = false
+
+# Versions are declared once, here. Member crates say `foo.workspace = true`.
+[workspace.dependencies]
+# -- internal ---------------------------------------------------------------
+straf3-sim = { path = "crates/straf3-sim" }
+straf3-collision = { path = "crates/straf3-collision" }
+straf3-map = { path = "crates/straf3-map" }
+straf3-replay = { path = "crates/straf3-replay" }
+straf3-platform = { path = "crates/straf3-platform" }
+straf3-render = { path = "crates/straf3-render" }
+straf3-devtools = { path = "crates/straf3-devtools" }
+
+# -- external ---------------------------------------------------------------
+# Every version below was checked against the registry, not guessed.
+
+# Math. NEVER enable glam's `fast-math` feature: it permits reassociation and
+# breaks the bit-identical results determinism depends on (spec section 4).
+glam = "0.33.3"
+
+# Swept convex-vs-static queries. Spec section 4 makes this conditional on a
+# determinism audit before we commit to it.
+parry3d = "0.30.2"
+
+# Rigid bodies for props/doors/ragdolls ONLY. Deliberately not a dependency of
+# any crate below the line, and never of straf3-sim: the character controller
+# is hand-written, and keeping rapier out of the movement path is what keeps
+# the seam check meaningful. Declared here so its version is agreed in advance.
+rapier3d = "0.35.1"
+
+# Valve 220 .map parsing already exists in Rust and is standalone; straf3-map
+# spends its own code on the compile step (brushes -> convex hulls + render
+# mesh) instead of re-implementing a parser.
+quake-map = "0.6.1"
+
+serde = { version = "1.0.229", features = ["derive"] }
+thiserror = "2.0.20"
+bytemuck = "1.25.2"
+pollster = "1.0.1"
+
+# Above the line only. egui's three crates move in lockstep and must stay
+# version-matched to each other.
+winit = "0.30.13"        # stable ApplicationHandler API, NOT the 0.31 beta
+wgpu = "30.0.0"          # requires rust-version 1.87, set above
+egui = "0.36.1"
+egui-wgpu = "0.36.1"
+egui-winit = "0.36.1"
+gltf = "1.4.1"           # render meshes; loading is above the line
+
+[profile.dev]
+opt-level = 1        # the simulation is unusable to feel at opt-level 0
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

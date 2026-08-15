@@ -1,0 +1,22 @@
+[package]
+name = "straf3-game"
+description = "The straf3 executable: window, loop, glue."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "straf3"
+path = "src/main.rs"
+
+# TOP OF THE STACK. Everything may be depended on from here; nothing may
+# depend on here.
+[dependencies]
+straf3-sim.workspace = true
+straf3-map.workspace = true
+straf3-replay.workspace = true
+straf3-platform.workspace = true
+straf3-render.workspace = true
+straf3-devtools.workspace = true

@@ -1,0 +1,17 @@
+[package]
+name = "straf3-collision"
+description = "Swept convex queries against static geometry."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# BELOW THE LINE. Enforced by `cargo xtask check-seam`.
+#
+# parry3d is provisional: spec section 4 makes it conditional on a determinism
+# audit. It is confined to this crate so that audit has one place to look, and
+# so replacing it would not touch the simulation.
+[dependencies]
+glam.workspace = true
+parry3d.workspace = true

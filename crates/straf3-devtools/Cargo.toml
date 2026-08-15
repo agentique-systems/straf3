@@ -1,0 +1,18 @@
+[package]
+name = "straf3-devtools"
+description = "egui overlays and movement telemetry."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# ABOVE THE LINE. May depend downward, never upward.
+[dependencies]
+straf3-sim.workspace = true
+straf3-render.workspace = true
+straf3-platform.workspace = true
+# These three move in lockstep; the workspace table keeps them matched.
+egui.workspace = true
+egui-wgpu.workspace = true
+egui-winit.workspace = true

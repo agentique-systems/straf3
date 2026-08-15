@@ -1,0 +1,4 @@
+[alias]
+xtask = "run --quiet --package xtask --"
+# The one command that enforces the architecture:
+#     cargo xtask check-seam

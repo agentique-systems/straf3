@@ -1,0 +1,16 @@
+[package]
+name = "straf3-map"
+description = "Valve 220 .map parsing and the compiled map format."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# BELOW THE LINE. Enforced by `cargo xtask check-seam`.
+[dependencies]
+straf3-collision.workspace = true
+glam.workspace = true
+# Parsing Valve 220 is a solved problem; this crate's own work is the compile
+# step that turns brushes into convex hulls and a render mesh.
+quake-map.workspace = true

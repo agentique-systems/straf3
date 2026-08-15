@@ -1,0 +1,16 @@
+[package]
+name = "straf3-replay"
+description = "Input recording and playback."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# BELOW THE LINE. Enforced by `cargo xtask check-seam`.
+#
+# Note the direction: replay depends on sim, never the reverse. Replay may
+# touch the filesystem; sim may not.
+[dependencies]
+straf3-sim.workspace = true
+serde.workspace = true
