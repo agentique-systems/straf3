@@ -1,9 +1,0 @@
-/home/cairon/.agentique-console/worktrees/as_6062018a83204a2c8da1/seat-sim-seam-0-e6832b/target/debug/deps/linebender_resource_handle-13ba6a0df1bb30c5.d: /home/cairon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/linebender_resource_handle-0.1.1/src/lib.rs /home/cairon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/linebender_resource_handle-0.1.1/src/blob.rs /home/cairon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/linebender_resource_handle-0.1.1/src/font.rs
-
-/home/cairon/.agentique-console/worktrees/as_6062018a83204a2c8da1/seat-sim-seam-0-e6832b/target/debug/deps/liblinebender_resource_handle-13ba6a0df1bb30c5.rlib: /home/cairon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/linebender_resource_handle-0.1.1/src/lib.rs /home/cairon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/linebender_resource_handle-0.1.1/src/blob.rs /home/cairon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/linebender_resource_handle-0.1.1/src/font.rs
-
-/home/cairon/.agentique-console/worktrees/as_6062018a83204a2c8da1/seat-sim-seam-0-e6832b/target/debug/deps/liblinebender_resource_handle-13ba6a0df1bb30c5.rmeta: /home/cairon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/linebender_resource_handle-0.1.1/src/lib.rs /home/cairon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/linebender_resource_handle-0.1.1/src/blob.rs /home/cairon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/linebender_resource_handle-0.1.1/src/font.rs
-
-/home/cairon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/linebender_resource_handle-0.1.1/src/lib.rs:
-/home/cairon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/linebender_resource_handle-0.1.1/src/blob.rs:
-/home/cairon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/linebender_resource_handle-0.1.1/src/font.rs:
