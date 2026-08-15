@@ -68,8 +68,11 @@ protocol constraint, which §3.2 already implements.
    one. That is contract item **C4**, and it is a bigger gap than the format work. C4 also settles
    *how* triggers are tested: they ride on `Trace` rather than on a second `World` method, because a
    single command issues up to a dozen sweeps along a bent path and any coarser granularity misses
-   volumes the player really went through — while `step_slide_move`'s discarded first attempt means
-   the accumulator must also roll back, or it credits triggers the player never touched.
+   volumes the player really went through. The opposite error is just as live: several of those
+   sweeps cover ground the hull never commits to, so the tracer must gather triggers over the
+   traversed prefix rather than the queried segment, and `step_slide_move`'s discarded first attempt
+   must additionally roll the accumulator back — otherwise the platform credits triggers the player
+   never touched.
 
 6. **Storage is not a constraint and never becomes one.** Measured on a realistic input stream, a
    45-second run stores in **~17 KiB**. Ten thousand players' worth of personal bests is 4.1 GiB —
@@ -456,10 +459,15 @@ impl TriggerSet {
 pub struct Trace {
     // ... existing fields unchanged ...
 
-    /// Timing volumes the hull overlapped anywhere along this sweep.
+    /// Timing volumes the hull overlapped along the part of this sweep it
+    /// actually travelled — that is, over `start ..= start + (end - start) *
+    /// fraction`, **not** over the whole requested segment.
     ///
     /// Triggers are non-solid, so they never affect `fraction` or `normal`:
     /// this field is what the sweep *passed through*, not what stopped it.
+    /// But it must stop where the sweep stopped. Callers issue sweeps whose
+    /// motion they then discard, and reporting volumes beyond `fraction`
+    /// credits a player with a finish line they never reached.
     pub triggers: TriggerSet,
 }
 ```
@@ -511,24 +519,94 @@ which calls `world.trace` directly with a different hull. The rule:
 | `check_duck`'s stand-up probe | no | zero-length, and a different hull |
 | `correct_all_solid`'s jitter probes | no | zero-length point tests |
 
-And the rollback: `step_slide_move` runs `slide_move` once, and if that bumped, **overwrites
-`p.origin` with `up_pos` and `p.velocity` with `start_v`** — discarding the first attempt's
-traversal entirely and re-running the move from the stepped-up position. Triggers accumulated during
-that discarded attempt must be discarded with it. So the accumulator is savepointed exactly where
-origin and velocity are:
+That table classifies *call sites*, and classifying call sites is not sufficient, because three of
+the "yes" sites do not always commit the motion they swept. Reading `step.rs` again at the level of
+the position writes rather than the calls:
+
+- `slide_move`, line 794: `if trace.all_solid { p.velocity.z = 0; return true }` — `p.origin` is
+  never advanced.
+- `slide_move`, line 801: `if trace.fraction > s(0.0) { p.origin = endpos }` — on a zero fraction
+  the hull does not move.
+- `step_slide_move`, lines 926–929: `if up_trace.all_solid { return }` — the lift is abandoned and
+  `p.origin` is never set to `up_pos`.
+- `step_slide_move`, lines 938–942: `if !down_trace.all_solid { p.origin = down_pos }` — the drop
+  is conditional in the same way.
+
+Each of those is a sweep that was *issued* over a segment the hull then did not travel. So the
+governing invariant is not "which calls count" but:
+
+> **A trigger is touched iff the player's hull overlapped it somewhere on the path the player
+> actually occupied.**
+
+Two mechanisms enforce that, and they are different in kind — one belongs to the tracer, one to
+`step_slide_move`.
+
+**Rule 1 — the tracer reports the traversed prefix, not the queried segment.** `Trace::triggers`
+must contain the volumes the hull overlaps while swept over `[start, start + (end - start) *
+fraction]`, not over `[start, end]`. This is a contract on `World::trace` (C8), stated here because
+the natural BSP implementation violates it: the descent visits `CONTENTS_TRIGGER` leaves along the
+whole query segment, and OR-ing each one as it is reached gathers volumes past the impact point.
+Gathering must be filtered by the same interval fraction the tracer is already computing for the
+solid hit.
+
+This single rule disposes of all four branches above without any of them needing special handling.
+When `fraction` is zero the traversed prefix is the hull at rest at `start`, so the only volumes
+reported are the ones the player is *standing in* — genuinely touched, and already reported by the
+previous committed sweep. `TriggerSet` is OR-ed, so re-reporting them is idempotent. A trigger under
+a low overhang cannot be credited by an aborted step-up, because the aborted lift traverses nothing.
+
+That reasoning leans on `all_solid` implying a zero fraction, which today is a property of
+`FlatGround`'s implementation (`world.rs:211-218` returns `fraction: s(0.0)` on `start_solid`, and
+`all_solid` is only ever set in that branch) rather than a stated obligation. Make it one:
+**`all_solid` must imply `fraction == 0.0`.** It is already true of the only implementor and it is
+true of Q3's tracer, but a hull that starts inside solid has not legitimately travelled anywhere, and
+without the obligation written down a future tracer could report `all_solid` alongside a nonzero
+fraction and quietly reopen the leak this rule closes.
+
+Note the deliberate looseness: the tracer knows `trace.fraction`, not `sweep_to`'s
+`SURFACE_CLIP_EPSILON`-backed-off fraction (`step.rs:340-345`), so gathering is clamped to the
+former. That over-reports by at most the epsilon backoff at the moment of impact — a hull flush
+against a wall reports a trigger it is touching but not quite standing in. That is the correct
+direction to err on a finish line, and it is bounded by a constant rather than by the length of the
+move.
+
+**Rule 2 — the one genuine rollback.** Rule 1 does not cover `step_slide_move`'s first
+`slide_move`, because that traversal really did happen: the hull moved along it, and only afterwards
+does the function **overwrite `p.origin` with `up_pos` and `p.velocity` with `start_v`**, discarding
+the attempt and re-running from the stepped-up position. Triggers accumulated during a traversal
+that is subsequently un-done must be un-done with it. So the accumulator is savepointed exactly
+where origin and velocity are — and, critically, restored on the *commit* path only:
 
 ```rust
 // In Pmove, alongside `ground_plane` / `walking`:
 touched: TriggerSet,
 
-// step_slide_move, at the point where start_o/start_v are captured:
+// step_slide_move, where start_o / start_v are captured:
 let saved_triggers = self.touched;      // a u32 copy
-// ... and restored alongside p.origin = up_pos; p.velocity = start_v:
+
+// ... restored only alongside the writes that discard the first attempt:
+p.origin = up_pos;
+p.velocity = start_v;
 self.touched = saved_triggers;
 ```
 
+The placement is load-bearing in both directions. Restoring it here is required, because the first
+attempt's path is abandoned. Restoring it on the `up_trace.all_solid` early return at line 927 would
+be a *bug*, because that return keeps the first attempt's result — the player really did move there
+— and rolling back would drop triggers they genuinely crossed. The early return and the successful
+lift look symmetric and are not, which is why Rule 1 rather than a second savepoint is what makes
+the aborted lift safe.
+
 Because `TriggerSet` is a `u32`, savepoint-and-rollback is a register copy. The discipline costs
 nothing; the absence of it silently mis-credits every trigger near a stair.
+
+**The test that pins both rules**, and which `straf3-sim` should carry rather than the server: a
+`World` implementation with one trigger volume and a one-unit step, driven so that (a) a step-up
+succeeds over a trigger the first attempt clipped and the second did not — the accumulator must not
+contain it; (b) a step-up aborts `all_solid` under an overhang while a trigger sits beyond the lift
+— the accumulator must not contain it; (c) the player walks flat through the trigger at 1,000 ups —
+it must. Case (b) fails under the call-site table alone and passes under Rule 1, which is the whole
+reason Rule 1 is written down.
 
 **Three further requirements that are easy to get wrong:**
 
@@ -676,6 +754,26 @@ This is a live constraint on the parry evaluation that spec section 4 makes cond
 deterministic?" is now "is parry deterministic *across targets*?"**, which is a materially harder
 question. A hand-written brush tracer over convex hulls — which is what the compiled-map path wants
 anyway, and what Q3 itself did — sidesteps it.
+
+C4 adds a second requirement to the same contract, and it is the one an implementor is most likely
+to get wrong by writing the obvious code: **`Trace::triggers` must report only the volumes the hull
+overlaps within the traversed prefix `[start, start + (end - start) * fraction]`.** The natural BSP
+descent walks the whole query segment and would OR in every `CONTENTS_TRIGGER` leaf it passes,
+including ones beyond the impact point — and the physics issues several sweeps whose motion it then
+does not commit (`step.rs:794`, `801`, `927`, `940`), so those over-reported volumes become finish
+lines credited to players who never reached them. The clamp is not an optimisation; it is what makes
+the accumulator mean what C4 says it means. This is a `World` obligation rather than a `Pmove` one
+because only the tracer knows where along the segment each overlap occurred.
+
+A corollary the clamp depends on, and which the `World` doc comment should state outright:
+**`all_solid` must imply `fraction == 0.0`.** `FlatGround` already satisfies it (`world.rs:211-218`)
+and Q3's tracer does too, but it is currently incidental. Written down, it makes "the hull started
+inside solid" and "the hull travelled nowhere" the same fact, which is what lets the aborted step-up
+at `step.rs:927` be safe without a second rollback point.
+
+An additional argument for the hand-written tracer: this requirement is natural to satisfy in code
+that already computes the entry fraction per leaf, and awkward to bolt onto a third-party library
+whose query API returns a first hit rather than an ordered traversal.
 
 ### C9 — `straf3-platform` and `straf3-render` must be specified web-first
 
@@ -985,6 +1083,13 @@ more expensive. Planning conservatively at 100×, a 45-second run costs ~200 ms 
 One small machine, with headroom, at a player count this game is unlikely to reach soon. But it is
 the resource an attacker can spend on your behalf, which is why §7.3 bounds it explicitly.
 
+C4's trigger accumulation does not move this number, and it is worth saying why rather than
+re-measuring: the work it adds inside a trace is one `u32` OR against a leaf the BSP descent already
+visits, and one fraction comparison to clamp gathering to the traversed prefix. That is arithmetic
+on data already in cache, in the same loop, and it is far inside the 100× factor above — which
+exists precisely because the real tracer is unwritten. The number that would genuinely need
+re-deriving is the tracer's own cost, and that measurement is not available until C8 exists.
+
 ---
 
 ## 5. Leaderboard data model
@@ -1289,6 +1394,28 @@ claimed runs per account, allowed only within a window of the account's creation
 A player who has genuinely accumulated dozens of local PBs before signing in is a good problem to
 have and can be handled by raising the cap deliberately, not by leaving the path unbounded.
 
+**A second interaction, sharper and narrower.** That cap is per-account, which silently assumes one
+attacker is one account; sock puppets are cheap when the only gate is an OAuth handle. Combined with
+first-submitter-wins ownership (§8.3 step 2), this opens an attack the §8.3 analysis does *not*
+cover, because it runs in the opposite direction: rather than stealing a ranked run from the public
+archive, an attacker who obtains a player's inputs **before that player submits** can claim them
+first under a throwaway account, and the genuine player's own submission then fails with `409`.
+
+This needs a capability §8.3 does not grant — the public archive only serves demos of runs already
+verified and ranked, so by construction the honest submission is already on record. It requires a
+different leak: a shared machine, a scraped IndexedDB store, a demo file passed to a friend. That is
+a real but materially different threat, and it is called out here rather than folded into §8.3's
+"bounded, not closed", which does not reach it.
+
+Two things follow, neither of them cryptographic. **First-submitter-wins is a tiebreak convention,
+not a proof of authorship** — it settles the common case cheaply and is not evidence in a dispute.
+**So run ownership must be administratively reassignable.** The `runs` row carries `player_id` as a
+mutable column, and a dispute is settled the same way every other dispute on this platform is
+settled: by looking at the demos. The genuine player has the recording, its local IndexedDB
+timestamps, and usually the surrounding attempts on the same map; the puppet account has one run and
+no history. This is not automated and should not be — the cost of the attack is already high enough
+that manual handling is proportionate.
+
 ### 6.5 Display names
 
 The provider handle is a starting suggestion, not the identity. Players pick a `display_name` unique
@@ -1390,7 +1517,8 @@ GET  /v1/maps/:slug/leaderboard/me              rank and time for the session's 
 POST /v1/attempts                               start a run: returns a ticket (§3.1, §7.3)
 POST /v1/runs                                   submit (§3.1)
 GET  /v1/runs/:id                               status, and time_ms once verified
-GET  /v1/runs/:id/demo                          the .s3d, for ghosts and playback — public
+GET  /v1/runs/:id/demo                          the .s3d, for ghosts and playback — unauthenticated,
+                                                but only once the run is verified and ranked (§8.3)
 GET  /v1/players/:name                          profile: PBs, records held, totals
 GET  /auth/:provider/start, /auth/:provider/callback, POST /auth/logout
 GET  /v1/meta                                   current sim_build, profiles, wasm artifact hash
