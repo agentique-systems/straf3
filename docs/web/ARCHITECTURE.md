@@ -1,7 +1,7 @@
 # straf3 on the web — architecture, formats, and the contract the game must expose
 
 Status: **design, for approval.** No application code is proposed here and none was written.
-Governing specification: rev 5. Written 2026-08-15.
+Governing specification: rev 6. Written 2026-08-15, revised against rev 6.
 
 Spec rev 5 §M settled five decisions and they are treated as fixed throughout:
 
@@ -24,9 +24,16 @@ investigations reached the same call site by different routes. §1 is the combin
 marks clearly which claims are mine and which are the probe's. It sets the shape of the contract in
 §2, which is the section to act on first.
 
+**Rev 6 closed the other half of that probe too**, and this revision of the document is written
+against the answer rather than against the question. Browser play is viable at **132 KiB** of
+gzipped wasm, and rev 6 §Q2 decided the bundle shape: **WebGPU only, no combined fallback bundle.**
+That decision is fixed and C9 states it rather than reopening it. Rev 6 §Q1 also confirmed C1 — we
+own the trigonometry, we do not pin the server to musl — and §R made the rolling digest a recorded
+protocol constraint, which §3.2 already implements.
+
 ---
 
-## 0. Summary — the six things to act on
+## 0. Summary — the eight things to act on
 
 1. **`straf3-sim` is *not* currently bit-identical across builds — but the fault line is not the one
    rev 5 §L expected.** It is not native-versus-browser. Native musl, wasm-in-Node and
@@ -58,12 +65,29 @@ marks clearly which claims are mine and which are the probe's. It sets the shape
 
 5. **Nothing starts or stops the run clock.** `RunState::start` and `RunState::finish` exist and are
    called from nowhere in the workspace. The product is a *time*, and no code currently produces
-   one. That is contract item **C4**, and it is a bigger gap than the format work.
+   one. That is contract item **C4**, and it is a bigger gap than the format work. C4 also settles
+   *how* triggers are tested: they ride on `Trace` rather than on a second `World` method, because a
+   single command issues up to a dozen sweeps along a bent path and any coarser granularity misses
+   volumes the player really went through — while `step_slide_move`'s discarded first attempt means
+   the accumulator must also roll back, or it credits triggers the player never touched.
 
 6. **Storage is not a constraint and never becomes one.** Measured on a realistic input stream, a
    45-second run stores in **~17 KiB**. Ten thousand players' worth of personal bests is 4.1 GiB —
    under seven cents a month. The costs that matter are verification CPU and operational care around
    physics changes, not bytes.
+
+7. **Browser play is small, and its bundle shape is decided.** A working WebGPU skeleton — canvas,
+   surface, adapter, swapchain, render loop — is **132 KiB** of gzipped wasm and ran in Chrome 146.
+   Rev 6 §Q2 fixed the shape: WebGPU only, no compiled-in WebGL2 fallback (it costs 595 KiB and
+   `wgpu` was measured to crash rather than degrade when it fires), no `egui`. One number is still
+   missing — stage D, the game crates with `parry3d` — and Wave 3 produces it (§1.5, C9).
+
+8. **Verification cannot tell a copied run from an original, and the document says so.** A `.s3d`
+   re-simulates identically whoever uploads it, and no client-side computation can bind identity
+   when the client is the adversary. §8.3 answers with a globally unique *canonical* run digest —
+   over the decoded command stream, not the file bytes, which are trivially perturbable — so the
+   first submitter owns the run, plus an attempt ticket and near-duplicate detection. It reduces the
+   attack; it does not close it, and it is disclosed rather than claimed away.
 
 One thing this document deliberately does **not** do, following from item 1: it does not encode a
 libc constraint into the deployment story. "Pin the server to Alpine/musl" would work today and would
@@ -247,11 +271,41 @@ native verifier and the browser client compute the same bits regardless of the h
 is genuinely one implementation and no hidden deployment constraint. §10 keeps a designed-in
 fallback that does not require reopening D2.
 
-### 1.5 What is still open
+### 1.5 The render half of the probe, and what is still open
 
-The rev 5 §N probe has two halves. The determinism half is closed. **The other half is not:**
-whether `wgpu`/`winit`/`egui` cross-compile to web at a tolerable bundle size. §9.2's browser-first
-recommendation depends on it and is marked accordingly. Nothing else in this document does.
+The rev 5 §N probe had two halves. **Both are now closed**, and the second one closed in favour of
+the browser more decisively than the first.
+
+Measured by the probe with `stat` and `gzip -9`, not estimated:
+
+| Stage | gzipped wasm | + JS glue |
+|---|---|---|
+| **A — `wgpu` + `winit`, WebGPU only** | **132 KiB** | 11.7 KiB |
+| B — + WebGL2 backend | 727 KiB | 17.7 KiB |
+| C — + `egui` | 2.50 MiB | 22.0 KiB |
+
+Stage A is not a hello-world: it is a canvas-bound window, surface, adapter, device, swapchain and
+a render loop, and **it ran in real Chrome 146**. The reason it is that small is structural — on the
+WebGPU-only path `wgpu` compiles in no `wgpu-core`, no `wgpu-hal` and no `naga`, because WGSL goes
+straight to the browser. `wgpu`'s reputation for weight is almost entirely the WebGL2 translation
+layer, and we are not shipping it (rev 6 §Q2; C9).
+
+**Two consequences the probe measured that are easy to assume away:**
+
+- **`wgpu` does not fall back for you.** With both backends compiled in and `requestAdapter()`
+  returning null, it crashed inside the WebGPU backend rather than degrading to GL. Backend
+  selection is a decision the *host page* makes in JavaScript before entering wasm. A "just compile
+  both and let it sort itself out" bundle does not work and would cost 595 KiB per visitor if it did.
+- **`egui-winit` 0.36.1 cannot compile for `wasm32`** — its `arboard` dependency has no wasm
+  backend — so `crates/straf3-devtools` has no web build today. Dropping `egui` from the web build
+  is both the largest available saving (−1.83 MiB) and the right call on its own terms: the devtools
+  overlay is speedometer, graphs and trace telemetry, which is cheaper as DOM over the canvas.
+
+**What remains open on the render side is one number: stage D** — the game crates plus `gltf`, with
+`parry3d` arriving transitively through `straf3-map`/`straf3-collision`. The probe seat's worktree
+was destroyed before it could measure it. That is the figure most likely to move the picture, and
+Wave 3 produces it as a side effect of criterion 2. Stage A being 132 KiB does not bound stage D;
+`parry3d` in particular is unmeasured here and is the single largest unknown in the web bundle.
 
 ---
 
@@ -382,7 +436,8 @@ on float formatting rules they have no reason to agree on.
 `RunState::start` and `RunState::finish` are `pub` and **called from nowhere in the workspace**
 (verified by grep). The one number the entire product is about is not produced by any code.
 
-The mechanism must be a seam, for the same reason `World` is one:
+The mechanism must be a seam, for the same reason `World` is one — and it turns out to need no new
+method on `World` at all, only one more field on what `trace` already returns:
 
 ```rust
 /// Trigger volumes the swept hull touched during a move.
@@ -398,27 +453,102 @@ impl TriggerSet {
     // bits 2..=31: checkpoints, for splits
 }
 
-pub trait World {
-    fn trace(&self, sweep: &Sweep) -> Trace;
+pub struct Trace {
+    // ... existing fields unchanged ...
 
-    /// Which timing volumes the swept hull entered. Must be evaluated over the
-    /// whole sweep, not at its endpoint.
-    fn triggers(&self, sweep: &Sweep) -> TriggerSet { TriggerSet::default() }
+    /// Timing volumes the hull overlapped anywhere along this sweep.
+    ///
+    /// Triggers are non-solid, so they never affect `fraction` or `normal`:
+    /// this field is what the sweep *passed through*, not what stopped it.
+    pub triggers: TriggerSet,
 }
 ```
 
-**Three requirements that are easy to get wrong:**
+**Triggers ride on `Trace`; there is no second query.** This is the resolution of a question the
+first draft of this document left dangerously open, so it is worth stating why, because the obvious
+alternative — a parallel `fn triggers(&self, sweep: &Sweep) -> TriggerSet` next to `trace` — is
+worse in three separate ways.
+
+*Cost.* A separate method doubles the number of collision queries a command performs, and §4.3's
+verification budget has no line item for that. Riding on `Trace` costs one extra `u32` per query and
+no additional broadphase descent: in a BSP tracer, trigger brushes are `CONTENTS_TRIGGER` volumes
+sitting in the same tree the sweep already walks. The tracer currently reaches them and discards
+them. It is strictly cheaper to OR a bit than to skip the node.
+
+*Granularity, which is the actual trap.* `Pmove::run` does not issue one sweep per command. It
+issues up to a dozen along a genuinely bent path: `ground_trace` twice, `slide_move`'s bump loop up
+to `SLIDE_BUMPS` (4) times, `step_slide_move` re-running `slide_move` after a step-up plus two probe
+sweeps of its own, and `correct_all_solid` up to 27 more in the stuck case. That fan-out is not
+incidental — it is the mechanism by which `PM_SlideMove` makes a player follow a corner or a ramp
+instead of travelling in a straight line. **A single coarse sweep from command-start origin to
+command-end origin is a chord across that bend, and it can miss a trigger volume the player's real
+hull went through.** That is the same failure this contract item exists to prevent, reintroduced one
+level down. Making triggers a field of `Trace` removes the question entirely: the granularity is the
+granularity of `trace`, by construction, and there is no second call site whose cadence could drift.
+
+*Hull correctness.* `Sweep` already carries `half_extents` and `center_offset`, and `check_duck`
+changes them mid-command. A trigger is touched when the *hull* overlaps it, as in Q3 — so trigger
+tests must inherit the exact hull of the sweep that found them. A field on `Trace` inherits it for
+free; a second method would have to be handed the same hull and would be one refactor away from not
+being.
+
+**Which sweeps count — the sibling bug, in the opposite direction.** Not every `Sweep` the physics
+issues is motion. Some are queries about geometry the hull never enters, and some are along a path
+that is subsequently *thrown away*. OR-ing all of them into one accumulator produces false
+positives — crediting a player with a trigger they never touched — which on a finish line is exactly
+as wrong as missing one.
+
+Reading `step.rs`, every trace funnels through `Pmove::sweep` except `check_duck`'s stand-up probe,
+which calls `world.trace` directly with a different hull. The rule:
+
+| Call site | Counts? | Why |
+|---|---|---|
+| `slide_move`'s bump-loop `sweep_to` | **yes** | this is the move; `p.origin` advances along it |
+| `step_slide_move`'s up-lift `sweep_to(start_o, up)` | **yes** | the hull really is carried upward |
+| `step_slide_move`'s down-drop `sweep_to(p.origin, down)` | **yes** | the hull really is carried down |
+| `ground_trace`'s downward probe | no | a question about the floor; the hull does not go there |
+| `step_slide_move`'s step-down probe (`sweep(start_o, down)`) | no | a question about whether stepping is allowed |
+| `check_duck`'s stand-up probe | no | zero-length, and a different hull |
+| `correct_all_solid`'s jitter probes | no | zero-length point tests |
+
+And the rollback: `step_slide_move` runs `slide_move` once, and if that bumped, **overwrites
+`p.origin` with `up_pos` and `p.velocity` with `start_v`** — discarding the first attempt's
+traversal entirely and re-running the move from the stepped-up position. Triggers accumulated during
+that discarded attempt must be discarded with it. So the accumulator is savepointed exactly where
+origin and velocity are:
+
+```rust
+// In Pmove, alongside `ground_plane` / `walking`:
+touched: TriggerSet,
+
+// step_slide_move, at the point where start_o/start_v are captured:
+let saved_triggers = self.touched;      // a u32 copy
+// ... and restored alongside p.origin = up_pos; p.velocity = start_v:
+self.touched = saved_triggers;
+```
+
+Because `TriggerSet` is a `u32`, savepoint-and-rollback is a register copy. The discipline costs
+nothing; the absence of it silently mis-credits every trigger near a stair.
+
+**Three further requirements that are easy to get wrong:**
 
 1. **Swept, not sampled.** At 1,000 ups and 8 ms a player moves 8 units per command. A finish
    trigger tested only at the command's endpoint is missed by anyone fast — which is to say, by
    exactly the runs a leaderboard cares about. Testing the endpoint is the single most likely bug in
-   this whole design.
+   this whole design; testing one chord per command, as above, is the second.
 2. **Evaluated at command boundaries, in integer milliseconds.** `RunState` already stores
    `started_at_ms` / `finished_at_ms` as `u32`. The clock reads `SimState::time_ms`, which is the
    exact integer sum of command durations. No interpolation, no sub-tick estimate: a sub-tick time
    would be a float and would have to be reproduced bit-exactly by the verifier for no benefit.
-3. **A default implementation, so existing `World` implementors keep compiling.** `EmptyWorld` and
-   `FlatGround` have no triggers and should not have to say so.
+   Note the shape this gives when `pmove_msec` sub-stepping lands (`step.rs:147`): the accumulator
+   is consumed at the end of each `Pmove::run`, so sub-stepping makes the clock *finer* without
+   making it float, and without changing this rule.
+3. **`Trace` gains a field, which is a mechanical break, not a design one.** `FlatGround` and
+   `EmptyWorld` build `Trace` literals and will not compile until they set `triggers:
+   TriggerSet::default()`; `Trace::clear()` already exists and covers most of it. This is deliberate
+   rather than hidden behind `#[non_exhaustive]`: a `World` implementor that has triggers and
+   forgets to report them produces a leaderboard that silently never finishes, so the compiler
+   should make every implementor look at the field once.
 
 **Consequence to accept deliberately:** times quantise to the command duration — multiples of 8 ms
 at 125 Hz, 4 ms at 250 Hz. Ties will be common, and a higher tick rate produces finer times. This is
@@ -439,6 +569,16 @@ pub fn decode(bytes: &[u8], limits: &Limits) -> Result<Recording, DecodeError>;
 /// Re-simulate and report what actually happened. The browser and the server
 /// call this same function — that is the point of it existing.
 pub fn verify<W: World>(rec: &Recording, world: &W) -> Verdict;
+
+/// Identity of the *run*, independent of how it was encoded.
+///
+/// blake3 over the `PhysicsIdent`, the spawn, and the decoded command stream
+/// in a canonical fixed-width form — NOT over the `.s3d` bytes. See §8.3: the
+/// bit-packed encoding has slack (absolute-versus-delta angle seeding, the
+/// optional checkpoint trail, reserved bytes), so the same run has many valid
+/// byte encodings and a hash of the file is trivially perturbed without
+/// touching the simulation. This value is what the platform makes unique.
+pub fn canonical_digest(rec: &Recording) -> [u8; 32];
 
 pub struct Verdict {
     pub outcome: Outcome,              // Finished { time_ms: u32 } | DidNotFinish | Rejected(..)
@@ -580,9 +720,41 @@ Requirements:
   computing a run time.
 
 **`straf3-render` targets web and native from one implementation.** `wgpu` and `winit` both do; that
-is the convergence that makes browser-first cost nothing. Under `wgpu` the web path is WebGPU with
-WebGL2 as the fallback backend. Bundle size and stack viability are the open half of the rev 5 probe
-(§1.5) and this item is contingent on it.
+is the convergence that makes browser-first cost nothing. The stack is measured and viable — 132 KiB
+of gzipped wasm for a working WebGPU skeleton in Chrome 146 (§1.5) — and rev 6 §Q2 fixed its shape:
+
+- **WebGPU only. One backend per bundle, and no fallback compiled in.** This is not a default to be
+  revisited during implementation; it is a decision made on measurement. Compiling WebGL2 in
+  alongside costs 595 KiB (727 vs 132) paid by every visitor, and — measured, not read from docs —
+  `wgpu` **crashes inside the WebGPU backend rather than degrading to GL** when both are present and
+  `requestAdapter()` returns null. The fallback you paid for does not fire.
+- **The host page picks the backend in JavaScript, before entering wasm.** Capability detection is
+  `navigator.gpu` plus a successful `requestAdapter()` in JS; on failure the page shows a browser
+  message and never instantiates the module. There must be no code path where wasm starts up and
+  then discovers it has no adapter.
+- **If WebGL2 is ever wanted it is a separate, on-demand bundle**, selected by that same JS check —
+  not a fallback baked into the primary artifact. The backend is already a runtime parameter to
+  `wgpu`, so this is a build-matrix change, not an architecture change, and it stays cheap to decide
+  later (§11 decision E).
+- **No `egui` in the web build.** `egui-winit` 0.36.1 cannot compile for `wasm32` (`arboard` has no
+  wasm backend), so `crates/straf3-devtools` has no web target today. Rather than work around it,
+  the web build drops `egui` entirely: it is the largest single saving available (−1.83 MiB) and the
+  overlay it provides — speedometer, graphs, trace telemetry — is cheaper and more legible as DOM
+  elements positioned over the canvas. `straf3-render` must therefore not depend on `egui`, and any
+  telemetry it exposes must be readable as plain values a host page can render.
+
+**The one number still missing is stage D**: the game crates plus `gltf`, with `parry3d` arriving
+transitively through `straf3-map`/`straf3-collision`. 132 KiB bounds nothing about it. Wave 3's
+acceptance criterion 2 produces it, and if it comes back large, the response is a dependency
+question (does the web build need `parry3d` at all, or does it ship precompiled hulls?) rather than
+a reopening of the backend decision.
+
+**This item is Wave 3's contract.** Rev 6 §S sets Wave 3 as the first playable straf3, and its
+acceptance criteria 3 and 5 are C9 restated from the other side: input captured as the same
+integer-millisecond `UserCmd` the simulation already takes, and frame pacing decoupled from
+simulation stepping so the fixed command cadence survives a variable frame rate. `CommandPump` is
+what satisfies both. Criterion 4 — a recorded input sequence replaying to the same checksum through
+the windowed build as through `straf3-headless` — is the test that C9's seam was not bypassed.
 
 ### C10 — no glam SIMD types below the seam
 
@@ -645,7 +817,7 @@ POST /v1/runs
 Content-Type: application/vnd.straf3.demo
 Content-Encoding: zstd
 Cookie: s3_session=...
-Idempotency-Key: <blake3 of the uncompressed body, hex>
+X-Straf3-Ticket: <attempt ticket from POST /v1/attempts>
 
 <.s3d bytes>
 ```
@@ -657,6 +829,17 @@ Response `202 Accepted`:
 ```
 
 Anonymous submissions are rejected with `401`. Anonymous play still records locally — see §6.4.
+
+**The attempt ticket** is a server-issued opaque value bound to the session, the map and the profile,
+obtained from `POST /v1/attempts` when the player starts a run and valid for a bounded window
+(§7.3). It is **not** in the `.s3d` header and must not be: the recording is a portable artifact
+meant to be downloaded, replayed and shared, and putting session state inside it would make every
+published demo carry a fragment of someone's login. It travels in the envelope, where it belongs.
+
+Be precise about what the ticket does and does not buy, because it is easy to over-read. It does
+**not** authenticate the inputs — nothing can, see §8.3. What it does is force a submission to be
+attached to a live, rate-limited attempt by a signed-in session, which is what turns "scrape the
+public demo archive and mass-resubmit" into "sit through one interaction per stolen run".
 
 ### 3.2 `.s3d` layout
 
@@ -892,9 +1075,11 @@ create table runs (
   status          run_status not null default 'pending',
   time_ms         integer,                       -- SERVER-COMPUTED. null unless verified.
   commands        integer not null,
-  demo_sha256     bytea not null,
+  demo_sha256     bytea not null,                -- of the bytes; storage dedup and diagnostics
+  run_digest      bytea not null,                -- canonical_digest() (C5) — the identity of the RUN
   demo_key        text,                          -- object-store key; null once pruned
   demo_bytes      integer not null,
+  attempt_id      uuid references attempts(id),  -- the ticket this arrived under
 
   client_time_ms  integer,                       -- what the client displayed; diagnostic only
   client_rolling_digest bigint,                  -- folded over every command (§1.3)
@@ -907,7 +1092,27 @@ create table runs (
 );
 create index on runs (map_id, profile_id, time_ms) where status = 'verified';
 create index on runs (player_id, submitted_at desc);
-create unique index on runs (player_id, demo_sha256);   -- idempotent resubmission
+
+-- GLOBAL, not per-player. This is the constraint that makes a run belong to
+-- whoever submitted it first; see §8.3. A per-player index here would be an
+-- idempotency key and nothing more, and would let anyone re-post a demo they
+-- downloaded from the leaderboard and have it rank as their own.
+create unique index on runs (run_digest);
+create index on runs (demo_sha256);
+
+-- One live attempt per ticket. Issued on request, consumed by a submission.
+create table attempts (
+  id           uuid primary key,
+  player_id    uuid not null references players(id),
+  map_id       int  not null references maps(id),
+  profile_id   int  not null references physics_profiles(id),
+  issued_at    timestamptz not null default now(),
+  expires_at   timestamptz not null,
+  consumed_at  timestamptz,                      -- set when a run is accepted under it
+  consumed_by  uuid references runs(id)
+);
+create index on attempts (player_id, issued_at desc);
+create index on attempts (expires_at) where consumed_at is null;
 
 -- Current personal best per category. Derived; rebuildable from `runs` alone.
 create table leaderboard_entries (
@@ -975,6 +1180,10 @@ stored time.** The schema above is built so this is detectable and recoverable:
 - `runs.profile_id` and `runs.sim_build_id` bind a time to the physics that produced it.
 - Demos are inputs, so they can be re-simulated under new physics for the measured ~2 ms each
   (§4.3). Re-verifying 250,000 stored demos is well under an hour on one core.
+- Re-verification under a new profile writes a *new* row, and that does not collide with the global
+  unique index on `run_digest`: `canonical_digest` covers the `PhysicsIdent`, which covers
+  `profile_digest`, so the same inputs under different physics are correctly a different run. The
+  same property makes the digest a safe identity across a `sim_build` bump.
 
 Two policies, and the choice is the operator's (§11, decision G):
 
@@ -1070,6 +1279,16 @@ This works precisely because the demo is the run. There is no client state to re
 about my earlier time" — the bytes replay, or they do not. It is also why the local-PB path is not
 throwaway work: it is the submission path minus one HTTP call.
 
+**One awkward interaction, stated rather than glossed:** a run recorded before sign-in has no
+attempt ticket, because there was no session to issue one. The claim path must therefore be exempt
+from the ticket requirement of §3.1, and that exemption is precisely the path a copier would prefer.
+It is tolerable because the ticket was never the load-bearing defence — the global uniqueness of
+`run_digest` is (§8.3, step 1), and it applies to claimed runs identically. What the ticket buys is
+resistance to *bulk* automated resubmission, so the claim path is bounded to match: a small cap on
+claimed runs per account, allowed only within a window of the account's creation, and rate-limited.
+A player who has genuinely accumulated dozens of local PBs before signing in is a good problem to
+have and can be handled by raising the cap deliberately, not by leaving the path unbounded.
+
 ### 6.5 Display names
 
 The provider handle is a starting suggestion, not the identity. Players pick a `display_name` unique
@@ -1100,7 +1319,25 @@ The queue is a Postgres table — `runs where status = 'pending'` claimed with
 `for update skip locked`. There is no throughput case for anything more elaborate; §4.3 puts the
 sustained rate in the single digits per second.
 
-### 7.2 What the verifier does
+### 7.2 What intake does, and what the verifier does
+
+**Intake (`POST /v1/runs`, in the API process)** does everything that is cheap and must be
+synchronous, because a rejection is worth issuing before any CPU is spent simulating:
+
+1. Require a session, and a live unconsumed `attempts` row whose ticket matches, whose
+   `map_id`/`profile_id` match the recording's, and whose `expires_at` has not passed.
+2. `decode` under `Limits` (C5) — parsing only, no simulation — and compute
+   `canonical_digest` (C5).
+3. Insert the `runs` row. The **global** unique index on `run_digest` decides what happens next, and
+   the response depends on who owns the existing row:
+   - no conflict → `202 Accepted`, queued for verification;
+   - conflict, and the existing row is **this player's** → `200 OK` with that run. This is
+     idempotency: a retried upload, or the same run re-encoded, returns the original;
+   - conflict, and the existing row is **another player's** → `409 Conflict`, "this run has already
+     been submitted". The run belongs to whoever got there first (§8.3).
+4. Mark the attempt consumed, whichever of those happened.
+
+**The verifier (separate binary)** then does the expensive half:
 
 1. Fetch the `.s3d` from object storage; `decode` under `Limits` (C5).
 2. Reject unless `PhysicsIdent` names a `sim_build` this verifier *is*, a known
@@ -1127,8 +1364,13 @@ gate — see §8.2.
   because at ~200 ms expected it means something is wrong, not slow.
 - Bounded verifier concurrency — cores minus two, matching the existing throughput assumptions.
 - Per-player rate limit (e.g. 30 submissions/minute, 500/day) and a per-IP limit ahead of auth.
-- `Idempotency-Key` = hash of the demo, enforced by the unique index on `(player_id, demo_sha256)`:
-  resubmitting the same bytes returns the existing run instead of queueing work.
+- Idempotency is the global unique index on `run_digest` plus the ownership check in §7.2, not a
+  client-supplied header: a retried or re-encoded upload of the same run returns the existing row
+  rather than queueing work, and the same digest from a different player is a `409`.
+- **Attempt tickets:** issued only to a signed-in session, TTL bounded (say 30 minutes — longer than
+  `Limits.max_commands` allows a run to be, so it never truncates legitimate play), single use, and
+  rate-limited themselves. A small cap on live unconsumed tickets per player stops a bulk harvest of
+  tickets ahead of a bulk resubmission.
 
 ### 7.4 Build versioning
 
@@ -1145,9 +1387,10 @@ GET  /v1/maps                                  list, with per-profile record tim
 GET  /v1/maps/:slug                             detail, spawn info, download key for the .map
 GET  /v1/maps/:slug/leaderboard?profile=cpm&limit=&offset=
 GET  /v1/maps/:slug/leaderboard/me              rank and time for the session's player
+POST /v1/attempts                               start a run: returns a ticket (§3.1, §7.3)
 POST /v1/runs                                   submit (§3.1)
 GET  /v1/runs/:id                               status, and time_ms once verified
-GET  /v1/runs/:id/demo                          the .s3d, for ghosts and playback
+GET  /v1/runs/:id/demo                          the .s3d, for ghosts and playback — public
 GET  /v1/players/:name                          profile: PBs, records held, totals
 GET  /auth/:provider/start, /auth/:provider/callback, POST /auth/logout
 GET  /v1/meta                                   current sim_build, profiles, wasm artifact hash
@@ -1206,10 +1449,43 @@ Partial mitigations, with honest limits:
 - **Human review of the top of each board**, using the demo playback the platform has anyway. A
   record run being watched by people who know the map is the strongest filter that exists, and it
   costs nothing to enable because ghosts are already a feature.
-- **Near-duplicate detection on the yaw trace.** This addresses a case verification genuinely misses:
-  downloading someone else's demo and resubmitting it as your own. Exact resubmission is caught by
-  the `demo_sha256` unique index; a slightly perturbed copy is not, and a similarity check over the
-  quantised yaw deltas is the practical answer. It will never be airtight.
+**Someone else's run, resubmitted as yours.** This deserves its own treatment rather than a bullet,
+because the platform hands the attacker the artifact: ghosts and top-of-board review both require
+`GET /v1/runs/:id/demo` to be public, and a `.s3d` re-simulates identically no matter who uploads
+it. Nothing in the recording says who produced it, and — this is the part that has no fix —
+**nothing can.** The artifact is inputs. Inputs are copyable, and any value the client computes over
+them, including a digest folded around a server-issued nonce, the copier can compute too, because
+the copier is running the same deterministic simulation on the same inputs. There is no client-side
+computation that binds identity when the client is the adversary.
+
+So the defence is not authentication. It is making the copy lose a race it starts behind in, and
+making the perturbed copy visible:
+
+1. **The run digest is canonical and globally unique.** `canonical_digest` (C5) hashes the decoded
+   command stream, spawn and `PhysicsIdent` — not the file bytes. This matters: the bit-packed
+   encoding has slack (an angle may be seeded absolutely or as a delta, the checkpoint trail is
+   optional, there are reserved bytes), so a hash of the *file* is perturbable into a fresh value
+   without altering a single simulated frame. Hashing the run instead means a re-encoded copy
+   collides with the original, and §7.2 rejects it with `409`.
+2. **First submitter owns it, and the honest player submits first by construction.** A demo only
+   becomes downloadable once its run is verified and ranked, so the original row exists before the
+   copy can be obtained. The thief is racing someone who has already finished.
+3. **An attempt ticket is required (§3.1).** Resubmission therefore cannot be a batch job over the
+   public archive; it costs a live, rate-limited, signed-in attempt per run.
+4. **Near-duplicate detection over the canonical command stream.** A copier who perturbs the
+   *inputs* — one flipped yaw LSB, or a dead command appended after the finish trigger, which
+   changes nothing because the time is already latched — defeats step 1 by producing a genuinely
+   different run. A similarity check over quantised yaw deltas catches this, and now has a
+   well-defined thing to compare against: the canonical stream, not a compressed file. It will never
+   be airtight.
+5. **Human review at the top of each board**, which is what actually settles it.
+
+State plainly what survives all five: someone who runs through a live attempt while feeding a
+perturbed copy of another player's inputs can get a run ranked, and re-simulation cannot tell that
+from a real run, in principle. Steps 1–3 reduce it from "trivial and scriptable" to "manual, per
+run, and detectable"; step 4 raises the cost of evading detection; none of them make it impossible.
+This is the same exposure every input-demo leaderboard has, Defrag included, and it is better
+disclosed than papered over.
 
 The realistic security posture for a niche movement game: **verification makes cheating require
 writing a movement bot, which is a substantially more interesting project than editing a time, and
@@ -1268,10 +1544,11 @@ sentimental:
 4. **D4 already leans this way**, and a URL is a better artifact than an unsigned executable for
    everything from feedback to bug reports.
 
-The risk is the open half of the probe (§1.5): if the `wgpu`/`winit`/`egui` stack does not
-cross-compile to web at a tolerable bundle size, this ordering weakens. It does not collapse — the
-sim and the input path are unaffected, and a leaner render path is a renderer decision, not an
-architecture one — but it should be re-checked before committing.
+The risk this paragraph used to carry — that `wgpu`/`winit` might not cross-compile to web at a
+tolerable size — **has been measured away.** A working WebGPU skeleton is 132 KiB of gzipped wasm
+and it ran in Chrome 146 (§1.5). The residual is stage D: the game crates with `parry3d` arriving
+transitively, which nobody has weighed. If that comes back large it is a dependency question for the
+web build, not a reason to reorder — the sim and input path are unaffected either way.
 
 **Order:**
 
@@ -1279,7 +1556,7 @@ architecture one — but it should be re-checked before committing.
 |---|---|---|
 | 0 | **C1 + C2** — deterministic trig and the cross-target CI check | nothing |
 | 1 | **C3, C4, C9** — 16-bit angles, run clock and triggers, `CommandPump` | C1 |
-| 2 | **Playable URL, no accounts, no backend.** Static site, wasm sim, one hardcoded map, local PBs in IndexedDB | C9, probe outcome |
+| 2 | **Playable URL, no accounts, no backend.** Static site, wasm sim, hardcoded arena, local PBs in IndexedDB | C9 |
 | 3 | **C5, C6, C7** — `.s3d`, physics identity, `.map` ingestion | C4 |
 | 4 | **Backend skeleton** — axum, Postgres, OAuth, players | D3 |
 | 5 | **Submission, verification, leaderboards** | 3 + 4 |
@@ -1288,6 +1565,15 @@ architecture one — but it should be re-checked before committing.
 
 Step 0 is hours of work, touches three lines of `step.rs`, and every later step is wrong without it.
 Step 2 is the artifact rev 5 §M values most and it needs no backend at all.
+
+**Step 2 assumes rev 6 §T resolves to the hardcoded arena**, which is the answer this ordering wants
+and the one rev 6 recommends. The operator's standing decision to import `.map` files rather than
+author them governs the *geometry layer* and is not in question here; §T asks only whether the first
+playable thing waits for that pipeline. If it does, step 2 moves behind C7 and the browser-first
+argument loses its best property — that it produces something to feel within days. Two ramps matter
+more than they sound: they are where CPM and VQ3 diverge most, and they are the discrete branches
+the 1-ULP finding in §1 warns about, so a hardcoded arena is also the cheapest place to find out
+whether that warning was real.
 
 ### 9.3 Deployment consequences the operator already flagged
 
@@ -1356,9 +1642,11 @@ someone changes the base image, and it fails silently when they do. §1.0.
 Everything below is a real fork where I have a recommendation but not the authority. Nothing here
 blocks drafting; all of it blocks building.
 
-Two things that are *not* on this list because they are already settled: the trigonometry fix (C1 —
-decided by the probe session, pre-verified, scheduled after Wave 2) and the choice of `.map` import
-over map authoring (decided by the operator).
+Three things that are *not* on this list because they are already settled: the trigonometry fix
+(C1 — decided by the probe session, pre-verified, scheduled after Wave 2), the choice of `.map`
+import over map authoring (decided by the operator), and the web bundle shape (rev 6 §Q2 — WebGPU
+only, no compiled-in fallback, no `egui`; C9 states it, and it is recorded here so it is not
+re-litigated during Wave 3).
 
 **A — Amend the determinism scope from "same binary, same machine" to "same source, any target".**
 *Recommend: yes.* Rev 1 deferred cross-platform bit-exactness; verified leaderboards need it, and
@@ -1384,9 +1672,13 @@ only).** *Recommend: the stronger form.* It is what Q3 did, it makes recordings 
 construction, and doing it later means re-recording every fixture. It costs a day and touches tests
 Wave 2 just wrote — which is exactly why the decision wants making now rather than in three weeks.
 
-**E — Confirm browser-first as the primary client.** *Recommend: yes*, for the four reasons in §9.2,
-contingent on the render-stack half of the probe. If the answer is no, the ordering changes but the
-contract does not.
+**E — Confirm browser-first as the primary client.** *Recommend: yes*, for the four reasons in §9.2.
+This was contingent on the render-stack half of the rev 5 probe; **that contingency has resolved in
+favour of the browser** — 132 KiB of gzipped wasm for a WebGPU skeleton running in Chrome 146
+(§1.5). The bundle-shape question underneath it is settled by rev 6 §Q2 and is not reopened here:
+WebGPU only, backend chosen in JS before entering wasm, WebGL2 only ever as a separate on-demand
+bundle (C9). What is left for you is only the ordering call, and if it goes the other way the
+ordering changes while the contract does not.
 
 **F — Map content licensing.** *No recommendation; I cannot resolve this.* `.map` files reference
 textures in `.pk3` archives whose redistribution rights vary and sometimes inherit id's. Hosting the
@@ -1401,6 +1693,18 @@ the machinery for either, but only if it is in the schema from the start.
 **H — Demo retention for non-PB attempts.** *Recommend: discard the bytes, keep the times.* §4.2
 shows keeping everything costs about $19/month at 10,000 players, so this is a product question —
 does anyone want to re-watch a failed run? — and not a cost one.
+
+**I — Confirm the anti-copy posture in §8.3, which trades a little friction for the only defence
+that exists.** *Recommend: yes.* Publishing demos is what makes ghosts and top-of-board review
+possible, and it is also what hands a copier a working run. There is no cryptographic fix — the
+artifact is inputs, and the client is the adversary (§8.3). The design answers with global
+uniqueness on the canonical run digest, an attempt ticket per submission, and near-duplicate
+detection, which together make a copy lose a race and cost a manual interaction. The friction you
+are approving is small but real: players must call `POST /v1/attempts` before a ranked run, and
+claimed anonymous runs are capped per account (§6.4). The alternative — keeping demos private —
+costs ghosts, playback and human review, which are worth more than the exposure. If you would rather
+not carry even that friction, say so and the ticket drops out; the digest uniqueness, which is the
+load-bearing part, stands without it.
 
 ---
 
@@ -1503,6 +1807,11 @@ streams at three mouse-jitter levels, measuring bit-packed size and then `zlib` 
 - The reconvergence case: one run where the final checksum matched across builds while 29 of 1,200
   intermediate per-command checksums did not. §3.2's rolling digest exists because of this
   measurement, so if it is wrong, that field is over-engineering — an 8-byte one.
+- The render-stack figures: 132 KiB / 727 KiB / 2.50 MiB gzipped wasm for stages A/B/C, measured
+  with `stat` and `gzip -9`, with stage A running in Chrome 146; that `wgpu` crashes rather than
+  degrading when both backends are compiled in and `requestAdapter()` returns null; and that
+  `egui-winit` 0.36.1 cannot compile for `wasm32`. Relayed via spec rev 6 §P2/§Q2, whose full report
+  is `artifact_0809bd0014d447c08766`.
 
 **Assumed, and stated as assumptions:**
 
@@ -1517,10 +1826,15 @@ streams at three mouse-jitter levels, measuring bit-packed size and then `zlib` 
 
 **Could still invalidate parts of this:**
 
-- **The render-stack half of the rev 5 probe.** If `wgpu`/`winit` are not viable for web at a
-  reasonable bundle size, §9.2's browser-first recommendation weakens and C9's render half needs
-  rethinking. This is now the only open question from rev 5 §N, and nothing else in this document
-  depends on it.
+- **Stage D — the game crates plus `gltf`, with `parry3d` arriving transitively.** Never measured;
+  the probe seat's worktree was destroyed before it got there. Stage A's 132 KiB bounds nothing
+  about it, and `parry3d` is the largest unknown. Wave 3's criterion 2 produces the number. If it is
+  bad, the response is a dependency question for the web build (precompiled hulls instead of a
+  tracer in the bundle) rather than a change to C9's backend decision or to §9.2's ordering.
+- **That the ticket and digest mitigations in §8.3 are worth their friction.** They rest on a
+  judgement about attacker economics, not a measurement: that requiring a live attempt per
+  submission moves copying from scriptable to manual. If copying turns out to be popular anyway,
+  the answer is human review and near-duplicate detection, not more protocol.
 - **A divergence in the collision layer** once it exists (C8) — the same class of bug as §1, in code
   not yet written. C2 is the defence.
 - **Wave 2's `pmove_msec` sub-stepping**, noted as a TODO at `step.rs:147`. It changes results, so it
