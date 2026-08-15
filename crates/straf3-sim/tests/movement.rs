@@ -1133,4 +1133,3 @@ fn standing_up_is_refused_under_a_low_ceiling() {
         "stood up into a ceiling 20 units above the floor"
     );
 }
-
