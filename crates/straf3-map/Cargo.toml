@@ -10,6 +10,12 @@ publish.workspace = true
 # BELOW THE LINE. Enforced by `cargo xtask check-seam`.
 [dependencies]
 straf3-collision.workspace = true
+# The `World` seam lives in straf3-sim, and a compiled map has to speak it:
+# C7 requirement 2 says `CompiledMap` must produce a `World` implementor, and
+# `SurfaceFlags` is what a compiled brush's shader name turns into. Not a cycle
+# — straf3-sim depends on glam and nothing else, deliberately (see its manifest)
+# — and not a seam violation: both crates are below the line.
+straf3-sim.workspace = true
 glam.workspace = true
 # Parsing Valve 220 is a solved problem; this crate's own work is the compile
 # step that turns brushes into convex hulls and a render mesh.

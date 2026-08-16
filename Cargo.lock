@@ -2781,6 +2781,7 @@ dependencies = [
  "glam",
  "quake-map",
  "straf3-collision",
+ "straf3-sim",
 ]
 
 [[package]]
