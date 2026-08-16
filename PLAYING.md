@@ -5,10 +5,12 @@ keyboard movement, and a strafe-jump-capable CPM movement model. No maps,
 weapons, sound or menus yet.
 
 > **Software rendering under WSL2.** This box has no GPU passthrough, so
-> Vulkan resolves to the software rasteriser `llvmpipe`. The window opens,
-> renders and takes input, and that is what these instructions verify — they
-> make no claim about frame rate, smoothness or latency "feel". See the
-> README for the native-Windows recommendation for actually tuning movement.
+> Vulkan resolves to the software rasteriser `llvmpipe`. The window opens and
+> the render loop runs — that is what these instructions verify. Whether it
+> looks and feels right, and whether live input moves the player, is yours
+> to judge; these instructions make no claim about frame rate, smoothness or
+> latency "feel". See the README for the native-Windows recommendation for
+> actually tuning movement.
 
 ## Run it
 
@@ -83,27 +85,31 @@ cargo run -p straf3-game --bin straf3 -- --world arena --exit-after 2000
 
 ## Record and replay
 
-```
-cargo run -p straf3-game --bin straf3 -- --world arena --exit-after 4000 --record run.rec
-cargo run -p straf3-game --bin straf3 -- --replay run.rec
-```
-
-Replay also accepts a different frame schedule; the resulting checksum is
-identical to the regular schedule's, which is criterion 5's proof that
-rendering is decoupled from simulation stepping:
-
-```
-cargo run -p straf3-game --bin straf3 -- --replay run.rec --frame-ms 1,97,3,250,8
-```
-
-**Arena recordings only replay through the windowed `straf3` binary.**
 `straf3-headless` (in `straf3-sim`, below the seam) only knows the `empty`
-and `flat <z>` worlds, not the arena — a recording made against the arena has
-no `world` directive it could use, only a `# NOTE` comment explaining why.
-If you record a `--world flat` or `--world empty` session instead, that file
-*does* replay identically through `straf3-headless`:
+and `flat <z>` worlds — it has no way to spell the arena. A recording made
+with `--world arena` gets a `# NOTE` comment instead of a `world` directive,
+and any replay of it (windowed or headless) silently falls back to `flat` —
+a different, wrong run, with no warning printed. So the round-trip below is
+demonstrated on `--world flat`. The arena is not replayable from a recording
+at all; it is covered instead by the in-tree tests in
+`crates/straf3-render/tests/arena_is_playable.rs`.
+
+Play for a few seconds — strafe, jump — before closing the window; an
+unattended, input-free recording reproduces trivially and proves nothing
+about the record/replay path.
 
 ```
-cargo run -p straf3-game --bin straf3 -- --world flat --exit-after 2000 --record flat.rec
-./target/debug/straf3-headless flat.rec
+cargo run -p straf3-game --bin straf3 -- --world flat --record /tmp/flat.rec
+# play, then close the window (or Esc, or let --exit-after end it)
+cargo run -p straf3-game --bin straf3 -- --replay /tmp/flat.rec
+cargo run -p straf3-sim --bin straf3-headless -- /tmp/flat.rec
+```
+
+Both print the same checksum. Replay also accepts a different frame
+schedule; the resulting checksum is identical to the regular schedule's,
+which is criterion 5's proof that rendering is decoupled from simulation
+stepping:
+
+```
+cargo run -p straf3-game --bin straf3 -- --replay /tmp/flat.rec --frame-ms 1,97,3,250,8
 ```
