@@ -362,3 +362,27 @@ fn buttons(spec: &str) -> Result<Buttons, String> {
     }
     Ok(b)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `arena` falls through the catch-all `other =>` arm of the `world`
+    /// directive, and that fallthrough is the only thing stopping this
+    /// runner from silently defaulting to `WorldChoice::Flat` and running an
+    /// arena recording in flat space. Nothing else pins that refusal — pin
+    /// it here, and demand the message names the world, so this fails loudly
+    /// if a future change routes `arena` to a different error (or to no
+    /// error at all) rather than passing on an unrelated failure.
+    #[test]
+    fn arena_world_is_refused_by_name() {
+        let err = match parse("rate 125\nworld arena\n") {
+            Ok(_) => panic!("`arena` is not a known world; parse should have refused it"),
+            Err(e) => e,
+        };
+        assert!(
+            err.contains("unknown world") && err.contains("arena"),
+            "expected an unknown-world error naming `arena`, got: {err}"
+        );
+    }
+}

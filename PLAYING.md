@@ -85,14 +85,27 @@ cargo run -p straf3-game --bin straf3 -- --world arena --exit-after 2000
 
 ## Record and replay
 
-`straf3-headless` (in `straf3-sim`, below the seam) only knows the `empty`
-and `flat <z>` worlds — it has no way to spell the arena. A recording made
-with `--world arena` gets a `# NOTE` comment instead of a `world` directive,
-and any replay of it (windowed or headless) silently falls back to `flat` —
-a different, wrong run, with no warning printed. So the round-trip below is
-demonstrated on `--world flat`. The arena is not replayable from a recording
-at all; it is covered instead by the in-tree tests in
-`crates/straf3-render/tests/arena_is_playable.rs`.
+Every recording names the world it was made in. `straf3 --replay` understands
+all three, so an arena session replays in the arena. `straf3-headless` (in
+`straf3-sim`, below the seam) only knows `empty` and `flat <z>` — it has no
+way to spell the arena, so it refuses an arena recording by name and exits
+non-zero rather than silently running it somewhere else:
+
+```
+$ cargo run -p straf3-game --bin straf3 -- --world arena --exit-after 2000 --record /tmp/arena.rec
+...
+straf3: recording written to /tmp/arena.rec
+$ cargo run -p straf3-game --bin straf3 -- --replay /tmp/arena.rec
+...
+  world         Arena
+...
+  checksum      0x38078f5270e2ecad
+$ cargo run -p straf3-sim --bin straf3-headless -- /tmp/arena.rec
+straf3-headless: /tmp/arena.rec: line 12: unknown world `arena` (empty|flat <z>)
+```
+
+The round-trip below uses `--world flat` so both readers can run the same
+file and their checksums can be compared.
 
 Play for a few seconds — strafe, jump — before closing the window; an
 unattended, input-free recording reproduces trivially and proves nothing
@@ -100,10 +113,16 @@ about the record/replay path.
 
 ```
 cargo run -p straf3-game --bin straf3 -- --world flat --record /tmp/flat.rec
-# play, then close the window (or Esc, or let --exit-after end it)
+# play, then close the window (or let --exit-after end it)
 cargo run -p straf3-game --bin straf3 -- --replay /tmp/flat.rec
 cargo run -p straf3-sim --bin straf3-headless -- /tmp/flat.rec
 ```
+
+> **The recording is written only on a clean exit** — closing the window or
+> letting `--exit-after` end the run. The file is written after the event
+> loop returns, so killing the process (Ctrl-C, `kill`, a closed terminal)
+> skips that write entirely: you get no file, not a truncated one, however
+> long you played, and nothing is printed to say so.
 
 Both print the same checksum. Replay also accepts a different frame
 schedule; the resulting checksum is identical to the regular schedule's,
