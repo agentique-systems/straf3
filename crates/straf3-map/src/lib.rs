@@ -77,10 +77,19 @@
 //!
 //! Stated here rather than discovered later:
 //!
-//! - **Curved surfaces are dropped.** A Quake 3 `patchDef` is collidable
-//!   geometry and this compiler has no Bézier tessellation, so every patch is
-//!   dropped and counted in [`Warning::PatchDropped`]. A route that runs over a
-//!   curved ramp will have a hole where the ramp was.
+//! - **Curved surfaces are parsed and skipped, not tessellated.** A Quake 3
+//!   `patchDef2` / `patchDef3` block is read well enough to get past it and is
+//!   then discarded; there is no Bézier tessellation here, so every patch is
+//!   collidable geometry that is simply gone, and a route that runs over a
+//!   curved ramp has a hole where the ramp was. Every one is counted in
+//!   [`Warning::PatchDropped`], which also carries a [`PatchLoss`] severity,
+//!   because the difference in scale is a difference in kind: this crate's
+//!   fixtures and the authored course lose 0–25 patches and remain playable,
+//!   while `afterslime.map` loses 1123 and `courtfun.map` 706 — on a movement
+//!   map the curves *are* the ramps and tubes, so those compile to something
+//!   the player falls through. **Tessellating patches is a Wave 5 question**;
+//!   until it is answered, treat [`PatchLoss::Substantial`] as "this map did
+//!   not import" rather than "this map imported with blemishes".
 //! - **Movers are frozen.** `func_door` and friends compile as static solids
 //!   where the mapper left them; the [`World`] contract says the world is
 //!   static for the duration of a run.
@@ -153,6 +162,55 @@ pub struct CompiledMap {
     pub warnings: Vec<Warning>,
 }
 
+/// The number of dropped patches at or above which a map is called
+/// [`PatchLoss::Substantial`].
+///
+/// # Why a hundred, and why a number at all
+///
+/// The count alone does not tell a caller anything, because the caller has no
+/// scale to read it against. Measured on the corpus: the fixtures in this crate
+/// and the authored course drop between zero and twenty-five patches, which is
+/// trim, a decorative arch, a light fixture — the route is intact and the map
+/// plays. `afterslime.map` drops 1123 and `courtfun.map` drops 706. On a
+/// movement map the curved surfaces *are* the ramps and tubes, so those two are
+/// not degraded, they are absent: the player falls through where the geometry
+/// should be.
+///
+/// A hundred sits in the empty band between those two populations rather than
+/// on a boundary anything is clustered near, which is the only property a
+/// threshold like this needs. It is not a claim that ninety-nine patches are
+/// fine; it is a claim that the two cases are far enough apart to separate, and
+/// a refusal to make every caller rediscover where by hand.
+pub const SUBSTANTIAL_PATCH_LOSS: usize = 100;
+
+/// How badly dropped curved surfaces hurt a map.
+///
+/// The compiler cannot tessellate Bézier patches (see the crate docs), so every
+/// patch is geometry that is simply gone. This says whether that is worth a
+/// footnote or worth refusing to race on the result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum PatchLoss {
+    /// Fewer than [`SUBSTANTIAL_PATCH_LOSS`] patches. Decorative curves are
+    /// missing; the map is playable and a route over brush geometry is intact.
+    Partial,
+    /// [`SUBSTANTIAL_PATCH_LOSS`] or more. Treat the compiled map as unusable
+    /// rather than imperfect — enough of its geometry is missing that a run on
+    /// it is not a run on the map the author made.
+    Substantial,
+}
+
+impl PatchLoss {
+    /// Classify a dropped-patch count.
+    #[must_use]
+    pub fn of(count: usize) -> Self {
+        if count >= SUBSTANTIAL_PATCH_LOSS {
+            Self::Substantial
+        } else {
+            Self::Partial
+        }
+    }
+}
+
 /// Something the compiler did that the map's author may not have intended.
 ///
 /// Warnings are data, not log lines — nothing below the seam prints. They are
@@ -164,6 +222,10 @@ pub enum Warning {
     PatchDropped {
         /// How many.
         count: usize,
+        /// Whether that count is a blemish or a hole where the map was. See
+        /// [`PatchLoss`] — this exists so a caller can tell the two apart
+        /// without knowing [`SUBSTANTIAL_PATCH_LOSS`] by folklore.
+        severity: PatchLoss,
     },
     /// A brush whose planes enclose nothing. Usually a bad vertex edit; Radiant
     /// will load such a map without complaint.
@@ -270,6 +332,7 @@ pub fn compile(source: &str) -> Result<CompiledMap, CompileError> {
     if prepared.patches_dropped > 0 {
         warnings.push(Warning::PatchDropped {
             count: prepared.patches_dropped,
+            severity: PatchLoss::of(prepared.patches_dropped),
         });
     }
 
@@ -442,6 +505,19 @@ impl CompiledMap {
             entity.fold(&mut h);
         }
         h.finish()
+    }
+
+    /// How much curved geometry this map lost, if any.
+    ///
+    /// `None` when nothing was dropped. Provided so a caller can gate on the
+    /// answer — refuse to publish a time, or mark the map unraceable — without
+    /// pattern-matching [`Warning`] itself.
+    #[must_use]
+    pub fn patch_loss(&self) -> Option<(usize, PatchLoss)> {
+        self.warnings.iter().find_map(|w| match w {
+            Warning::PatchDropped { count, severity } => Some((*count, *severity)),
+            _ => None,
+        })
     }
 
     /// Every volume of one kind, in source order.
