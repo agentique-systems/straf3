@@ -1,23 +1,70 @@
-//! egui overlays and movement telemetry.
+//! The on-screen overlay and its movement telemetry.
 //!
-//! Above the seam. Reads simulation state to display it; never feeds anything
-//! back into the simulation.
-//! Stub — the speedometer, strafe-efficiency graph and trace overlays land in
-//! a later wave.
+//! Above the seam. This crate reads simulation state in order to display it,
+//! and there is no API here through which anything could be fed back — no
+//! `&mut SimState`, no command, no world. A run played with the overlay on and
+//! a run played with it off produce the same checksum, and that is a property
+//! of the shape of this crate rather than of anyone's discipline.
+//!
+//! # What is on screen
+//!
+//! Four readouts, which are what a movement run is judged by:
+//!
+//! | readout | where | why |
+//! |---|---|---|
+//! | horizontal speed | centre, large | the number a strafe-jumper is steering by |
+//! | ground / slide / air | under the speed | the three states are three different sets of physics |
+//! | run time | top centre | `m:ss.mmm`, from the simulation's own millisecond count |
+//! | split vs. ghost | under the clock | signed, motorsport convention: negative is good |
+//!
+//! plus a dim corner line carrying the frame rate, vertical speed, tick count
+//! and simulation time — the readout wave 3 printed to the terminal once a
+//! second, which is how a stalled simulation is told apart from a slow one.
+//!
+//! # Using it
+//!
+//! ```no_run
+//! # fn f(device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder,
+//! #      target: &wgpu::TextureView, state: &straf3_sim::SimState, fps: u32) {
+//! use straf3_devtools::{Hud, HudFrame, TelemetrySample};
+//!
+//! // once, against the surface format
+//! let mut hud = Hud::new(device, wgpu::TextureFormat::Bgra8UnormSrgb);
+//!
+//! // per frame, after the world is recorded and before the encoder is submitted
+//! let sample = TelemetrySample::of(state).with_fps(fps).with_split_ms(None);
+//! hud.draw(
+//!     HudFrame {
+//!         device,
+//!         queue,
+//!         encoder,
+//!         target,
+//!         width: 1920,
+//!         height: 1080,
+//!         pixels_per_point: 1.0,
+//!     },
+//!     &sample,
+//! );
+//! # }
+//! ```
+//!
+//! # Native is the target
+//!
+//! The overlay is judged natively; the browser client is deferred (spec rev 2,
+//! criterion 9). Nothing here is native-only any more — dropping `egui-winit`
+//! took `arboard` with it, which was the one thing that could not build for
+//! `wasm32` — but no claim is made about how it looks in a browser, because
+//! nobody has looked.
 
-/// One sample of movement telemetry, as shown on the overlay.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct TelemetrySample {
-    /// Horizontal speed in units per second — the number that matters.
-    pub horizontal_speed: f32,
-}
+#![forbid(unsafe_code)]
+#![warn(missing_docs)]
+#![warn(clippy::all)]
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub mod hud;
+pub mod telemetry;
 
-    #[test]
-    fn default_sample_is_stationary() {
-        assert_eq!(TelemetrySample::default().horizontal_speed, 0.0);
-    }
-}
+pub use hud::{Hud, HudFrame, HudStyle, compose};
+pub use telemetry::{
+    CLOCK_PLACEHOLDER, Phase, RunReadout, SpeedTrend, TelemetrySample, TrendFilter,
+    format_clock_ms, format_run, format_speed, format_split_ms,
+};
