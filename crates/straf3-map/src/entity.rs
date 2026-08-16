@@ -481,7 +481,10 @@ mod tests {
     fn an_intermission_camera_is_not_a_spawn() {
         // It is a viewpoint, and mappers put it in the ceiling or outside the
         // level. Reading it as a spawn puts the player in solid.
-        let ents = vec![entity("info_player_intermission", &[("origin", "0 0 4096")])];
+        let ents = vec![entity(
+            "info_player_intermission",
+            &[("origin", "0 0 4096")],
+        )];
         assert!(spawns(&ents).is_empty());
     }
 
