@@ -58,7 +58,7 @@ pub mod winding;
 
 pub use hull::{CompiledHull, Hull, add_hull_bevels, axial_planes, compile_hull};
 pub use plane::Plane;
-pub use trace::{HullWorld, trace_hull};
+pub use trace::{HullWorld, TriggerHull, trace_hull};
 pub use winding::{Winding, hull_windings, winding_bounds};
 
 #[cfg(test)]

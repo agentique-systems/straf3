@@ -1,11 +1,29 @@
+== provenance ==
+published   2026-08-16, re-run in full from probes/coil-course/src/main.rs
+tree        wave 4 stage 2, after C3 (16-bit view angles) and the C4 run clock
+command     cargo run --release -- ../../assets/maps/coil.map
+
+Supersedes the pre-C3 publication. Two numbers moved and both moved because of
+C3, not because of anything the run clock did: H3's bot now ends at y=1796 z=145
+where it used to end at y=1792 z=143. Its 4416 ms to y=1780 and its 783 ups peak
+are unchanged. The angle quantisation changes which yaw the bot's search can
+actually ask for, so a greedy search over a coarser alphabet lands a few units
+elsewhere; nothing about the movement model moved, and `cargo xtask determinism`
+still folds to e0cd098aa4af9ba2 on all four targets.
+
+H5 is new, and H3 is longer than it was: the bot now runs to the finish line
+rather than stopping at y=1780, so its trajectory table continues past where the
+superseded file ended.
+
 == coil-course probe ==
 map          ../../assets/maps/coil.map
 solids       26 hulls
 triggers     4
-   t_start      Vec3(-224.0, 32.0, -32.0) .. Vec3(224.0, 64.0, 768.0)
-   t_cp1        Vec3(-224.0, 1536.0, -32.0) .. Vec3(224.0, 1568.0, 768.0)
-   t_cp2        Vec3(-224.0, 3104.0, -96.0) .. Vec3(224.0, 3136.0, 768.0)
-   t_finish     Vec3(-96.0, 3424.0, 64.0) .. Vec3(96.0, 3488.0, 768.0)
+   t_start      -> target_starttimer    START                    Vec3(-224.0, 32.0, -32.0) .. Vec3(224.0, 64.0, 768.0)
+   t_cp1        -> target_checkpoint    checkpoint bit 0x00000004 Vec3(-224.0, 1536.0, -32.0) .. Vec3(224.0, 1568.0, 768.0)
+   t_cp2        -> target_checkpoint    checkpoint bit 0x00000008 Vec3(-224.0, 3104.0, -96.0) .. Vec3(224.0, 3136.0, 768.0)
+   t_finish     -> target_stoptimer     FINISH                   Vec3(-96.0, 3424.0, 64.0) .. Vec3(96.0, 3488.0, 768.0)
+clock        the world reports 0x0000000f; a timeable map needs START|FINISH
 bounds       Vec3(-768.0, -864.0, -224.0) .. Vec3(768.0, 5376.0, 512.0)
 profile      cpm, 125 Hz
 
@@ -264,25 +282,42 @@ void samples on the centre line: 0
      40      -268      -662        24       326
      72      -282      -573        61       394
     104      -293      -465        65       446
-    136      -299      -347        33       486
+    136      -298      -346        33       486
     168      -288      -217        96       529
     200      -253       -83       108       544
     232      -196        44        66       550
-    264      -144       180        63       586
+    264      -143       180        63       586
     296      -106       331       107       622
-    328       -86       493        98       656
-    360       -84       665        37       688
+    328       -85       493        98       656
+    360       -83       665        37       688
     392      -101       844        85       719
-    424      -138      1029       110       742
+    424      -137      1029       110       742
     456      -170      1216        81       744
-    488      -189      1408        44       767
-    520      -177      1606       101       782
-    552      -112      1792       143       763
+    488      -188      1408        44       767
+    520      -193      1607       101       782
+    552      -209      1796       145       708
+    584      -197      1981       199       737
+    616      -165      2171       200       767
+    648      -116      2364       149       783
+    680       -58      2556        46       782
+    712       -24      2739        57       714
+    744       -12      2923       137       728
+    776       -21      3112       168       753
+    808       -47      3306       147       770
 
-reached y=1792 z=143 in 4416 ms; peak horizontal speed 783 ups
+reached y=3452 z=113 in 6656 ms; peak horizontal speed 783 ups
 
-== triggers the bot's path overlapped ==
-["t_start", "t_cp1"]   (sampled once per decision window, so this under-reports)
+== H5  the run clock ==
+sampled once per decision window : ["t_start", "t_cp1", "t_cp2", "t_finish"]
+swept, from Trace::triggers      : ["t_start", "t_cp1", "t_cp2", "t_finish"]
+
+  window end     run ms  volume
+        1856         48  t_start
+        4096       2288  t_cp1
+        6208       4400  t_cp2
+        6656       4792  t_finish
+
+clock: FINISHED  start 1808 ms  finish 6600 ms  time 4.792 s (4792 ms, u32)
 
 == texture families in the compiled solids ==
   straf3/finish      1

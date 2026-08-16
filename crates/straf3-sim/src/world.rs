@@ -63,6 +63,91 @@ impl SurfaceFlags {
     }
 }
 
+/// Timing volumes a swept hull passed through.
+///
+/// A bitmask rather than a collection, for the reason ARCHITECTURE C4 gives:
+/// the simulation allocates nothing on the movement path, and a map has a small
+/// fixed number of timing volumes. Accumulating one is an `|=`, and saving and
+/// restoring the accumulator across a rolled-back move is a register copy.
+///
+/// # Why the simulation names these and not the map
+///
+/// `straf3-sim` must not know what a `.map` is — it does not depend on
+/// `straf3-map`, deliberately (see that crate's manifest and this module's
+/// docs). But the run clock has to be *below* the seam, because a time that is
+/// not a pure consequence of the command stream is not reproducible and cannot
+/// be folded into [`SimState::checksum`].
+///
+/// The resolution is that geometry knowledge travels up the dependency chain as
+/// *bits*, not as types. `straf3-map` knows that a `trigger_multiple` wired to a
+/// `target_startTimer` is a start line; it compresses that to
+/// [`TriggerSet::START`] when it builds the world. `straf3-collision` carries
+/// the bits through the tracer without interpreting them. `straf3-sim` reads
+/// [`Self::START`] and [`Self::FINISH`] and knows nothing else about the map.
+/// This is the same inversion that makes [`World`] a trait the *consumer*
+/// declares.
+///
+/// [`SimState::checksum`]: crate::SimState::checksum
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct TriggerSet(pub u32);
+
+impl TriggerSet {
+    /// No volumes at all.
+    pub const NONE: Self = Self(0);
+    /// The start line: crossing it starts the clock.
+    pub const START: Self = Self(1 << 0);
+    /// The finish line: crossing it stops the clock.
+    pub const FINISH: Self = Self(1 << 1);
+
+    /// The bit [`Self::checkpoint`] gives checkpoint zero. Bits below it are
+    /// [`Self::START`] and [`Self::FINISH`].
+    pub const FIRST_CHECKPOINT_BIT: u32 = 2;
+
+    /// How many checkpoints fit in the remaining bits.
+    pub const MAX_CHECKPOINTS: u32 = 32 - Self::FIRST_CHECKPOINT_BIT;
+
+    /// The bit for checkpoint `index`, or `None` past [`Self::MAX_CHECKPOINTS`].
+    ///
+    /// `None` rather than a silent wrap: a map with 31 checkpoints must be
+    /// reported as unrepresentable by whoever compiled it, not quietly given a
+    /// checkpoint that shares a bit with the finish line.
+    #[must_use]
+    pub const fn checkpoint(index: u32) -> Option<Self> {
+        if index < Self::MAX_CHECKPOINTS {
+            Some(Self(1 << (Self::FIRST_CHECKPOINT_BIT + index)))
+        } else {
+            None
+        }
+    }
+
+    /// Whether every volume in `other` is in this set.
+    ///
+    /// Note that an empty `other` is contained by everything, as with
+    /// [`SurfaceFlags::contains`].
+    #[must_use]
+    pub const fn contains(self, other: Self) -> bool {
+        self.0 & other.0 == other.0
+    }
+
+    /// Whether the two sets share any volume.
+    #[must_use]
+    pub const fn intersects(self, other: Self) -> bool {
+        self.0 & other.0 != 0
+    }
+
+    /// Whether nothing was touched.
+    #[must_use]
+    pub const fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+
+    /// This set plus `other`.
+    #[must_use]
+    pub const fn with(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+}
+
 /// A request to sweep the player's hull through the world.
 ///
 /// The hull is an axis-aligned box, as Quake's was. That is not a placeholder
@@ -108,7 +193,37 @@ pub struct Trace {
     /// float error that produces overbounce.
     pub start_solid: bool,
     /// The hull was inside solid geometry for the whole sweep.
+    ///
+    /// Implementors must ensure this implies `fraction == 0.0`. ARCHITECTURE C8
+    /// states it as an obligation rather than leaving it as an accident of one
+    /// tracer, because [`Self::triggers`] leans on it: a hull that starts inside
+    /// solid has not legitimately travelled anywhere, and a nonzero fraction
+    /// alongside `all_solid` would credit an aborted move with volumes it never
+    /// reached.
     pub all_solid: bool,
+    /// Timing volumes the hull overlapped along the part of this sweep it
+    /// **actually travelled** — over `start ..= start + (end - start) *
+    /// fraction`, not over the whole requested segment.
+    ///
+    /// Triggers are non-solid, so they never affect [`Self::fraction`] or
+    /// [`Self::normal`]: this is what the sweep *passed through*, not what
+    /// stopped it. But it must stop where the sweep stopped, and that is a
+    /// contract on the implementor, not a hint. The physics issues sweeps whose
+    /// motion it then discards — `PM_SlideMove`'s zero-fraction bumps,
+    /// `PM_StepSlideMove`'s abandoned lift — and reporting volumes beyond
+    /// `fraction` credits a player with a finish line they never reached.
+    ///
+    /// Gathering is clamped to `fraction`, not to the mover's
+    /// `SURFACE_CLIP_EPSILON`-backed-off fraction, which the tracer cannot see.
+    /// That over-reports by at most the epsilon backoff at the moment of
+    /// impact — a hull flush against a wall reports a volume it is touching but
+    /// not quite standing in. On a finish line that is the correct direction to
+    /// err, and it is bounded by a constant rather than by the length of the
+    /// move.
+    ///
+    /// An implementor with no timing volumes leaves this
+    /// [`TriggerSet::NONE`]; [`Trace::clear`] already does.
+    pub triggers: TriggerSet,
 }
 
 impl Trace {
@@ -121,6 +236,7 @@ impl Trace {
             surface: SurfaceFlags::NONE,
             start_solid: false,
             all_solid: false,
+            triggers: TriggerSet::NONE,
         }
     }
 
@@ -149,8 +265,28 @@ impl Trace {
 /// The world is static for the duration of a run. Moving platforms and doors,
 /// if they ever exist, get their own interface rather than making this one
 /// time-dependent.
+///
+/// Two further obligations, both of which the run clock depends on and neither
+/// of which the type system can state (ARCHITECTURE C4 and C8):
+///
+/// 1. **`all_solid` implies `fraction == 0.0`.**
+/// 2. **[`Trace::triggers`] covers the traversed prefix only** — the volumes the
+///    hull overlaps over `start ..= start + (end - start) * fraction`, not over
+///    the requested segment. The natural BSP implementation violates this: the
+///    descent visits trigger leaves along the whole query segment, and OR-ing
+///    each one as it is reached gathers volumes past the impact point.
+///
+/// There is deliberately no separate `fn triggers(&self, sweep) -> TriggerSet`.
+/// `Pmove` issues up to a dozen sweeps per command along a genuinely bent path,
+/// and a single coarse query from command-start to command-end is a chord across
+/// that bend which can miss a volume the player's real hull went through. Riding
+/// on `Trace` makes the granularity of trigger testing the granularity of
+/// tracing, by construction, with no second call site whose cadence could drift —
+/// and it inherits the exact hull of the sweep that found it, which matters
+/// because `PM_CheckDuck` changes that hull mid-command.
 pub trait World {
-    /// Sweep the player's hull and report what stopped it.
+    /// Sweep the player's hull and report what stopped it, and what it passed
+    /// through on the way.
     fn trace(&self, sweep: &Sweep) -> Trace;
 }
 
@@ -220,6 +356,7 @@ impl World for FlatGround {
                 surface: self.surface,
                 start_solid: true,
                 all_solid: end_z < self.height,
+                triggers: TriggerSet::NONE,
             };
         }
         if end_z >= self.height {
@@ -236,6 +373,7 @@ impl World for FlatGround {
             surface: self.surface,
             start_solid: false,
             all_solid: false,
+            triggers: TriggerSet::NONE,
         }
     }
 }

@@ -28,7 +28,7 @@
 //! determinism nobody has audited.
 
 use straf3_sim::num::{Scalar, Vec3, s};
-use straf3_sim::world::{Sweep, Trace, World};
+use straf3_sim::world::{Sweep, Trace, TriggerSet, World};
 
 use crate::hull::Hull;
 
@@ -142,25 +142,80 @@ fn bounds_intersect(mins: Vec3, maxs: Vec3, mins2: Vec3, maxs2: Vec3) -> bool {
         || mins.z > maxs2.z + BOUNDS_EPSILON)
 }
 
+/// One convex piece of a timing volume, and what touching it means.
+///
+/// Split out from [`straf3_map::TriggerVolume`] rather than reusing it, because
+/// this crate must not depend on `straf3-map` — the dependency runs the other
+/// way. What crosses the boundary is a [`TriggerSet`], which is `straf3-sim`'s
+/// own alphabet: the map compiler decides that *this* brush is a start line and
+/// hands over [`TriggerSet::START`]; nothing here interprets the bits.
+///
+/// One `.map` trigger entity may own several brushes — a start line spanning an
+/// L-shaped corridor really is two boxes — so a volume becomes several of these
+/// carrying the same bits. Inside any one of them is inside the volume.
+///
+/// [`straf3_map::TriggerVolume`]: https://docs.rs/straf3-map
+#[derive(Debug, Clone, PartialEq)]
+pub struct TriggerHull {
+    /// What this piece means to a run.
+    pub triggers: TriggerSet,
+    /// The volume itself. Never traced as solid: a player must run through a
+    /// finish line, not bump into it.
+    pub hull: Hull,
+}
+
+impl TriggerHull {
+    /// A volume piece meaning `triggers`.
+    #[must_use]
+    pub fn new(triggers: TriggerSet, hull: Hull) -> Self {
+        Self { triggers, hull }
+    }
+}
+
 /// A world made of convex hulls: the [`World`] a compiled map answers with.
 ///
 /// Owns its hulls rather than borrowing them. The alternative — a view over a
 /// map's storage — buys nothing: this is built once when a map loads and held
 /// for the whole run, exactly as the hardcoded `ARENA` static was, and lifetimes
 /// on the type would propagate into every caller that holds a world.
+///
+/// Solid hulls and [`TriggerHull`]s are two separate lists and must stay that
+/// way. A trigger in the solid list is a wall across the finish line; a solid in
+/// the trigger list is geometry the player falls through.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct HullWorld {
     hulls: Vec<Hull>,
+    triggers: Vec<TriggerHull>,
 }
 
 impl HullWorld {
-    /// A world of these hulls, traced in the order given.
+    /// A world of these hulls, traced in the order given, with no timing
+    /// volumes.
     ///
     /// The order is part of the answer, not an implementation detail: equal
     /// entry fractions are broken by it.
     #[must_use]
     pub fn new(hulls: Vec<Hull>) -> Self {
-        Self { hulls }
+        Self {
+            hulls,
+            triggers: Vec::new(),
+        }
+    }
+
+    /// The same world with timing volumes attached.
+    ///
+    /// Their order does not affect the answer — the result is an OR over every
+    /// volume the swept hull reached — but it is preserved anyway, so that two
+    /// compiles of the same `.map` produce identical worlds field by field.
+    #[must_use]
+    pub fn with_triggers(mut self, triggers: Vec<TriggerHull>) -> Self {
+        self.triggers = triggers;
+        self
+    }
+
+    /// Attach one more volume piece.
+    pub fn push_trigger(&mut self, trigger: TriggerHull) {
+        self.triggers.push(trigger);
     }
 
     /// The hulls, in trace order.
@@ -169,10 +224,65 @@ impl HullWorld {
         &self.hulls
     }
 
-    /// Whether this world has any geometry at all.
+    /// The timing volumes, in the order they were given.
+    #[must_use]
+    pub fn triggers(&self) -> &[TriggerHull] {
+        &self.triggers
+    }
+
+    /// Every volume this world could ever report, OR-ed together.
+    ///
+    /// What a caller checks to find out whether a map is actually timeable
+    /// before letting a player start a run on it.
+    #[must_use]
+    pub fn trigger_coverage(&self) -> TriggerSet {
+        self.triggers
+            .iter()
+            .fold(TriggerSet::NONE, |set, t| set.with(t.triggers))
+    }
+
+    /// Whether this world has any solid geometry at all.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.hulls.is_empty()
+    }
+
+    /// Timing volumes the hull overlapped over the prefix of `sweep` it
+    /// actually travelled.
+    ///
+    /// The clamp to `fraction` is ARCHITECTURE C4's rule 1, and it is the whole
+    /// reason this is a second pass rather than an `|=` inside the solid loop:
+    /// the earliest solid hit is not known until every solid hull has been
+    /// tested, so a volume can only be judged in or out afterwards. Testing the
+    /// truncated segment — rather than testing the full one and comparing
+    /// fractions — also gets the degenerate case right for free: at
+    /// `fraction == 0` the segment collapses to a point sweep, and the only
+    /// volumes reported are the ones the hull is standing in.
+    fn gather_triggers(&self, sweep: &Sweep, fraction: Scalar) -> TriggerSet {
+        let travelled = Sweep {
+            start: sweep.start,
+            end: sweep.start + (sweep.end - sweep.start) * fraction,
+            half_extents: sweep.half_extents,
+            center_offset: sweep.center_offset,
+        };
+
+        let mut set = TriggerSet::NONE;
+        for volume in &self.triggers {
+            // Another piece of the same volume already answered. Skipping is an
+            // optimisation only — OR is idempotent — so it cannot change a
+            // result on any target.
+            if set.contains(volume.triggers) {
+                continue;
+            }
+            let mut probe = Trace::clear();
+            trace_hull(&volume.hull, &travelled, &mut probe);
+            // Entered it, or started inside it. Both are overlaps; only the
+            // second is invisible to `fraction`.
+            if probe.hit() || probe.start_solid {
+                set = set.with(volume.triggers);
+            }
+        }
+        set
     }
 
     /// The bounding box of every hull, or `None` when there is no geometry.
@@ -207,6 +317,9 @@ impl World for HullWorld {
         for hull in &self.hulls {
             trace_hull(hull, sweep, &mut best);
         }
+        if !self.triggers.is_empty() {
+            best.triggers = self.gather_triggers(sweep, best.fraction);
+        }
         best
     }
 }
@@ -216,7 +329,7 @@ mod tests {
     use super::*;
     use crate::plane::Plane;
     use straf3_sim::num::{to_bits, vec3};
-    use straf3_sim::world::SurfaceFlags;
+    use straf3_sim::world::{SurfaceFlags, TriggerSet};
 
     /// The standing player hull, in the shape `Sweep` wants.
     fn sweep(from: Vec3, to: Vec3) -> Sweep {
@@ -455,6 +568,157 @@ mod tests {
         assert_eq!(to_bits(a.normal.x), to_bits(b.normal.x));
         assert_eq!(to_bits(a.normal.y), to_bits(b.normal.y));
         assert_eq!(to_bits(a.normal.z), to_bits(b.normal.z));
+    }
+
+    // ── timing volumes ─────────────────────────────────────────────────────
+
+    /// A box volume spanning y and z generously, thin in x at `[x0, x1]`.
+    fn gate(x0: f32, x1: f32) -> Hull {
+        Hull::from_aabb(
+            vec3(s(x0), s(-256.0), s(-256.0)),
+            vec3(s(x1), s(256.0), s(256.0)),
+            SurfaceFlags::NONE,
+        )
+    }
+
+    #[test]
+    fn a_timing_volume_is_passed_through_rather_than_hit() {
+        let world = HullWorld::new(vec![floor()]).with_triggers(vec![TriggerHull::new(
+            TriggerSet::FINISH,
+            gate(100.0, 104.0),
+        )]);
+        let t = world.trace(&sweep(
+            vec3(s(0.0), s(0.0), s(24.125)),
+            vec3(s(200.0), s(0.0), s(24.125)),
+        ));
+        assert!(!t.hit(), "a trigger must not stop the player");
+        assert_eq!(t.fraction, s(1.0));
+        assert_eq!(t.normal, Vec3::ZERO);
+        assert!(
+            !t.start_solid,
+            "a trigger must never report the player as stuck in it"
+        );
+        assert_eq!(t.triggers, TriggerSet::FINISH);
+    }
+
+    /// ARCHITECTURE C4 rule 1, at the tracer where it is a contract.
+    ///
+    /// A wall at x=50 and a volume at x=100. The sweep asks to travel to x=200,
+    /// so the volume is on the *queried* segment; it is not on the segment the
+    /// hull travels. Reporting it credits a player with a finish line on the far
+    /// side of a wall they are standing against.
+    #[test]
+    fn a_volume_past_the_wall_that_stopped_the_sweep_is_not_reported() {
+        let wall = Hull::from_aabb(
+            vec3(s(50.0), s(-256.0), s(-256.0)),
+            vec3(s(60.0), s(256.0), s(256.0)),
+            SurfaceFlags::NONE,
+        );
+        let world = HullWorld::new(vec![floor(), wall]).with_triggers(vec![
+            TriggerHull::new(TriggerSet::FINISH, gate(100.0, 104.0)),
+            TriggerHull::new(TriggerSet::START, gate(20.0, 24.0)),
+        ]);
+
+        let t = world.trace(&sweep(
+            vec3(s(0.0), s(0.0), s(24.125)),
+            vec3(s(200.0), s(0.0), s(24.125)),
+        ));
+        assert!(t.hit(), "the wall should have stopped this");
+        assert_eq!(
+            t.triggers,
+            TriggerSet::START,
+            "the volume before the wall counts; the one beyond it does not"
+        );
+
+        // The same geometry without the wall reports both, which is what makes
+        // the assertion above about the clamp rather than about the volume.
+        let open = HullWorld::new(vec![floor()]).with_triggers(world.triggers().to_vec());
+        let t = open.trace(&sweep(
+            vec3(s(0.0), s(0.0), s(24.125)),
+            vec3(s(200.0), s(0.0), s(24.125)),
+        ));
+        assert_eq!(t.triggers, TriggerSet::START.with(TriggerSet::FINISH));
+    }
+
+    /// At a zero fraction the traversed prefix is the hull at rest, so the only
+    /// volumes reported are the ones the player is standing in — which the
+    /// previous committed sweep already reported. That is what makes an
+    /// abandoned move safe without a second rollback point in the mover.
+    #[test]
+    fn a_sweep_that_travels_nowhere_reports_only_what_it_is_standing_in() {
+        let world = HullWorld::new(vec![Hull::from_aabb(
+            vec3(s(-512.0), s(-512.0), s(0.0)),
+            vec3(s(512.0), s(512.0), s(512.0)),
+            SurfaceFlags::NONE,
+        )])
+        .with_triggers(vec![
+            TriggerHull::new(TriggerSet::START, gate(-16.0, 16.0)),
+            TriggerHull::new(TriggerSet::FINISH, gate(100.0, 104.0)),
+        ]);
+
+        let inside = vec3(s(0.0), s(0.0), s(128.0));
+        let t = world.trace(&sweep(inside, vec3(s(400.0), s(0.0), s(128.0))));
+        assert!(t.all_solid);
+        assert_eq!(t.fraction, s(0.0));
+        assert_eq!(
+            t.triggers,
+            TriggerSet::START,
+            "standing in one volume, nowhere near the other"
+        );
+    }
+
+    /// One trigger entity may own several brushes — a start line across an
+    /// L-shaped corridor really is two boxes. Inside any of them is inside.
+    #[test]
+    fn several_pieces_of_one_volume_are_one_volume() {
+        let world = HullWorld::new(vec![floor()]).with_triggers(vec![
+            TriggerHull::new(TriggerSet::START, gate(-500.0, -400.0)),
+            TriggerHull::new(TriggerSet::START, gate(100.0, 104.0)),
+        ]);
+        let t = world.trace(&sweep(
+            vec3(s(0.0), s(0.0), s(24.125)),
+            vec3(s(200.0), s(0.0), s(24.125)),
+        ));
+        assert_eq!(t.triggers, TriggerSet::START);
+        assert_eq!(world.trigger_coverage(), TriggerSet::START);
+    }
+
+    /// A world with no volumes answers exactly as it did before they existed —
+    /// bit for bit, and without paying for a second pass.
+    #[test]
+    fn a_world_without_volumes_is_unchanged() {
+        let world = HullWorld::new(vec![floor()]);
+        assert_eq!(world.trigger_coverage(), TriggerSet::NONE);
+        let s1 = sweep(
+            vec3(s(0.0), s(0.0), s(124.0)),
+            vec3(s(0.0), s(0.0), s(-76.0)),
+        );
+        let t = world.trace(&s1);
+        assert_eq!(t.triggers, TriggerSet::NONE);
+
+        // And attaching volumes the sweep does not reach changes nothing else.
+        let with = world.clone().with_triggers(vec![TriggerHull::new(
+            TriggerSet::FINISH,
+            gate(1000.0, 1004.0),
+        )]);
+        let u = with.trace(&s1);
+        assert_eq!(to_bits(t.fraction), to_bits(u.fraction));
+        assert_eq!(t.normal, u.normal);
+        assert_eq!(u.triggers, TriggerSet::NONE);
+    }
+
+    /// The checkpoint alphabet is 30 bits wide and does not collide with the
+    /// two lines.
+    #[test]
+    fn checkpoint_bits_are_distinct_from_the_start_and_finish_lines() {
+        let mut all = TriggerSet::START.with(TriggerSet::FINISH);
+        for i in 0..TriggerSet::MAX_CHECKPOINTS {
+            let bit = TriggerSet::checkpoint(i).expect("in range");
+            assert!(!all.intersects(bit), "checkpoint {i} reused a bit");
+            all = all.with(bit);
+        }
+        assert_eq!(all.0, u32::MAX);
+        assert_eq!(TriggerSet::checkpoint(TriggerSet::MAX_CHECKPOINTS), None);
     }
 
     #[test]

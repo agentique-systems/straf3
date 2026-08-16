@@ -26,7 +26,7 @@ use crate::cmd::{Buttons, UserCmd};
 use crate::num::{self, Scalar, Vec3, s, vec3};
 use crate::profile::{Hull, PhysicsProfile};
 use crate::state::{GroundState, PlayerState, SimState};
-use crate::world::{SurfaceFlags, Sweep, Trace, World};
+use crate::world::{SurfaceFlags, Sweep, Trace, TriggerSet, World};
 
 // ── Quake's internal constants ─────────────────────────────────────────────
 //
@@ -134,14 +134,34 @@ where
 /// thousands of simulations per second should not be forced to copy state it
 /// is about to overwrite. `step` is defined in terms of this one, so there is
 /// no second implementation to keep in agreement.
-pub fn step_in_place<W>(state: &mut SimState, cmd: &UserCmd, world: &W, profile: &PhysicsProfile)
+///
+/// # The return value
+///
+/// The timing volumes the player's hull passed through during this command.
+/// [`SimState::run`] is already advanced from [`TriggerSet::START`] and
+/// [`TriggerSet::FINISH`] before this returns, so a caller that only wants a
+/// time can ignore it — and every existing caller does.
+///
+/// It is returned rather than stored because checkpoint splits are a *caller's*
+/// concern and [`SimState`] is the thing a recording's digest folds. Growing
+/// `SimState` with a checkpoint table would change every digest ever taken, to
+/// carry data the physics never reads. So the alphabet crosses the seam and the
+/// bookkeeping stays above it.
+///
+/// [`SimState::run`]: crate::SimState::run
+pub fn step_in_place<W>(
+    state: &mut SimState,
+    cmd: &UserCmd,
+    world: &W,
+    profile: &PhysicsProfile,
+) -> TriggerSet
 where
     W: World + ?Sized,
 {
     // A zero-length command advances nothing. Returning early rather than
     // integrating by zero keeps `tick` counting commands that did something.
     if cmd.duration_ms == 0 {
-        return;
+        return TriggerSet::NONE;
     }
 
     // TODO(wave3): Q3's `PmoveSingle` splits a long command into several
@@ -160,10 +180,30 @@ where
     state.player.view = cmd.view;
 
     let mut pm = Pmove::new(cmd, world, profile, dt);
-    pm.run(&mut state.player, ms);
+    let touched = pm.run(&mut state.player, ms);
 
     state.tick += 1;
     state.time_ms += u32::from(ms);
+
+    // The clock is read at the command boundary, in whole milliseconds, from
+    // the integer sum of command durations — never interpolated within the
+    // command that crossed the line. A sub-tick time would be a float, and a
+    // verifier would have to reproduce it bit-exactly for no benefit.
+    //
+    // The consequence, accepted deliberately (ARCHITECTURE C4): times quantise
+    // to the command duration — multiples of 8 ms at 125 Hz, 4 ms at 250 Hz.
+    //
+    // Start before finish, so a command that crosses both — a course whose
+    // lines touch, or a player teleported across the map — yields zero rather
+    // than a run that never started.
+    if touched.contains(TriggerSet::START) {
+        state.run.start(state.time_ms);
+    }
+    if touched.contains(TriggerSet::FINISH) {
+        state.run.finish(state.time_ms);
+    }
+
+    touched
 }
 
 /// Apply a whole sequence of commands in order.
@@ -252,6 +292,16 @@ struct Pmove<'a, W: World + ?Sized> {
     walking: bool,
     ground_normal: Vec3,
     ground_surface: SurfaceFlags,
+
+    /// Timing volumes the hull has passed through so far this command.
+    ///
+    /// Q3 has no equivalent; this is ARCHITECTURE C4's accumulator. It sits
+    /// beside `ground_plane` and `walking` because it has the same lifetime —
+    /// one command — and is consumed by [`step_in_place`] at the end of
+    /// [`Pmove::run`]. When `pmove_msec` sub-stepping lands, that consumption
+    /// point makes the clock finer without making it a float and without
+    /// changing any rule here.
+    touched: TriggerSet,
 }
 
 impl<'a, W: World + ?Sized> Pmove<'a, W> {
@@ -300,11 +350,13 @@ impl<'a, W: World + ?Sized> Pmove<'a, W> {
             walking: false,
             ground_normal: num::ZERO,
             ground_surface: SurfaceFlags::NONE,
+            touched: TriggerSet::NONE,
         }
     }
 
-    /// Quake's `PmoveSingle`, in its order.
-    fn run(&mut self, p: &mut PlayerState, ms: u16) {
+    /// Quake's `PmoveSingle`, in its order. Returns the timing volumes the
+    /// player's hull passed through.
+    fn run(&mut self, p: &mut PlayerState, ms: u16) -> TriggerSet {
         // `PmoveSingle`: releasing the jump input re-arms the jump.
         if !self.jump_pressed {
             p.jump_held = false;
@@ -324,10 +376,23 @@ impl<'a, W: World + ?Sized> Pmove<'a, W> {
         // the state the next command starts from — describes where the player
         // ended up, not where they began.
         self.ground_trace(p);
+
+        self.touched
     }
 
     // ── traces ─────────────────────────────────────────────────────────────
 
+    /// A **probe**: a question about geometry the hull does not enter.
+    ///
+    /// Nothing swept here counts towards [`Self::touched`], and that is the
+    /// whole distinction this pair of methods exists to make. The ground probe
+    /// reaches `ground_trace_probe` units below the player's feet every command;
+    /// `PM_CorrectAllSolid` fires 27 zero-length point tests; the step-down
+    /// probe asks whether stepping is allowed before anything moves. OR-ing any
+    /// of them into the accumulator credits a player with a finish line they
+    /// never touched, which on a leaderboard is exactly as wrong as missing one.
+    ///
+    /// Use [`Self::sweep_to`] when the hull really is carried along the sweep.
     fn sweep(&self, from: Vec3, to: Vec3) -> Trace {
         self.world.trace(&Sweep {
             start: from,
@@ -337,14 +402,39 @@ impl<'a, W: World + ?Sized> Pmove<'a, W> {
         })
     }
 
-    /// A sweep, plus the point it actually reached.
+    /// A **committed sweep**: the hull is carried along it. Returns the trace
+    /// and the point it actually reached.
     ///
     /// The hull is held [`SURFACE_CLIP_EPSILON`] clear of whatever it hit,
     /// measured along the surface normal, which is what Q3's collision code
     /// does and what keeps a resting player out of the floor. See that
     /// constant's documentation.
-    fn sweep_to(&self, from: Vec3, to: Vec3) -> (Trace, Vec3) {
+    ///
+    /// # Why the accumulator is fed here and only here
+    ///
+    /// These are precisely ARCHITECTURE C4's three "counts" call sites —
+    /// `slide_move`'s bump loop, and `step_slide_move`'s up-lift and
+    /// down-drop — and every one of C4's "does not count" sites goes through
+    /// [`Self::sweep`] instead. Making that a property of *which method you
+    /// call* rather than a table a future reader has to consult is the point:
+    /// a new probe added with `sweep` is silently correct, and a new committed
+    /// move added with `sweep_to` is silently correct.
+    ///
+    /// Three of the committed sites do not always commit the motion they
+    /// swept — `slide_move` returns early on `all_solid` and skips the position
+    /// write on a zero fraction; `step_slide_move`'s lift and drop are both
+    /// conditional. None of them needs special handling here, because
+    /// [`Trace::triggers`] reports the **traversed prefix** and `all_solid`
+    /// implies a zero fraction: an abandoned move traverses nothing, and a
+    /// zero-fraction bump reports only the volumes the player is standing in,
+    /// which the previous committed sweep already reported. `TriggerSet` is
+    /// OR-ed, so re-reporting is idempotent.
+    ///
+    /// The one case the traversed-prefix rule does *not* cover is the genuine
+    /// rollback in [`Self::step_slide_move`]; see the savepoint there.
+    fn sweep_to(&mut self, from: Vec3, to: Vec3) -> (Trace, Vec3) {
         let trace = self.sweep(from, to);
+        self.touched = self.touched.with(trace.triggers);
         let motion = to - from;
         let mut fraction = trace.fraction;
         if trace.hit() && !trace.start_solid {
@@ -760,7 +850,7 @@ impl<'a, W: World + ?Sized> Pmove<'a, W> {
     /// time clipping velocity to every plane touched so far. The plane set is
     /// bounded by [`PhysicsProfile::max_clip_planes`]; running out means
     /// stopping dead, which is what happens in a tight corner.
-    fn slide_move(&self, p: &mut PlayerState, gravity: bool) -> bool {
+    fn slide_move(&mut self, p: &mut PlayerState, gravity: bool) -> bool {
         let mut primal_velocity = p.velocity;
         let mut end_velocity = num::ZERO;
 
@@ -916,9 +1006,12 @@ impl<'a, W: World + ?Sized> Pmove<'a, W> {
     /// This is why Quake players walk up stairs without jumping and without the
     /// camera bobbing over each tread — the whole move is re-run from
     /// [`PhysicsProfile::step_height`] up, then dropped back down.
-    fn step_slide_move(&self, p: &mut PlayerState, gravity: bool) {
+    fn step_slide_move(&mut self, p: &mut PlayerState, gravity: bool) {
         let start_o = p.origin;
         let start_v = p.velocity;
+        // The savepoint for ARCHITECTURE C4's rule 2, captured exactly where
+        // origin and velocity are. See where it is restored, below.
+        let start_triggers = self.touched;
 
         if !self.slide_move(p, gravity) {
             return; // went exactly where we wanted on the first try
@@ -935,12 +1028,37 @@ impl<'a, W: World + ?Sized> Pmove<'a, W> {
         let up = start_o + num::UP * self.profile.step_height;
         let (up_trace, up_pos) = self.sweep_to(start_o, up);
         if up_trace.all_solid {
-            return; // no headroom to step into
+            // No headroom: the first attempt's result stands, and so must its
+            // triggers. Rolling back here would be a bug — the player really
+            // did move along that path. The early return and the successful
+            // lift look symmetric and are not, which is why the traversed-prefix
+            // rule rather than a second savepoint is what makes the aborted lift
+            // safe: `all_solid` implies a zero fraction, so the lift above
+            // traversed nothing and contributed nothing.
+            return;
         }
 
         let step_size = up_pos.z - start_o.z;
         p.origin = up_pos;
         p.velocity = start_v;
+        // Rule 2 — the one genuine rollback. The first `slide_move` really did
+        // traverse its path, and only now is it discarded: origin is overwritten
+        // with the stepped-up position and velocity with the pre-attempt value.
+        // Triggers accumulated during a traversal that is subsequently un-done
+        // must be un-done with it, so the accumulator is restored alongside
+        // exactly those two writes.
+        //
+        // Deliberate refinement over the code sketch in ARCHITECTURE C4, which
+        // restores the bare savepoint here. That would also discard the lift's
+        // own contribution — and the lift is not part of the abandoned attempt:
+        // the hull really is carried from `start_o` to `up_pos` and stays there.
+        // C4's governing invariant is "a trigger is touched iff the player's
+        // hull overlapped it somewhere on the path the player actually
+        // occupied", and the lift is such a path, so its volumes are kept while
+        // the discarded attempt's are dropped. The two differ only when a volume
+        // sits within `step_height` directly overhead and was not on the first
+        // attempt's path; in that case the sketch under-reports.
+        self.touched = start_triggers.with(up_trace.triggers);
 
         self.slide_move(p, gravity);
 

@@ -29,7 +29,7 @@
 
 use straf3_sim::num::{Scalar, Vec3, s, vec3};
 use straf3_sim::state::GroundState;
-use straf3_sim::world::{SurfaceFlags, Sweep, Trace, World};
+use straf3_sim::world::{SurfaceFlags, Sweep, Trace, TriggerSet, World};
 use straf3_sim::{Buttons, PhysicsProfile, SimState, UserCmd, ViewAngles, run, step};
 
 /// The command duration used throughout: 125 Hz, spec D2's default.
@@ -79,6 +79,7 @@ impl World for SlopedGround {
                 surface: self.surface,
                 start_solid: true,
                 all_solid: d1 < s(0.0),
+                triggers: TriggerSet::NONE,
             };
         }
         if d1 >= s(0.0) {
@@ -90,6 +91,7 @@ impl World for SlopedGround {
             surface: self.surface,
             start_solid: false,
             all_solid: false,
+            triggers: TriggerSet::NONE,
         }
     }
 }
@@ -203,6 +205,7 @@ impl World for Boxes {
                     surface: SurfaceFlags::NONE,
                     start_solid: false,
                     all_solid: false,
+                    triggers: TriggerSet::NONE,
                 };
             }
         }
@@ -214,6 +217,7 @@ impl World for Boxes {
                 surface: SurfaceFlags::NONE,
                 start_solid: true,
                 all_solid,
+                triggers: TriggerSet::NONE,
             };
         }
         best
