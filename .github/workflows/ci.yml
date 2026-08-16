@@ -53,6 +53,23 @@ jobs:
       - name: Dependency seam and float determinism
         run: cargo xtask check-seam
 
+      # The crates under probes/ are standalone on purpose — own [workspace],
+      # own Cargo.lock — so not one line of them is built by the Build, Clippy
+      # or Test steps above. That is not a theoretical gap: C3 changed
+      # ViewAngles to 16-bit, every producer inside the workspace was updated,
+      # this job would have stayed green, and two probes stopped compiling.
+      # One of them was probes/wasm-determinism, the only path that exercises
+      # wasm under a real browser.
+      #
+      # This step is deliberately placed after Build/Test rather than before:
+      # a probe failing to compile is a weaker signal than the workspace
+      # failing, and reading them the other way round wastes a diagnosis.
+      #
+      # Runs on this job, not the fast gate, because probes/wasm-render pulls
+      # winit and wgpu and needs the system libraries installed above.
+      - name: Probes still compile
+        run: cargo xtask check-probes
+
   seam-only:
     # A fast gate that needs no system libraries and compiles nothing but
     # xtask: the architectural rule and the determinism rule are the things

@@ -249,14 +249,18 @@ impl Bot {
             // button is pressed only when there is ground to leave.
             let grounded = matches!(st.player.ground, GroundState::Grounded { .. });
             let buttons = if c.jump && grounded { Buttons::JUMP } else { Buttons::NONE };
-            let yaw = st.player.view.yaw + c.yaw_rate;
+            // C3 made ViewAngles 16-bit at the command boundary, so the turn
+            // has to accumulate in degrees and quantise on the way into the
+            // command — which is what a real recording does, and what the
+            // state carries back on the next tick.
+            let yaw = st.player.view.yaw_degrees() + c.yaw_rate;
             let cmd = UserCmd {
                 duration_ms: self.rate.command_millis(),
                 forward_move: c.forward,
                 right_move: c.right,
                 up_move: 0,
                 buttons,
-                view: ViewAngles { pitch: s(0.0), yaw, roll: s(0.0) },
+                view: ViewAngles::from_degrees(s(0.0), yaw, s(0.0)),
             };
             step_in_place(&mut st, &cmd, &course.world, profile);
         }
@@ -326,7 +330,7 @@ fn ballistic(
         right_move: 0,
         up_move: 0,
         buttons: Buttons::NONE,
-        view: ViewAngles { pitch: s(0.0), yaw: s(90.0), roll: s(0.0) },
+        view: ViewAngles::from_degrees(s(0.0), s(90.0), s(0.0)),
     };
     step_in_place(&mut st, &still, &course.world, profile);
     st.player.velocity = vec3(s(0.0), speed, s(0.0));
