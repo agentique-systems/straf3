@@ -12,10 +12,22 @@
 //!     jumping within the run-up each has.
 //! H4. Each jump's stated landing window is what the simulation actually
 //!     produces when a player leaves the lip at that speed.
+//! H5. The course's trigger volumes, fed to the tracer as `TriggerHull`s, drive
+//!     `RunState` from geometry alone: a bot that runs the corridor crosses
+//!     `target_startTimer`, both checkpoints and `target_stopTimer` in order,
+//!     and comes out the other side with a `u32` millisecond time.
 //!
 //! Any of these can come back false. H3 is the one most likely to: the arithmetic
 //! that produced those numbers is a point-mass ballistic model, and the real
 //! mover clips velocity into every plane it touches.
+//!
+//! H5 also carries a second, sharper question, which is why it prints two lists
+//! rather than one. Sampling the trajectory once per decision window and asking
+//! "was the hull inside a box at that instant" is the cheap way to detect a
+//! crossing and is the bug ARCHITECTURE C4 exists to prevent; the accumulator
+//! `Trace::triggers` feeds is the honest one. Both are printed. Where they
+//! agree, that is a measurement about *this* course's volumes being generous,
+//! not a licence to use the cheap one.
 //!
 //! # Why this probe does not use `straf3-map`
 //!
@@ -30,13 +42,17 @@
 //! cd probes/coil-course
 //! cargo run --release -- ../../assets/maps/coil.map | tee results/coil.txt
 //! ```
+//!
+//! It takes a few minutes: H3's bot brute-forces 180 controls over a 40-tick
+//! lookahead at every 8-tick decision window, all the way to the finish line.
 
 use std::collections::BTreeMap;
 use std::fs::File;
 
-use straf3_collision::{Hull, HullWorld, Plane};
+use straf3_collision::{Hull, HullWorld, Plane, TriggerHull};
 use straf3_sim::num::{Scalar, Vec3, s, vec3};
-use straf3_sim::world::{SurfaceFlags, Sweep, World};
+use straf3_sim::state::RunState;
+use straf3_sim::world::{SurfaceFlags, Sweep, TriggerSet, World};
 use straf3_sim::{
     Buttons, GroundState, PhysicsProfile, SimState, TickRate, UserCmd, ViewAngles, step_in_place,
 };
@@ -44,6 +60,10 @@ use straf3_sim::{
 /// A trigger volume, kept as the axis-aligned box it is authored as.
 struct Trigger {
     target: String,
+    /// What crossing it means to the run clock, as the bit the simulation reads.
+    set: TriggerSet,
+    /// The classname the `target` key resolved to, or `?`.
+    resolved: String,
     mins: Vec3,
     maxs: Vec3,
 }
@@ -96,21 +116,58 @@ fn load(path: &str) -> Course {
     let mut spawn = Vec3::ZERO;
     let mut spawn_yaw = s(0.0);
 
+    // What each `targetname` in the file is, so a trigger brush can be told
+    // what it means. The indirection is the Defrag convention: the brush the
+    // player crosses says only `"target" "t_start"`, and what `t_start` *is*
+    // lives in a point entity elsewhere in the file — so nothing can be
+    // classified until the whole entity list has been read once.
+    let mut targets: BTreeMap<String, String> = BTreeMap::new();
+    for ent in &map.entities {
+        if let (Some(name), Some(class)) = (key(ent, "targetname"), key(ent, "classname")) {
+            targets.insert(name.to_ascii_lowercase(), class.to_ascii_lowercase());
+        }
+    }
+    let mut next_checkpoint = 0u32;
+
     for ent in &map.entities {
         let class = key(ent, "classname").unwrap_or("");
         match class {
             "info_player_start" | "info_player_deathmatch" => {
-                spawn = key(ent, "origin").and_then(parse_origin).expect("spawn origin");
-                spawn_yaw = key(ent, "angle").and_then(|a| a.parse().ok()).unwrap_or(s(0.0));
+                spawn = key(ent, "origin")
+                    .and_then(parse_origin)
+                    .expect("spawn origin");
+                spawn_yaw = key(ent, "angle")
+                    .and_then(|a| a.parse().ok())
+                    .unwrap_or(s(0.0));
             }
             // Trigger brushes are volumes, not solids: they must never reach
             // the tracer as geometry or the player would bump into the finish
             // line. Their bounds come from the same planes all the same.
             "trigger_multiple" | "trigger_once" | "trigger_push" | "trigger_teleport" => {
+                let target = key(ent, "target").unwrap_or("<untargeted>").to_string();
+                let resolved = targets
+                    .get(&target.to_ascii_lowercase())
+                    .cloned()
+                    .unwrap_or_else(|| "?".to_string());
+                // The whole mapping from map data to the simulation's alphabet,
+                // in six lines. `straf3-sim` never sees any of these names.
+                let set = match resolved.as_str() {
+                    "target_starttimer" => TriggerSet::START,
+                    "target_stoptimer" => TriggerSet::FINISH,
+                    "target_checkpoint" => {
+                        let bit = TriggerSet::checkpoint(next_checkpoint)
+                            .expect("more checkpoints than bits");
+                        next_checkpoint += 1;
+                        bit
+                    }
+                    _ => TriggerSet::NONE,
+                };
                 for brush in &ent.brushes {
                     let (mins, maxs) = brush_bounds(brush);
                     triggers.push(Trigger {
-                        target: key(ent, "target").unwrap_or("<untargeted>").to_string(),
+                        target: target.clone(),
+                        set,
+                        resolved: resolved.clone(),
                         mins,
                         maxs,
                     });
@@ -128,17 +185,26 @@ fn load(path: &str) -> Course {
                         .collect();
                     let hull = Hull::from_planes(&planes, SurfaceFlags::NONE)
                         .expect("brush encloses no volume");
-                    textures.push(
-                        brush[0].texture.to_str().unwrap_or("?").to_string(),
-                    );
+                    textures.push(brush[0].texture.to_str().unwrap_or("?").to_string());
                     hulls.push(hull);
                 }
             }
         }
     }
 
+    // The volumes go into the world as `TriggerHull`s, so the run clock is
+    // driven by the geometry through `Trace::triggers` rather than by anything
+    // this probe samples on the side. Boxes rather than the authored planes:
+    // every trigger in coil.map is axis-aligned, and `brush_bounds` already
+    // derived the box.
+    let volumes: Vec<TriggerHull> = triggers
+        .iter()
+        .filter(|t| !t.set.is_empty())
+        .map(|t| TriggerHull::new(t.set, Hull::from_aabb(t.mins, t.maxs, SurfaceFlags::NONE)))
+        .collect();
+
     Course {
-        world: HullWorld::new(hulls),
+        world: HullWorld::new(hulls).with_triggers(volumes),
         triggers,
         spawn,
         spawn_yaw,
@@ -150,7 +216,9 @@ fn load(path: &str) -> Course {
 fn brush_bounds(brush: &quake_map::Brush) -> (Vec3, Vec3) {
     let planes: Vec<Plane> = brush
         .iter()
-        .map(|f| Plane::from_points(v(f.half_space[0]), v(f.half_space[1]), v(f.half_space[2])).unwrap())
+        .map(|f| {
+            Plane::from_points(v(f.half_space[0]), v(f.half_space[1]), v(f.half_space[2])).unwrap()
+        })
         .collect();
     let hull = Hull::from_planes(&planes, SurfaceFlags::NONE).expect("trigger encloses no volume");
     let mut lo = Vec3::splat(Scalar::INFINITY);
@@ -175,7 +243,13 @@ fn classify(normal: Vec3, profile: &PhysicsProfile) -> &'static str {
 }
 
 /// Drop a player hull straight down and report what it lands on.
-fn ground_under(course: &Course, x: Scalar, y: Scalar, from_z: Scalar, profile: &PhysicsProfile) -> Option<(Scalar, Vec3)> {
+fn ground_under(
+    course: &Course,
+    x: Scalar,
+    y: Scalar,
+    from_z: Scalar,
+    profile: &PhysicsProfile,
+) -> Option<(Scalar, Vec3)> {
     let half = profile.hull_half_extents();
     let offset = profile.hull_center_offset();
     let t = course.world.trace(&Sweep {
@@ -226,7 +300,12 @@ impl Bot {
             for right in [-127i8, 0, 127] {
                 for forward in [0i8, 127] {
                     for jump in [true, false] {
-                        out.push(Control { yaw_rate, right, forward, jump });
+                        out.push(Control {
+                            yaw_rate,
+                            right,
+                            forward,
+                            jump,
+                        });
                     }
                 }
             }
@@ -235,6 +314,12 @@ impl Bot {
     }
 
     /// Apply one control for `ticks`, returning the resulting state.
+    ///
+    /// Returns the volumes those commands passed through as well as the state.
+    /// Speculative lookahead calls throw that away — a future the bot considered
+    /// and did not take must not start the clock — and only the committed call
+    /// in [`Bot::run`] keeps it. That is the same distinction `Pmove` draws one
+    /// level down between a probe and a committed sweep.
     fn hold(
         &self,
         state: &SimState,
@@ -242,13 +327,18 @@ impl Bot {
         ticks: u32,
         course: &Course,
         profile: &PhysicsProfile,
-    ) -> SimState {
+    ) -> (SimState, TriggerSet) {
         let mut st = *state;
+        let mut touched = TriggerSet::NONE;
         for _ in 0..ticks {
             // Bunny hopping: Q3 requires releasing jump between hops, so the
             // button is pressed only when there is ground to leave.
             let grounded = matches!(st.player.ground, GroundState::Grounded { .. });
-            let buttons = if c.jump && grounded { Buttons::JUMP } else { Buttons::NONE };
+            let buttons = if c.jump && grounded {
+                Buttons::JUMP
+            } else {
+                Buttons::NONE
+            };
             // C3 made ViewAngles 16-bit at the command boundary, so the turn
             // has to accumulate in degrees and quantise on the way into the
             // command — which is what a real recording does, and what the
@@ -262,9 +352,9 @@ impl Bot {
                 buttons,
                 view: ViewAngles::from_degrees(s(0.0), yaw, s(0.0)),
             };
-            step_in_place(&mut st, &cmd, &course.world, profile);
+            touched = touched.with(step_in_place(&mut st, &cmd, &course.world, profile));
         }
-        st
+        (st, touched)
     }
 
     /// Run from `state` until `until_y`, or until `max_ticks` runs out.
@@ -276,34 +366,60 @@ impl Bot {
         max_ticks: u32,
         course: &Course,
         profile: &PhysicsProfile,
-    ) -> (SimState, Vec<(u32, Vec3, Scalar)>) {
+    ) -> (SimState, Vec<(u32, Vec3, Scalar)>, Vec<(u32, u32, String)>) {
         let controls = Self::controls();
         let mut trail = Vec::new();
+        let mut crossings: Vec<(u32, u32, String)> = Vec::new();
+        let mut seen = TriggerSet::NONE;
         let mut ticks = 0;
-        while ticks < max_ticks && state.player.origin.y < until_y {
+        while ticks < max_ticks
+            && state.player.origin.y < until_y
+            && !matches!(state.run, RunState::Finished { .. })
+        {
             let mut best = None;
             let mut best_score = Scalar::NEG_INFINITY;
             for &c in &controls {
-                let f = self.hold(&state, c, self.lookahead, course, profile);
+                let (f, _speculative) = self.hold(&state, c, self.lookahead, course, profile);
                 if !f.player.origin.is_finite() {
                     continue;
                 }
                 let speed = vec3(f.player.velocity.x, f.player.velocity.y, s(0.0)).length();
                 // Progress along the course dominates; speed breaks ties, which
                 // is what stops the bot trading its whole run for one long slide.
-                let score = f.player.origin.y + s(0.25) * speed - s(0.5) * (f.player.origin.z - state.player.origin.z).min(s(0.0));
+                let score = f.player.origin.y + s(0.25) * speed
+                    - s(0.5) * (f.player.origin.z - state.player.origin.z).min(s(0.0));
                 if score > best_score {
                     best_score = score;
                     best = Some(c);
                 }
             }
             let Some(c) = best else { break };
-            state = self.hold(&state, c, self.decide_every, course, profile);
+            let (next, touched) = self.hold(&state, c, self.decide_every, course, profile);
+            state = next;
             ticks += self.decide_every;
+
+            // Edge detection is the caller's job: the accumulator reports
+            // *overlapped this command*, and a player is inside a start volume
+            // for several commands running.
+            for volume in &course.triggers {
+                if volume.set.is_empty()
+                    || !touched.contains(volume.set)
+                    || seen.contains(volume.set)
+                {
+                    continue;
+                }
+                seen = seen.with(volume.set);
+                crossings.push((
+                    state.time_ms,
+                    state.run.elapsed_ms(state.time_ms).unwrap_or(0),
+                    volume.target.clone(),
+                ));
+            }
+
             let speed = vec3(state.player.velocity.x, state.player.velocity.y, s(0.0)).length();
             trail.push((ticks, state.player.origin, speed));
         }
-        (state, trail)
+        (state, trail, crossings)
     }
 }
 
@@ -334,7 +450,10 @@ fn ballistic(
     };
     step_in_place(&mut st, &still, &course.world, profile);
     st.player.velocity = vec3(s(0.0), speed, s(0.0));
-    let jump = UserCmd { buttons: Buttons::JUMP, ..still };
+    let jump = UserCmd {
+        buttons: Buttons::JUMP,
+        ..still
+    };
     step_in_place(&mut st, &jump, &course.world, profile);
 
     let mut airborne_seen = false;
@@ -356,7 +475,9 @@ fn ballistic(
 // ---------------------------------------------------------------------------
 
 fn main() {
-    let path = std::env::args().nth(1).unwrap_or_else(|| "../../assets/maps/coil.map".into());
+    let path = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "../../assets/maps/coil.map".into());
     let profile = PhysicsProfile::cpm();
     let rate = TickRate::HZ_125;
     let course = load(&path);
@@ -368,8 +489,24 @@ fn main() {
     println!("solids       {} hulls", course.world.hulls().len());
     println!("triggers     {}", course.triggers.len());
     for t in &course.triggers {
-        println!("   {:<12} {:?} .. {:?}", t.target, t.mins, t.maxs);
+        let meaning = if t.set == TriggerSet::START {
+            "START".to_string()
+        } else if t.set == TriggerSet::FINISH {
+            "FINISH".to_string()
+        } else if t.set.is_empty() {
+            "(untimed)".to_string()
+        } else {
+            format!("checkpoint bit {:#010x}", t.set.0)
+        };
+        println!(
+            "   {:<12} -> {:<20} {:<24} {:?} .. {:?}",
+            t.target, t.resolved, meaning, t.mins, t.maxs
+        );
     }
+    println!(
+        "clock        the world reports {:#010x}; a timeable map needs START|FINISH",
+        course.world.trigger_coverage().0
+    );
     let bounds = course.world.bounds().unwrap();
     println!("bounds       {:?} .. {:?}", bounds.0, bounds.1);
     println!("profile      cpm, {} Hz", rate.hz());
@@ -386,12 +523,21 @@ fn main() {
         "spawn {:?} yaw {}  start_solid={}  all_solid={}",
         course.spawn, course.spawn_yaw, t.start_solid, t.all_solid
     );
-    let under = ground_under(&course, course.spawn.x, course.spawn.y, course.spawn.z, &profile);
+    let under = ground_under(
+        &course,
+        course.spawn.x,
+        course.spawn.y,
+        course.spawn.z,
+        &profile,
+    );
     println!("ground under spawn: {under:?}  (want surface z=0, normal z=1)");
 
     // ---- H2: the running surface -----------------------------------------
     println!("\n== H2  surface survey along x=0, every 32 units of y ==");
-    println!("{:>7} {:>9} {:>9} {:>10}", "y", "surface", "normal.z", "state");
+    println!(
+        "{:>7} {:>9} {:>9} {:>10}",
+        "y", "surface", "normal.z", "state"
+    );
     let mut y = s(-800.0);
     let mut gaps: Vec<Scalar> = Vec::new();
     let mut families: BTreeMap<&str, (Scalar, Scalar, u32)> = BTreeMap::new();
@@ -425,13 +571,31 @@ fn main() {
     println!("\n== H4  jump gates, launched along +Y at a sweep of speeds ==");
     let gates: [(&str, Vec3, Scalar, Scalar); 3] = [
         // (name, launch origin (feet on the lip), first speed, step)
-        ("ramp-wave shortcut", vec3(s(0.0), s(1780.0), s(112.0 + 24.0)), s(350.0), s(25.0)),
-        ("the gully           ", vec3(s(0.0), s(2292.0), s(128.0 + 24.0)), s(450.0), s(25.0)),
-        ("the finish          ", vec3(s(0.0), s(3124.0), s(64.0 + 24.0)), s(350.0), s(25.0)),
+        (
+            "ramp-wave shortcut",
+            vec3(s(0.0), s(1780.0), s(112.0 + 24.0)),
+            s(350.0),
+            s(25.0),
+        ),
+        (
+            "the gully           ",
+            vec3(s(0.0), s(2292.0), s(128.0 + 24.0)),
+            s(450.0),
+            s(25.0),
+        ),
+        (
+            "the finish          ",
+            vec3(s(0.0), s(3124.0), s(64.0 + 24.0)),
+            s(350.0),
+            s(25.0),
+        ),
     ];
     for (name, origin, first, stepping) in gates {
         println!("\n-- {name} from {:?}", origin);
-        println!("{:>8} {:>10} {:>9} {:>10}", "ups", "landed y", "landed z", "exit ups");
+        println!(
+            "{:>8} {:>10} {:>9} {:>10}",
+            "ups", "landed y", "landed z", "exit ups"
+        );
         let mut sp = first;
         while sp <= s(1000.0) {
             let (end, exit) = ballistic(&course, origin, sp, &profile, rate);
@@ -442,32 +606,78 @@ fn main() {
 
     // ---- H3: is that speed reachable? ------------------------------------
     println!("\n== H3  strafe-jumping from the spawn ==");
-    let bot = Bot { rate, lookahead: 40, decide_every: 8 };
+    let bot = Bot {
+        rate,
+        lookahead: 40,
+        decide_every: 8,
+    };
     let start = SimState::spawned_at(course.spawn, course.spawn_yaw);
-    let (end, trail) = bot.run(start, s(1780.0), 5_000, &course, &profile);
-    println!("{:>7} {:>9} {:>9} {:>9} {:>9}", "tick", "x", "y", "z", "ups");
+    // Run for the finish line, not for a y coordinate: `Bot::run` stops when
+    // `RunState` says the clock has stopped. The y limit is only a backstop for
+    // a bot that gets past the finish volume without crossing it.
+    let (end, trail, crossings) = bot.run(start, s(3600.0), 20_000, &course, &profile);
+    println!(
+        "{:>7} {:>9} {:>9} {:>9} {:>9}",
+        "tick", "x", "y", "z", "ups"
+    );
     for (t, p, sp) in trail.iter().step_by(4) {
         println!("{t:>7} {:>9.0} {:>9.0} {:>9.0} {sp:>9.0}", p.x, p.y, p.z);
     }
     let peak = trail.iter().map(|(_, _, s)| *s).fold(s(0.0), Scalar::max);
     println!(
         "\nreached y={:.0} z={:.0} in {} ms; peak horizontal speed {peak:.0} ups",
-        end.player.origin.y,
-        end.player.origin.z,
-        end.time_ms
+        end.player.origin.y, end.player.origin.z, end.time_ms
     );
 
-    // Which triggers did the bot cross on the way?
-    println!("\n== triggers the bot's path overlapped ==");
-    let mut hit: Vec<&str> = Vec::new();
+    // ---- H5: does the geometry produce a time? ----------------------------
+    //
+    // The two ways of asking, side by side. The first samples the trajectory
+    // once per decision window and asks whether the hull overlapped a box at
+    // that instant; the second is the accumulator the simulation itself keeps,
+    // fed by every committed sweep inside every command. The gap between them
+    // is the bug ARCHITECTURE C4 exists to prevent, and it is reported rather
+    // than argued.
+    println!("\n== H5  the run clock ==");
+    let mut sampled: Vec<&str> = Vec::new();
     for (_, p, _) in &trail {
         for tr in &course.triggers {
-            if tr.overlaps(*p, half, offset) && !hit.contains(&tr.target.as_str()) {
-                hit.push(&tr.target);
+            if tr.overlaps(*p, half, offset) && !sampled.contains(&tr.target.as_str()) {
+                sampled.push(&tr.target);
             }
         }
     }
-    println!("{hit:?}   (sampled once per decision window, so this under-reports)");
+    println!("sampled once per decision window : {sampled:?}");
+    let swept: Vec<&str> = crossings.iter().map(|(_, _, n)| n.as_str()).collect();
+    println!("swept, from Trace::triggers      : {swept:?}");
+
+    // The bot commits 8 commands per decision, so this column is the end of the
+    // window a crossing was detected in, not the command that crossed. The
+    // clock itself has no such coarseness — `RunState` below is stamped by the
+    // command that touched the line — and the two are printed together rather
+    // than one being passed off as the other.
+    println!("\n{:>12} {:>10}  volume", "window end", "run ms");
+    for (at, elapsed, name) in &crossings {
+        println!("{at:>12} {elapsed:>10}  {name}");
+    }
+    match end.run {
+        RunState::NotStarted => println!("\nclock: never started"),
+        RunState::Running { started_at_ms } => println!(
+            "\nclock: RUNNING, started at {started_at_ms} ms, {} ms elapsed at the cut-off",
+            end.run.elapsed_ms(end.time_ms).unwrap_or(0)
+        ),
+        RunState::Finished {
+            started_at_ms,
+            finished_at_ms,
+        } => {
+            let ms = finished_at_ms - started_at_ms;
+            println!(
+                "\nclock: FINISHED  start {started_at_ms} ms  finish {finished_at_ms} ms  \
+                 time {}.{:03} s ({ms} ms, u32)",
+                ms / 1000,
+                ms % 1000
+            );
+        }
+    }
 
     println!("\n== texture families in the compiled solids ==");
     let mut counts: BTreeMap<&str, u32> = BTreeMap::new();

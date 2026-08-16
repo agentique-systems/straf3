@@ -103,4 +103,4 @@ pub use cmd::{
 pub use profile::PhysicsProfile;
 pub use state::{GroundState, PlayerState, RunState, SimState, Timers};
 pub use step::{run, step, step_in_place};
-pub use world::{SurfaceFlags, Sweep, Trace, World};
+pub use world::{SurfaceFlags, Sweep, Trace, TriggerSet, World};
