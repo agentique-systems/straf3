@@ -308,11 +308,14 @@ fn parse(text: &str) -> Result<Input, String> {
                     right_move: axis(&f, 3).map_err(&at)?,
                     up_move: axis(&f, 4).map_err(&at)?,
                     buttons: buttons(f.get(5).copied().unwrap_or("-")).map_err(&at)?,
-                    view: ViewAngles {
-                        pitch: num(&f, 6).unwrap_or(s(0.0)),
-                        yaw: num(&f, 7).unwrap_or(yaw),
-                        roll: num(&f, 8).unwrap_or(s(0.0)),
-                    },
+                    // Written as degrees, carried as Q3's 16-bit angles
+                    // (contract item C3): quantising here is what makes the
+                    // command in this file the command the simulation ran.
+                    view: ViewAngles::from_degrees(
+                        num(&f, 6).unwrap_or(s(0.0)),
+                        num(&f, 7).unwrap_or(yaw),
+                        num(&f, 8).unwrap_or(s(0.0)),
+                    ),
                 };
                 for _ in 0..repeat {
                     cmds.push(cmd);

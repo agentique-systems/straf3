@@ -1,7 +1,7 @@
 //! Everything the simulation remembers between commands.
 
 use crate::cmd::ViewAngles;
-use crate::num::{Scalar, Vec3, s, to_bits};
+use crate::num::{Scalar, Vec3, to_bits};
 
 /// Whether the player is standing on something.
 ///
@@ -238,17 +238,18 @@ pub struct SimState {
 
 impl SimState {
     /// A state with the player standing still at `spawn`, looking along
-    /// `yaw`, clock not started.
+    /// `yaw` degrees, clock not started.
+    ///
+    /// `yaw` is in degrees and is quantised to a 16-bit view angle on the way
+    /// in (contract item C3) — a spawn yaw is an input like any other, and a
+    /// spawn the simulation could not have been *commanded* into would make
+    /// the first tick of a replay unreproducible.
     #[must_use]
     pub fn spawned_at(spawn: Vec3, yaw: Scalar) -> Self {
         Self {
             player: PlayerState {
                 origin: spawn,
-                view: ViewAngles {
-                    pitch: s(0.0),
-                    yaw,
-                    roll: s(0.0),
-                },
+                view: ViewAngles::looking_along(yaw),
                 ..PlayerState::default()
             },
             ..Self::default()
@@ -292,9 +293,13 @@ impl SimState {
 
         fold_vec(self.player.origin, &mut h);
         fold_vec(self.player.velocity, &mut h);
-        fold_scalar(self.player.view.pitch, &mut h);
-        fold_scalar(self.player.view.yaw, &mut h);
-        fold_scalar(self.player.view.roll, &mut h);
+        // The view folds as the 16-bit angles it is, not as the degrees they
+        // stand for: the shorts are the recorded value, and folding a derived
+        // float would put a conversion between the recording and the digest
+        // that verifies it.
+        fold_u32(u32::from(self.player.view.pitch), &mut h);
+        fold_u32(u32::from(self.player.view.yaw), &mut h);
+        fold_u32(u32::from(self.player.view.roll), &mut h);
         match self.player.ground {
             GroundState::Airborne => fold_u32(0, &mut h),
             GroundState::Grounded { normal } => {
@@ -337,6 +342,7 @@ impl SimState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::num::s;
     use crate::num::vec3;
 
     #[test]

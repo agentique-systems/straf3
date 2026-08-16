@@ -40,11 +40,7 @@ fn interesting_commands(rate: TickRate) -> Vec<UserCmd> {
             } else {
                 Buttons::NONE
             },
-            view: ViewAngles {
-                pitch: s(-3.3),
-                yaw,
-                roll: s(0.0),
-            },
+            view: ViewAngles::from_degrees(s(-3.3), yaw, s(0.0)),
         });
     }
     cmds
@@ -121,8 +117,18 @@ fn a_single_changed_input_bit_changes_the_result() {
     let cmds = interesting_commands(rate);
     let reference = run(&spawn_state(), &cmds, &world, &profile);
 
-    // A thousandth of a degree on one mouse angle — far below anything a mouse
-    // can produce — must change the whole run.
+    // One 16-bit step of view angle — 0.0055°, a twentieth of the smallest
+    // motion a default-sensitivity mouse can report — must change the whole
+    // run.
+    //
+    // One *step* and not a thousandth of a degree, and the difference is
+    // contract item C3 rather than a tolerance: the view angle in a command is
+    // one of 65 536 values, so a thousandth of a degree is not a smaller input
+    // than a step, it is *no input at all*. The command it would produce is
+    // bit-identical to the one it was nudged from, which is asserted below —
+    // that finiteness is what makes a recording exactly reproducible, and
+    // testing sensitivity to a difference the format cannot express would be
+    // testing a claim the type has already refuted.
     //
     // Command 1 and not command 500, and the reason is a real property of Quake
     // movement rather than a convenience. `PM_Accelerate` grants nothing when
@@ -135,23 +141,46 @@ fn a_single_changed_input_bit_changes_the_result() {
     // accelerating tests the sensitivity that exists rather than asserting one
     // that would only be true if the clamp were missing.
     let mut yaw_moved = cmds.clone();
-    yaw_moved[1].view.yaw += s(0.001);
+    yaw_moved[1].view.yaw += 1;
     assert_ne!(
         reference.checksum(),
         run(&spawn_state(), &yaw_moved, &world, &profile).checksum(),
-        "a thousandth of a degree of mouse movement did not change the run"
+        "one step of mouse movement did not change the run"
     );
 
     // And with the clamp taken out of the argument: nudge every command by the
-    // same thousandth of a degree, which no accelerating player can absorb.
+    // same single step, which no accelerating player can absorb.
     let mut all_moved = cmds.clone();
     for c in &mut all_moved {
-        c.view.yaw += s(0.001);
+        c.view.yaw += 1;
     }
     assert_ne!(
         reference.checksum(),
         run(&spawn_state(), &all_moved, &world, &profile).checksum(),
         "a run-long mouse offset did not change the run"
+    );
+
+    // The other side of C3, and the reason the nudge above is a step: a view
+    // angle a thousandth of a degree away from the reference does not produce
+    // a different run, because it does not produce a different *command*. The
+    // input space is finite, so there is nothing between two adjacent angles
+    // for a recording to fail to carry.
+    let mut sub_quantum = cmds.clone();
+    for c in &mut sub_quantum {
+        c.view = ViewAngles::from_degrees(
+            c.view.pitch_degrees() + s(0.001),
+            c.view.yaw_degrees() + s(0.001),
+            c.view.roll_degrees(),
+        );
+    }
+    assert_eq!(
+        cmds, sub_quantum,
+        "a sub-quantum nudge produced a different command: the view angle is \
+         not quantised at the command boundary"
+    );
+    assert_eq!(
+        reference.checksum(),
+        run(&spawn_state(), &sub_quantum, &world, &profile).checksum()
     );
 
     // And the movement axes, which reach the physics through a different path.

@@ -71,8 +71,11 @@ impl Camera {
 
         Self {
             eye: origin + vec3(s(0.0), s(0.0), eye_height),
-            pitch: lerp_angle(prev.view.pitch, curr.view.pitch, t),
-            yaw: lerp_angle(prev.view.yaw, curr.view.yaw, t),
+            // Degrees, out of the command's 16-bit angles (C3). `lerp_angle`
+            // takes the short way round, so the `[0, 360)` range those come
+            // back in is not a discontinuity the camera can see.
+            pitch: lerp_angle(prev.view.pitch_degrees(), curr.view.pitch_degrees(), t),
+            yaw: lerp_angle(prev.view.yaw_degrees(), curr.view.yaw_degrees(), t),
             fov_x: DEFAULT_FOV_X,
         }
     }
@@ -133,11 +136,7 @@ mod tests {
     fn player(origin: Vec3, pitch: Scalar, yaw: Scalar) -> PlayerState {
         PlayerState {
             origin,
-            view: ViewAngles {
-                pitch,
-                yaw,
-                roll: s(0.0),
-            },
+            view: ViewAngles::from_degrees(pitch, yaw, s(0.0)),
             ..PlayerState::default()
         }
     }

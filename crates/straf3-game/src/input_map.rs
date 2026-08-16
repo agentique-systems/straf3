@@ -17,7 +17,11 @@
 //! - no mouse deltas — `view` is absolute, accumulated in
 //!   [`straf3_platform::MouseLook`] and already whole when it arrives here;
 //! - no analogue axes — the command axes are Quake's signed bytes, because
-//!   keys are digital and an integer cannot smuggle a NaN into the physics.
+//!   keys are digital and an integer cannot smuggle a NaN into the physics;
+//! - no full-precision view angle — [`straf3_sim::ViewAngles`] is 16-bit per
+//!   axis (contract item C3), quantised by [`straf3_platform::MouseLook::angles`]
+//!   as the accumulator's value crosses into the command. What the recording
+//!   carries is what the simulation consumed, exactly.
 //!
 //! # Why the two spellings of jump are both sent
 //!
@@ -151,7 +155,8 @@ mod tests {
         assert_eq!(cmd.right_move, 127);
         assert!(cmd.buttons.contains(Buttons::JUMP));
         assert_eq!(cmd.up_move, 127);
-        assert_eq!(cmd.view.yaw, s(45.0));
+        assert_eq!(cmd.view.yaw, straf3_sim::angle_to_short(s(45.0)));
+        assert_eq!(cmd.view.yaw_degrees(), s(45.0));
     }
 
     #[test]
@@ -194,11 +199,15 @@ mod tests {
         input.look.apply_motion(s(100.0), s(0.0)); // 11° more
         let second = command_from_input(&input, TICK);
 
-        assert!((first.view.yaw - s(79.0)).abs() < s(1e-3));
-        assert!((second.view.yaw - s(68.0)).abs() < s(1e-3));
+        // Within half a quantum of where the mouse actually points — the
+        // command is 16-bit (C3), so the tolerance is the quantisation and
+        // not slop.
+        let half_quantum = straf3_sim::ANGLE_RESOLUTION / s(2.0);
+        assert!((first.view.yaw_degrees() - s(79.0)).abs() <= half_quantum);
+        assert!((second.view.yaw_degrees() - s(68.0)).abs() <= half_quantum);
         // A delta would have made these two equal. They must not be.
         assert_ne!(first.view.yaw, second.view.yaw);
-        assert_eq!(second.view.roll, s(0.0));
+        assert_eq!(second.view.roll, 0);
     }
 
     #[test]

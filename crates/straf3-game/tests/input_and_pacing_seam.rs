@@ -174,7 +174,7 @@ fn yaw_stays_wrapped_and_keeps_its_resolution() {
 fn input_never_produces_roll() {
     let mut look = MouseLook::looking_along(s(30.0));
     look.apply_motion(s(-250.0), s(140.0));
-    assert_eq!(look.angles().roll, s(0.0));
+    assert_eq!(look.angles().roll, 0);
 }
 
 /// **The renderer feeds the seam and does not bypass it.**
