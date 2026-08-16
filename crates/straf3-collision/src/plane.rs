@@ -214,7 +214,10 @@ mod tests {
 
     #[test]
     fn a_nearly_axial_normal_snaps_onto_the_axis() {
-        let p = Plane::new(vec3(s(0.000_001), s(0.000_002), s(0.999_999_9)), s(64.000_001));
+        let p = Plane::new(
+            vec3(s(0.000_001), s(0.000_002), s(0.999_999_9)),
+            s(64.000_001),
+        );
         let snapped = p.snapped();
         assert_eq!(snapped.normal, vec3(s(0.0), s(0.0), s(1.0)));
         assert_eq!(snapped.dist, s(64.0));
@@ -224,7 +227,11 @@ mod tests {
     fn a_genuinely_slanted_normal_is_left_alone() {
         // A 45° ramp normal must survive snapping untouched, or the ramp the
         // whole movement model is tuned against stops being a ramp.
-        let n = vec3(s(0.0), -core::f32::consts::FRAC_1_SQRT_2, core::f32::consts::FRAC_1_SQRT_2);
+        let n = vec3(
+            s(0.0),
+            -core::f32::consts::FRAC_1_SQRT_2,
+            core::f32::consts::FRAC_1_SQRT_2,
+        );
         let p = Plane::new(n, s(90.5));
         assert_eq!(p.snapped(), p);
     }

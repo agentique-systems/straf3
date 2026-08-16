@@ -275,7 +275,10 @@ mod tests {
             vec3(s(400.0), s(0.0), s(40.0)),
         ));
         assert!(t.start_solid);
-        assert!(!t.all_solid, "there is a way out, so motion must not be barred");
+        assert!(
+            !t.all_solid,
+            "there is a way out, so motion must not be barred"
+        );
         assert_eq!(t.fraction, s(1.0));
     }
 
@@ -322,7 +325,10 @@ mod tests {
 
         let forwards = HullWorld::new(vec![a.clone(), b.clone()]);
         let backwards = HullWorld::new(vec![b, a]);
-        let s1 = sweep(vec3(s(0.0), s(0.0), s(24.0)), vec3(s(200.0), s(0.0), s(24.0)));
+        let s1 = sweep(
+            vec3(s(0.0), s(0.0), s(24.0)),
+            vec3(s(200.0), s(0.0), s(24.0)),
+        );
 
         assert_eq!(forwards.trace(&s1).surface, SurfaceFlags::NONE);
         assert_eq!(backwards.trace(&s1).surface, SurfaceFlags::SLICK);
@@ -346,17 +352,30 @@ mod tests {
         let a = HullWorld::new(vec![honest]);
         let b = HullWorld::new(vec![wide]);
         for (from, to) in [
-            (vec3(s(0.0), s(0.0), s(24.0)), vec3(s(200.0), s(0.0), s(24.0))),
-            (vec3(s(96.0), s(0.0), s(400.0)), vec3(s(96.0), s(0.0), s(0.0))),
+            (
+                vec3(s(0.0), s(0.0), s(24.0)),
+                vec3(s(200.0), s(0.0), s(24.0)),
+            ),
+            (
+                vec3(s(96.0), s(0.0), s(400.0)),
+                vec3(s(96.0), s(0.0), s(0.0)),
+            ),
             (
                 vec3(s(-100.0), s(-100.0), s(60.0)),
                 vec3(s(300.0), s(120.0), s(60.0)),
             ),
-            (vec3(s(0.0), s(0.0), s(24.0)), vec3(s(0.0), s(400.0), s(24.0))),
+            (
+                vec3(s(0.0), s(0.0), s(24.0)),
+                vec3(s(0.0), s(400.0), s(24.0)),
+            ),
         ] {
             let s1 = sweep(from, to);
             let (ta, tb) = (a.trace(&s1), b.trace(&s1));
-            assert_eq!(to_bits(ta.fraction), to_bits(tb.fraction), "{from:?}->{to:?}");
+            assert_eq!(
+                to_bits(ta.fraction),
+                to_bits(tb.fraction),
+                "{from:?}->{to:?}"
+            );
             assert_eq!(ta.normal, tb.normal, "{from:?}->{to:?}");
             assert_eq!(ta.start_solid, tb.start_solid);
         }

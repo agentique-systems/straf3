@@ -235,13 +235,12 @@ pub fn compile_hull(planes: &[Plane], surface: SurfaceFlags) -> Option<CompiledH
 /// A brush that is exactly six axial faces gets neither pass and comes out
 /// untouched, which is why generalising the arena to this code changes nothing
 /// about the arena.
-pub fn add_hull_bevels(
-    planes: &mut Vec<Plane>,
-    faces: &mut Vec<Winding>,
-    mins: Vec3,
-    maxs: Vec3,
-) {
-    debug_assert_eq!(planes.len(), faces.len(), "faces must be parallel to planes");
+pub fn add_hull_bevels(planes: &mut Vec<Plane>, faces: &mut Vec<Winding>, mins: Vec3, maxs: Vec3) {
+    debug_assert_eq!(
+        planes.len(),
+        faces.len(),
+        "faces must be parallel to planes"
+    );
 
     // ── the axial planes ───────────────────────────────────────────────────
     let mut order = 0usize;
@@ -256,7 +255,11 @@ pub fn add_hull_bevels(
                 None => {
                     let mut normal = Vec3::ZERO;
                     normal[axis] = dir;
-                    let dist = if dir == s(1.0) { maxs[axis] } else { -mins[axis] };
+                    let dist = if dir == s(1.0) {
+                        maxs[axis]
+                    } else {
+                        -mins[axis]
+                    };
                     planes.push(Plane::new(normal, dist));
                     faces.push(Winding::new());
                     planes.len() - 1
