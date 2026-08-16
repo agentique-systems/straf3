@@ -64,3 +64,114 @@ jobs:
       - run: rustup show
       - uses: Swatinem/rust-cache@v2
       - run: cargo xtask check-seam
+
+  # ── cross-target determinism (architecture item C2) ────────────────────────
+  #
+  # One reference command stream through straf3-sim on every target the
+  # project ships or verifies on, compared by a digest folded over EVERY
+  # command rather than by the final state. The probe that motivated this
+  # measured a case that diverged at command 635, differed on 29 of 1200
+  # intermediate checksums, and re-converged to an identical final checksum:
+  # an end-state comparison would have certified a diverged run.
+  #
+  # Split across three jobs so the Windows binary is executed on Windows
+  # rather than under an emulator. Each runner emits a report; the third job
+  # compares them. `cargo xtask determinism` with no arguments does all of
+  # this in one process locally.
+
+  determinism-linux-wasm:
+    name: determinism / glibc + musl + wasm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust and the extra targets
+        # rust-toolchain.toml pins the compiler and lists windows-gnu; musl
+        # and wasm32 are added here because only this check needs them.
+        run: |
+          rustup show
+          rustup target add x86_64-unknown-linux-musl wasm32-unknown-unknown
+
+      # Pinned rather than "whatever the image ships": the wasm report is
+      # produced by V8, and a determinism check should not change what it
+      # measures when the runner image is refreshed.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Emit one report per target
+        run: |
+          mkdir -p determinism-reports
+          cargo xtask determinism --only x86_64-unknown-linux-gnu  --emit determinism-reports/linux-gnu.txt
+          cargo xtask determinism --only x86_64-unknown-linux-musl --emit determinism-reports/linux-musl.txt
+          cargo xtask determinism --only wasm32-unknown-unknown    --emit determinism-reports/wasm32.txt
+
+      - name: glibc vs musl vs wasm
+        # These three are the known fault line (glibc against everyone else),
+        # so comparing them here fails within this job instead of waiting for
+        # the Windows runner. The full four-way comparison still runs below.
+        run: |
+          cargo xtask determinism --compare \
+            determinism-reports/linux-gnu.txt \
+            determinism-reports/linux-musl.txt \
+            determinism-reports/wasm32.txt
+
+      - uses: actions/upload-artifact@v4
+        # Uploaded even when the comparison above fails: the reports are how
+        # a divergence gets diagnosed, and they are exactly what is lost if
+        # the job stops here.
+        if: always()
+        with:
+          name: determinism-linux-wasm
+          path: determinism-reports/
+
+  determinism-windows:
+    name: determinism / windows-gnu
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Emit the Windows report
+        run: |
+          mkdir -p determinism-reports
+          cargo xtask determinism --only x86_64-pc-windows-gnu --emit determinism-reports/windows-gnu.txt
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: determinism-windows
+          path: determinism-reports/
+
+  determinism-compare:
+    name: determinism / all four targets agree
+    needs: [determinism-linux-wasm, determinism-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: determinism-*
+          merge-multiple: true
+          path: determinism-reports
+
+      - name: Compare all four
+        # The four files are named explicitly rather than globbed. A glob
+        # over a partially-downloaded artifact set would compare three
+        # targets and pass; this fails instead, and `--compare` additionally
+        # names any of the four targets that is missing from the comparison.
+        run: |
+          cargo xtask determinism --compare \
+            determinism-reports/linux-gnu.txt \
+            determinism-reports/linux-musl.txt \
+            determinism-reports/windows-gnu.txt \
+            determinism-reports/wasm32.txt

@@ -13,6 +13,11 @@ members = [
     "crates/straf3-game",
     # ── automation ──────────────────────────────────────────────────────
     "xtask",
+    # The cross-target determinism reference stream (architecture item C2).
+    # A workspace member rather than a standalone crate like probes/ so it
+    # resolves `glam` through this workspace's Cargo.lock: a check built
+    # against a different resolution would be verifying a different tree.
+    "tools/det-runner",
 ]
 
 [workspace.package]

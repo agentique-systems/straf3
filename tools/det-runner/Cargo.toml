@@ -1,0 +1,31 @@
+# The reference command stream, compiled once per target.
+#
+# `cargo xtask determinism` builds this crate for each of the four supported
+# targets, runs it, and compares the rolling digests that come back. It is a
+# workspace member (rather than standalone like probes/) on purpose: it must
+# resolve `glam` through the workspace's Cargo.lock, or the check would be
+# verifying a slightly different tree than the one we ship.
+[package]
+name = "straf3-det-runner"
+description = "Runs the cross-target determinism reference stream and prints its rolling digest."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "straf3_det_runner"
+# cdylib for wasm32-unknown-unknown, loaded by a raw `WebAssembly.instantiate`
+# with no wasm-bindgen so nothing sits between the sim's floats and the digest
+# that comes back. rlib so the native binary can link the same code.
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "straf3-det-runner"
+path = "src/main.rs"
+
+# One dependency, the thing under test. Anything else would put code between
+# the simulation and the digest.
+[dependencies]
+straf3-sim.workspace = true
