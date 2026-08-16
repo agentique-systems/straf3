@@ -1,9 +1,9 @@
 //! `cargo run -p straf3-render --example window`
 //!
-//! Opens a window and flies the autopilot around the arena. This is the
+//! Opens a window and flies the autopilot down the course. This is the
 //! renderer's own slice, standing on its own: no input path, no `straf3-game`,
 //! nothing from another crate's worktree. If this draws, the device, the
-//! surface, the pipeline, the camera and the arena are all working.
+//! surface, the pipeline, the camera and the compiled map are all working.
 //!
 //! It is not the game. `straf3-game` is the game; it owns the window and the
 //! input, and it calls the same [`Renderer`] this does.

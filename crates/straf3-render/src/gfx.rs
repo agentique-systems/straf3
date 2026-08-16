@@ -3,13 +3,13 @@
 //! Split in two on purpose:
 //!
 //! - [`Scene`] owns everything that does not know where its pixels go — the
-//!   pipeline, the arena's vertex buffer, the uniforms, the depth buffer. It
+//!   pipeline, the map's vertex buffer, the uniforms, the depth buffer. It
 //!   draws into any texture view it is handed.
 //! - [`Gfx`] is [`Scene`] plus a window surface.
 //!
 //! The split is not tidiness. It is what lets [`Scene`] be driven headlessly
 //! into an offscreen texture (see `tests/offscreen.rs`), so "the renderer draws
-//! the arena" is something that can be *asserted* on a machine with no display
+//! the map" is something that can be *asserted* on a machine with no display
 //! — this one, and CI — rather than something a human has to squint at.
 
 use std::sync::Arc;
@@ -19,16 +19,15 @@ use straf3_sim::num::{Scalar, s};
 use wgpu::util::DeviceExt as _;
 use winit::window::Window;
 
-use crate::arena::ARENA;
 use crate::camera::Camera;
-use crate::mesh::{self, Vertex};
+use crate::mesh::{GpuMesh, Vertex};
 
 /// Depth format. `Depth32Float` is the one format guaranteed on WebGPU's
 /// downlevel limits as well as everywhere native.
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
 /// The colour distance fades into, and the colour of the sky. Not black: a
-/// black horizon makes the arena feel like a room with the lights off.
+/// black horizon makes the world feel like a room with the lights off.
 pub const CLEAR: wgpu::Color = wgpu::Color {
     r: 0.055,
     g: 0.075,
@@ -36,9 +35,9 @@ pub const CLEAR: wgpu::Color = wgpu::Color {
     a: 1.0,
 };
 
-/// How quickly fog closes in, per unit. Tuned against the arena's own size:
-/// at `1/5200` the far wall of a 3072-unit arena is lightly hazed and nothing
-/// nearer is touched. Denser than this and the arena reads as a fog bank; the
+/// How quickly fog closes in, per unit. Tuned against the scale a course is
+/// built at: at `1/5200` the far end of a 3000-unit run is lightly hazed and
+/// nothing nearer is touched. Denser and the world reads as a fog bank; the
 /// first pass at it was, which is why this number is measured against the
 /// rendered image rather than picked.
 const FOG_DENSITY: f32 = 1.0 / 5200.0;
@@ -53,13 +52,14 @@ struct Globals {
     fog_color: [f32; 4],
 }
 
-/// Everything needed to draw the arena into some texture view.
+/// Everything needed to draw a compiled map into some texture view.
 pub struct Scene {
     device: wgpu::Device,
     queue: wgpu::Queue,
     pipeline: wgpu::RenderPipeline,
     vertices: wgpu::Buffer,
-    vertex_count: u32,
+    indices: wgpu::Buffer,
+    index_count: u32,
     globals: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     depth: wgpu::TextureView,
@@ -67,16 +67,23 @@ pub struct Scene {
 }
 
 impl Scene {
-    /// Build the pipeline and upload the arena.
+    /// Build the pipeline and upload `mesh`.
+    ///
+    /// The mesh is a parameter rather than something this file reaches for,
+    /// because the geometry now comes from a compiled map chosen at runtime.
+    /// `straf3-render` no longer knows what world it is drawing, which is the
+    /// point: there is exactly one place that decides, and it is
+    /// `straf3-game`'s `scene.rs`.
     pub fn new(
         device: wgpu::Device,
         queue: wgpu::Queue,
         format: wgpu::TextureFormat,
         width: u32,
         height: u32,
+        mesh: &GpuMesh,
     ) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("straf3-arena"),
+            label: Some("straf3-map"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
         });
 
@@ -111,13 +118,13 @@ impl Scene {
         });
 
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("straf3-arena"),
+            label: Some("straf3-map"),
             bind_group_layouts: &[Some(&bind_layout)],
             immediate_size: 0,
         });
 
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("straf3-arena"),
+            label: Some("straf3-map"),
             layout: Some(&layout),
             vertex: wgpu::VertexState {
                 module: &shader,
@@ -127,7 +134,7 @@ impl Scene {
             },
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
-                // No back-face culling. The arena is closed convex solids, so
+                // No back-face culling. A map is closed convex solids, so
                 // culling would save a little fill — but a face emitted with
                 // the wrong winding would then be *invisible*, which is the
                 // one class of geometry bug that looks like a hole in the map
@@ -158,13 +165,31 @@ impl Scene {
             cache: None,
         });
 
-        // The arena is static geometry, so this is uploaded once and never
-        // touched again. There is no per-frame vertex traffic at all.
-        let verts = mesh::build(&ARENA);
+        // A map is static geometry, so this is uploaded once and never touched
+        // again. There is no per-frame vertex traffic at all.
+        //
+        // Indexed, unlike the arena's mesh: a real map runs to tens of
+        // thousands of triangles rather than a few thousand. `create_buffer_init`
+        // rejects a zero-length buffer, and the flat and empty worlds legitimately
+        // have nothing to draw, so both buffers get one padding element in that
+        // case and `index_count` stays 0 — the draw is then a no-op rather than
+        // a special case at the call site.
+        let empty = mesh.is_empty();
+        let verts: &[Vertex] = if empty {
+            &[Vertex::zeroed()]
+        } else {
+            &mesh.vertices
+        };
+        let idx: &[u32] = if empty { &[0] } else { &mesh.indices };
         let vertices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("straf3-arena-mesh"),
-            contents: bytemuck::cast_slice(&verts),
+            label: Some("straf3-map-mesh"),
+            contents: bytemuck::cast_slice(verts),
             usage: wgpu::BufferUsages::VERTEX,
+        });
+        let indices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("straf3-map-indices"),
+            contents: bytemuck::cast_slice(idx),
+            usage: wgpu::BufferUsages::INDEX,
         });
 
         let depth = depth_view(&device, width.max(1), height.max(1));
@@ -174,7 +199,8 @@ impl Scene {
             queue,
             pipeline,
             vertices,
-            vertex_count: verts.len() as u32,
+            indices,
+            index_count: if empty { 0 } else { mesh.indices.len() as u32 },
             globals,
             bind_group,
             depth,
@@ -182,10 +208,10 @@ impl Scene {
         }
     }
 
-    /// How many triangles the arena came out as.
+    /// How many triangles the map came out as.
     #[must_use]
     pub fn triangle_count(&self) -> u32 {
-        self.vertex_count / 3
+        self.index_count / 3
     }
 
     /// The device, for callers that need to allocate alongside the scene.
@@ -208,7 +234,7 @@ impl Scene {
         }
     }
 
-    /// Record one frame of the arena into `target`.
+    /// Record one frame of the map into `target`.
     pub fn draw(
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
@@ -229,7 +255,7 @@ impl Scene {
             .write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("straf3-arena"),
+            label: Some("straf3-map"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view: target,
                 depth_slice: None,
@@ -254,7 +280,8 @@ impl Scene {
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.bind_group, &[]);
         pass.set_vertex_buffer(0, self.vertices.slice(..));
-        pass.draw(0..self.vertex_count, 0..1);
+        pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
+        pass.draw_indexed(0..self.index_count, 0, 0..1);
     }
 }
 
@@ -296,7 +323,7 @@ impl Gfx {
     /// page picks WebGPU before entering wasm, because wgpu's WebGPU backend
     /// does not degrade to WebGL2 on its own — it panics inside itself
     /// (spec rev 6 Q2, measured).
-    pub async fn new(window: Arc<Window>, backends: wgpu::Backends) -> Self {
+    pub async fn new(window: Arc<Window>, backends: wgpu::Backends, mesh: GpuMesh) -> Self {
         let mut desc = wgpu::InstanceDescriptor::new_without_display_handle_from_env();
         desc.backends = backends;
         let instance = wgpu::Instance::new(desc);
@@ -361,9 +388,9 @@ impl Gfx {
         };
         surface.configure(&device, &config);
 
-        let scene = Scene::new(device, queue, format, width, height);
+        let scene = Scene::new(device, queue, format, width, height, &mesh);
         log_line(&format!(
-            "straf3-render: arena is {} triangles",
+            "straf3-render: map is {} triangles",
             scene.triangle_count()
         ));
 

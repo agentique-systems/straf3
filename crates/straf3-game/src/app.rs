@@ -96,6 +96,21 @@ pub struct App {
     renderer: Option<straf3_render::Renderer>,
 }
 
+/// The triangles for the world this session is playing in.
+///
+/// One line, and it is the whole invariant: the mesh comes off the same
+/// [`CompiledMap`](straf3_map::CompiledMap) whose hulls `scene.rs` handed to the
+/// simulation. There is no path by which the renderer could be given a
+/// different world from the one the player collides with — the flat and empty
+/// worlds have no geometry and correctly draw nothing.
+#[cfg(feature = "render")]
+fn scene_mesh() -> straf3_render::mesh::GpuMesh {
+    match crate::scene::loaded() {
+        Some(loaded) => straf3_render::mesh::GpuMesh::from_map(&loaded.map.mesh),
+        None => straf3_render::mesh::GpuMesh::empty(),
+    }
+}
+
 impl App {
     /// Build the application. No window is created until the event loop
     /// resumes — winit owns that moment, on both targets.
@@ -293,11 +308,12 @@ impl ApplicationHandler for App {
             self.renderer = Some(straf3_render::Renderer::with_backends(
                 window.clone(),
                 wgpu::Backends::BROWSER_WEBGPU,
+                scene_mesh(),
             ));
         }
         #[cfg(all(feature = "render", not(target_arch = "wasm32")))]
         {
-            self.renderer = Some(straf3_render::Renderer::new(window.clone()));
+            self.renderer = Some(straf3_render::Renderer::new(window.clone(), scene_mesh()));
         }
         #[cfg(not(feature = "render"))]
         log::warn!(
@@ -454,7 +470,7 @@ mod tests {
         assert_eq!(options.rate, TickRate::HZ_125);
         assert_eq!(options.rate.command_millis(), 8);
         assert_eq!(options.profile, PhysicsProfile::cpm());
-        assert_eq!(options.world, WorldChoice::Arena);
+        assert_eq!(options.world, WorldChoice::Map);
         assert!(!options.record);
     }
 
@@ -474,9 +490,13 @@ mod tests {
     #[test]
     fn an_unavailable_world_is_resolved_at_construction_not_at_first_frame() {
         let app = App::new(Options {
-            world: WorldChoice::Arena,
+            world: WorldChoice::Map,
             ..Options::default()
         });
+        // No map is installed in this test process, so `Map` is unavailable and
+        // `App::new` must already have fallen back rather than leaving a world
+        // that would panic — or silently draw nothing — at the first frame.
         assert!(app.options().world.is_available());
+        assert_eq!(app.options().world, WorldChoice::Flat);
     }
 }

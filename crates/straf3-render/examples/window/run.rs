@@ -32,12 +32,15 @@ impl ApplicationHandler for Demo {
             event_loop
                 .create_window(
                     Window::default_attributes()
-                        .with_title("straf3 — arena flythrough (renderer slice)")
+                        .with_title("straf3 — course flythrough (renderer slice)")
                         .with_inner_size(winit::dpi::LogicalSize::new(1280, 720)),
                 )
                 .expect("create a window"),
         );
-        self.renderer = Some(Renderer::new(window.clone()));
+        // The same compiled map the autopilot is colliding with — one
+        // `CompiledMap`, its mesh to the GPU and its hulls to the tracer.
+        let mesh = straf3_render::mesh::GpuMesh::from_map(&driver::course::get().map.mesh);
+        self.renderer = Some(Renderer::new(window.clone(), mesh));
         self.window = Some(window);
         self.started = Instant::now();
         self.last_report = self.started;

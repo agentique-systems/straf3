@@ -1,4 +1,4 @@
-# arena_ramp_run — run, jump and strafe across the arena's ramps — geometry straf3-headless cannot build
+# course_ramp_run — run, jump and strafe across the course's ramp wave — geometry straf3-headless cannot build
 #
 # GENERATED from crates/straf3-platform/tests/support/mod.rs (`runs()`).
 # Do not hand-edit: `fixtures_match_their_definitions` will fail.
@@ -6,9 +6,9 @@
 
 rate 125
 profile cpm
-world arena
-spawn 0 0 64
-yaw 0
+world map
+spawn 0 1400 64
+yaw 90
 
 # cmd <repeat> <fwd> <right> <up> <buttons> <pitch> <yaw> <roll>
 cmd 30 0 0 0 - 0 0 0

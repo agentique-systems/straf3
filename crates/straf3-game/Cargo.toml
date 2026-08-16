@@ -23,14 +23,17 @@ path = "src/main.rs"
 # TOP OF THE STACK. Everything may be depended on from here; nothing may
 # depend on here.
 #
-# `straf3-map` and `straf3-replay` are deliberately absent: Wave 3 is the
-# hardcoded arena (spec rev 6 §T-a) and neither is used yet. `straf3-devtools`
-# is absent for a harder reason — it depends on `egui-winit`, which depends on
-# `arboard`, which has no `wasm32` backend at all, so declaring it here would
-# make the web build impossible (spec rev 6 §Q2). All three are still built by
-# `cargo build --workspace`; they are just not linked into the game yet.
+# `straf3-map` is here because the hardcoded arena is retired: the geometry the
+# game plays in is now a compiled `.map`, and `scene.rs` is where it is chosen.
+# It is NOT optional — the flat and empty worlds need no map, but the type that
+# names them does, and a `--no-default-features` build must still parse
+# `--map`. `straf3-replay` is still absent (nothing writes a `.s3d` yet), and
+# `straf3-devtools` is absent for a harder reason: it depends on `egui-winit`,
+# which depends on `arboard`, which has no `wasm32` backend at all, so declaring
+# it here would make the web build impossible (spec rev 6 §Q2).
 [dependencies]
 straf3-sim.workspace = true
+straf3-map.workspace = true
 straf3-platform.workspace = true
 winit.workspace = true
 log.workspace = true

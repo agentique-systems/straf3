@@ -37,7 +37,11 @@ mod native {
 usage: straf3 [options]                     open a window and play
        straf3 --replay <file> [options]     run a recorded file, no window
 
-  --world <arena|flat|empty>  geometry to play in (default arena)
+  --map <file.map>            Valve 220 map to compile and play (default
+                              assets/maps/coil.map)
+  --world <map|flat|empty>    geometry to play in (default map). `flat` and
+                              `empty` need no map and are the two worlds
+                              straf3-headless can reproduce.
   --profile <cpm|vq3>         movement constants (default cpm)
   --rate <hz>                 command rate, 1..=1000 (default 125)
   --record <file>             write every command produced to <file>, in
@@ -78,6 +82,27 @@ Controls: WASD move, mouse look, Space jump, Ctrl crouch, Shift walk,
             }
         };
 
+        // Reading the file is deliberately here and not in `straf3-map`:
+        // `compile` takes text, not a path, because that is what lets the
+        // browser fetch a `.map` over HTTP and compile it through the identical
+        // code path. This is the only place in the native build that turns a
+        // path into map source.
+        //
+        // A map that cannot be read or compiled is a warning, not a failure:
+        // `WorldChoice::or_fallback` drops to the flat world, which still opens
+        // a window you can move in. Refusing to start would make a missing file
+        // indistinguishable from a broken build.
+        if options.session.world == WorldChoice::Map {
+            match std::fs::read_to_string(&options.map_path) {
+                Ok(source) => {
+                    if let Err(e) = straf3_game::scene::install(&source) {
+                        eprintln!("straf3: cannot compile {}: {e}", options.map_path);
+                    }
+                }
+                Err(e) => eprintln!("straf3: cannot read {}: {e}", options.map_path),
+            }
+        }
+
         if let Some(path) = &options.replay_from {
             return run_replay(path, &options.replay);
         }
@@ -105,10 +130,14 @@ Controls: WASD move, mouse look, Space jump, Ctrl crouch, Shift walk,
 
     struct Parsed {
         session: Options,
+        map_path: String,
         record_to: Option<String>,
         replay_from: Option<String>,
         replay: ReplayOptions,
     }
+
+    /// Where the course lives when `--map` is not given.
+    const DEFAULT_MAP: &str = "assets/maps/coil.map";
 
     /// Replay a recorded file with no window and no adapter.
     ///
@@ -210,6 +239,7 @@ Controls: WASD move, mouse look, Space jump, Ctrl crouch, Shift walk,
     /// Parse the command line. `Ok(None)` means "print the usage and stop".
     fn parse<I: Iterator<Item = String>>(args: I) -> Result<Option<Parsed>, String> {
         let mut session = Options::default();
+        let mut map_path = DEFAULT_MAP.to_owned();
         let mut record_to = None;
         let mut replay_from = None;
         let mut replay = ReplayOptions::default();
@@ -222,8 +252,9 @@ Controls: WASD move, mouse look, Space jump, Ctrl crouch, Shift walk,
                 "--world" => {
                     let name = value()?;
                     session.world = WorldChoice::parse(&name)
-                        .ok_or_else(|| format!("unknown world `{name}` (arena|flat|empty)"))?;
+                        .ok_or_else(|| format!("unknown world `{name}` (map|flat|empty)"))?;
                 }
+                "--map" => map_path = value()?,
                 "--profile" => {
                     let name = value()?;
                     session.profile = match name.as_str() {
@@ -290,6 +321,7 @@ Controls: WASD move, mouse look, Space jump, Ctrl crouch, Shift walk,
 
         Ok(Some(Parsed {
             session,
+            map_path,
             record_to,
             replay_from,
             replay,
@@ -305,9 +337,10 @@ Controls: WASD move, mouse look, Space jump, Ctrl crouch, Shift walk,
         }
 
         #[test]
-        fn no_arguments_is_the_arena_at_125hz_under_cpm() {
+        fn no_arguments_is_the_default_map_at_125hz_under_cpm() {
             let parsed = parse_args(&[]).unwrap().unwrap();
-            assert_eq!(parsed.session.world, WorldChoice::Arena);
+            assert_eq!(parsed.session.world, WorldChoice::Map);
+            assert_eq!(parsed.map_path, DEFAULT_MAP);
             assert_eq!(parsed.session.rate, TickRate::HZ_125);
             assert_eq!(parsed.session.profile_name, "cpm");
             assert!(parsed.record_to.is_none());

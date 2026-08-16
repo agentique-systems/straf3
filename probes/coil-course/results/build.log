@@ -1,0 +1,3 @@
+   Compiling coil-course v0.1.0 (/home/cairon/.agentique-console/worktrees/as_8ed01c4b420e4adca177/seat-integrator/probes/coil-course)
+    Finished `release` profile [optimized] target(s) in 3.91s
+     Running `/home/cairon/.cache/straf3-probe-target/release/coil ../../assets/maps/coil.map`

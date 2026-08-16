@@ -14,7 +14,17 @@ use straf3_sim::PlayerState;
 use straf3_sim::num::{Scalar, Vec3, s, vec3};
 
 use crate::InterpolationAlpha;
-use crate::arena::{EYE_HEIGHT, EYE_HEIGHT_CROUCHED};
+
+/// Eye height above the player origin, standing — Q3's `DEFAULT_VIEWHEIGHT`.
+///
+/// Declared here rather than with the geometry, which is where it used to live.
+/// It is a property of the *player*, not of the world they are standing in: the
+/// arena happened to be the only world there was, and a map cannot have an
+/// opinion about how tall the person running through it is.
+pub const EYE_HEIGHT: Scalar = s(26.0);
+
+/// Eye height above the player origin, crouched — Q3's `CROUCH_VIEWHEIGHT`.
+pub const EYE_HEIGHT_CROUCHED: Scalar = s(12.0);
 
 /// Degrees to radians, as Q3's `AngleVectors` spells it.
 const DEG_TO_RAD: Scalar = s(core::f32::consts::PI * 2.0 / 360.0);
@@ -23,8 +33,9 @@ const DEG_TO_RAD: Scalar = s(core::f32::consts::PI * 2.0 / 360.0);
 /// player's own hull when they stand against a wall.
 const Z_NEAR: Scalar = s(4.0);
 
-/// Far plane. The arena's diagonal is about 4700 units; this clears it with
-/// room to spare so nothing pops.
+/// Far plane. Generous on purpose: it has to clear the diagonal of whatever map
+/// is loaded, and a course runs to several thousand units end to end. Fog closes
+/// in long before this, so the cost of the headroom is nothing.
 const Z_FAR: Scalar = s(16384.0);
 
 /// Default horizontal field of view, in degrees — Q3's `cg_fov` default.

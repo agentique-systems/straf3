@@ -25,6 +25,7 @@ struct VsOut {
     @location(0) normal: vec3<f32>,
     @location(1) color: vec3<f32>,
     @location(2) eye_distance: f32,
+    @location(3) world: vec3<f32>,
 };
 
 @vertex
@@ -38,7 +39,35 @@ fn vs_main(
     out.normal = normal;
     out.color = color;
     out.eye_distance = length(position - globals.eye.xyz);
+    out.world = position;
     return out;
+}
+
+// Edge length of one checkerboard cell, in Quake units. 128 is two player
+// widths, which reads as a floor tile at running speed rather than as noise.
+const TILE: f32 = 128.0;
+// How much darker the odd cells are.
+const CHECKER: f32 = 0.86;
+
+// Why there is a checkerboard at all: with flat colours and no textures, a
+// large single-coloured floor has no optical flow. At 600 units a second the
+// screen does not change, and the movement — the whole point of the project —
+// cannot be felt. This is the cheapest thing that restores it.
+//
+// Why it is here and not in the mesh: the arena used to solve this by
+// subdividing big faces into tiled quads, which is bounded when the world is
+// ten boxes and is not when it is four thousand brushes. Per-fragment costs no
+// triangles and works on a brush face of any shape or orientation.
+//
+// A 3-D checker sampled on the surface, rather than a 2-D one per face: it
+// needs no per-face basis, and on any axis-aligned plane one of the three terms
+// is constant, so what you see on a floor or a wall is an ordinary 2-D
+// chequerboard. On a ramp it stays a regular pattern that moves with you, which
+// is all the eye needs.
+fn checker(world: vec3<f32>) -> f32 {
+    let cell = floor(world / TILE);
+    let parity = (cell.x + cell.y + cell.z) - 2.0 * floor((cell.x + cell.y + cell.z) * 0.5);
+    return mix(1.0, CHECKER, parity);
 }
 
 // Fixed light, high and to one side. A world-space constant rather than a
@@ -54,7 +83,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // and fog are the only place they mean anything. Doing this at the end
     // instead (the obvious-looking arrangement) fogs geometry towards a black
     // that does not match the sky, and the horizon comes out as a dark band.
-    let base = pow(in.color, vec3<f32>(2.2));
+    let base = pow(in.color, vec3<f32>(2.2)) * checker(in.world);
 
     let n = normalize(in.normal);
     // A hemisphere ambient — brighter facing up, dimmer facing down — plus one
