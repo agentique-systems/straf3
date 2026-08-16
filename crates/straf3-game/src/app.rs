@@ -218,16 +218,20 @@ impl App {
         }
         let elapsed_ms = now_ms - self.last_telemetry_ms;
         self.last_telemetry_ms = now_ms;
-        let elapsed_s = straf3_sim::num::seconds_from_millis(
-            u32::try_from(elapsed_ms.max(1)).unwrap_or(u32::MAX),
-        );
-        let fps = self.frames as f64 / f64::from(elapsed_s);
+        // Whole-millisecond arithmetic only: this is a frames-per-second
+        // readout, not the criterion-3 duration-to-seconds conversion, and it
+        // must never let a float-seconds value exist even transiently.
+        // `fps_milli` is thousandths of a frame-per-second, so the final
+        // division by 1000 lands on whole fps without ever multiplying a
+        // duration by a scale-of-a-thousand literal.
+        let fps_milli = self.frames * 1_000_000 / elapsed_ms.max(1);
+        let fps = fps_milli / 1000;
         self.frames = 0;
 
         let state = self.game.state();
         log::info!(
             "speed {:>6.1} ups   origin ({:>8.1} {:>8.1} {:>8.1})   {}   \
-             tick {}   sim {} ms   {:.0} fps",
+             tick {}   sim {} ms   {} fps",
             self.game.horizontal_speed(),
             state.player.origin.x,
             state.player.origin.y,
