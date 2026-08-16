@@ -69,6 +69,27 @@ pub use gfx::Scene;
 #[derive(Debug, Clone, Copy)]
 pub struct InterpolationAlpha(pub f32);
 
+/// A frame that has had the world drawn into it and has not been submitted yet.
+///
+/// Handed to an overlay so it can append its own passes to the same encoder.
+/// Deliberately plain wgpu handles rather than a trait: `straf3-devtools`
+/// depends on this crate for nothing, and an overlay that had to name a
+/// `straf3-render` trait could not be tested against an offscreen texture.
+pub struct Overlay<'a> {
+    /// The device the renderer came up on.
+    pub device: &'a wgpu::Device,
+    /// Its queue.
+    pub queue: &'a wgpu::Queue,
+    /// The encoder the world was recorded into.
+    pub encoder: &'a mut wgpu::CommandEncoder,
+    /// The colour target, already holding the world. Load it; do not clear it.
+    pub target: &'a wgpu::TextureView,
+    /// Surface width in physical pixels.
+    pub width: u32,
+    /// Surface height in physical pixels.
+    pub height: u32,
+}
+
 /// The renderer.
 ///
 /// Construct it once with the window, then call [`render`](Self::render) as
@@ -192,6 +213,21 @@ impl Renderer {
     /// making it the caller's problem would put a `cfg(target_arch)` in every
     /// event loop.
     pub fn render(&mut self, prev: &PlayerState, curr: &PlayerState, alpha: InterpolationAlpha) {
+        self.render_with(prev, curr, alpha, |_| {});
+    }
+
+    /// As [`render`](Self::render), calling `overlay` after the world has been
+    /// recorded and before the frame is submitted.
+    ///
+    /// The overlay is handed the same encoder, so it costs no extra submit and
+    /// cannot be drawn under the world.
+    pub fn render_with(
+        &mut self,
+        prev: &PlayerState,
+        curr: &PlayerState,
+        alpha: InterpolationAlpha,
+        overlay: impl FnOnce(Overlay<'_>),
+    ) {
         let mut slot = self.gfx.borrow_mut();
         let Some(g) = slot.as_mut() else {
             return;
@@ -199,7 +235,25 @@ impl Renderer {
         if let Some((w, h)) = self.pending_size.take() {
             g.resize(w, h);
         }
-        g.render(&Camera::between(prev, curr, alpha));
+        g.render_with(&Camera::between(prev, curr, alpha), overlay);
+    }
+
+    /// Run `f` with the device and the surface's texture format, once they
+    /// exist. `None` while the device is still being acquired — which on the
+    /// web is the first several frames, not an edge case.
+    ///
+    /// This is how an overlay is constructed: it has to be built against the
+    /// same format the frame will be drawn into. egui compiles a different
+    /// fragment entry point for sRGB and gamma-space targets, and a mismatch is
+    /// not a validation error — it is a washed-out overlay.
+    pub fn with_device<R>(
+        &self,
+        f: impl FnOnce(&wgpu::Device, wgpu::TextureFormat) -> R,
+    ) -> Option<R> {
+        self.gfx.borrow().as_ref().map(|g| {
+            let (device, format) = g.device_and_format();
+            f(device, format)
+        })
     }
 }
 

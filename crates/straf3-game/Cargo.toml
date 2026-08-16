@@ -27,10 +27,14 @@ path = "src/main.rs"
 # game plays in is now a compiled `.map`, and `scene.rs` is where it is chosen.
 # It is NOT optional — the flat and empty worlds need no map, but the type that
 # names them does, and a `--no-default-features` build must still parse
-# `--map`. `straf3-replay` is still absent (nothing writes a `.s3d` yet), and
-# `straf3-devtools` is absent for a harder reason: it depends on `egui-winit`,
-# which depends on `arboard`, which has no `wasm32` backend at all, so declaring
-# it here would make the web build impossible (spec rev 6 §Q2).
+# `--map`.
+#
+# `straf3-devtools` used to be excluded here on the grounds that it depended on
+# `egui-winit`, which depends on `arboard`, which has no `wasm32` backend at
+# all. That is no longer true: wave 4 dropped `egui-winit` from that crate (the
+# overlay takes no input, so it needs no windowing integration) and it builds
+# for `wasm32-unknown-unknown`. It is optional here only because it draws into a
+# frame, and `--no-default-features` has no frame.
 [dependencies]
 straf3-sim.workspace = true
 straf3-map.workspace = true
@@ -43,6 +47,9 @@ log.workspace = true
 # gives a window you can move in that draws nothing. That is what makes this
 # crate's own tests runnable in CI on a machine with no adapter.
 straf3-render = { workspace = true, optional = true }
+# The on-screen overlay. Optional alongside `straf3-render` for the same
+# reason: with `--no-default-features` there is no frame to draw one into.
+straf3-devtools = { workspace = true, optional = true }
 # Only to name `wgpu::Backends::BROWSER_WEBGPU` when handing the web build's
 # backend choice to the renderer. No wgpu object is ever created here.
 wgpu = { workspace = true, optional = true }
@@ -60,4 +67,4 @@ web-sys = { workspace = true, features = ["Document", "Element", "Window"] }
 default = ["render"]
 # Draw the arena. Also selects the arena as the collision world, so what is
 # drawn and what is collided with are the same geometry by construction.
-render = ["dep:straf3-render", "dep:wgpu"]
+render = ["dep:straf3-render", "dep:straf3-devtools", "dep:wgpu"]

@@ -64,8 +64,9 @@ Controls: WASD move, mouse look, Space jump, Ctrl crouch, Shift walk,
 ";
 
     pub fn main() -> ExitCode {
-        // `info` by default: the once-a-second speed readout is the only feedback
-        // this wave has, since the telemetry overlay is out of scope.
+        // `info` by default: the once-a-second speed readout is what an
+        // unattended run leaves in a log file, where the on-screen overlay
+        // cannot follow it.
         env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
             .format_timestamp(None)
             .init();

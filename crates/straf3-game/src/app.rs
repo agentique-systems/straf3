@@ -92,8 +92,17 @@ pub struct App {
     primed: bool,
     last_telemetry_ms: u64,
     frames: u64,
+    /// The last frame rate [`App::report_telemetry`] computed, for the overlay.
+    ///
+    /// The overlay draws every frame and the rate is only measured once a
+    /// second, so the number it shows is the last one measured rather than a
+    /// per-frame reciprocal — which at 300 fps would be unreadable noise.
+    last_fps: u32,
     #[cfg(feature = "render")]
     renderer: Option<straf3_render::Renderer>,
+    /// The on-screen overlay, built on the first frame the device exists.
+    #[cfg(feature = "render")]
+    hud: Option<straf3_devtools::Hud>,
 }
 
 /// The triangles for the world this session is playing in.
@@ -137,8 +146,11 @@ impl App {
             primed: false,
             last_telemetry_ms: 0,
             frames: 0,
+            last_fps: 0,
             #[cfg(feature = "render")]
             renderer: None,
+            #[cfg(feature = "render")]
+            hud: None,
         }
     }
 
@@ -184,10 +196,44 @@ impl App {
 
         #[cfg(feature = "render")]
         if let Some(renderer) = &mut self.renderer {
-            renderer.render(
+            // Built on the first frame the device exists — which natively is
+            // the first frame and on the web is several frames in.
+            if self.hud.is_none() {
+                self.hud = renderer.with_device(straf3_devtools::Hud::new);
+            }
+            // The split is the one number the simulation cannot know. No ghost
+            // is loaded yet, so it is `None` and the overlay draws no split at
+            // all rather than `+0.000`, which would claim the player was level
+            // with a personal best that is not there.
+            let split_ms: Option<i32> = None;
+            let sample = straf3_devtools::TelemetrySample::of(self.game.state())
+                .with_fps(self.last_fps)
+                .with_split_ms(split_ms);
+            let pixels_per_point = self
+                .window
+                .as_ref()
+                .map_or(1.0, |w| w.scale_factor() as f32);
+            let hud = self.hud.as_mut();
+            renderer.render_with(
                 &self.game.previous().player,
                 &self.game.state().player,
                 straf3_render::InterpolationAlpha(self.game.alpha()),
+                |o| {
+                    if let Some(hud) = hud {
+                        hud.draw(
+                            straf3_devtools::HudFrame {
+                                device: o.device,
+                                queue: o.queue,
+                                encoder: o.encoder,
+                                target: o.target,
+                                width: o.width,
+                                height: o.height,
+                                pixels_per_point,
+                            },
+                            &sample,
+                        );
+                    }
+                },
             );
         }
 
@@ -223,10 +269,9 @@ impl App {
 
     /// A speed readout, once a second.
     ///
-    /// The devtools overlay is explicitly out of scope for this wave (and its
-    /// `egui-winit` dependency cannot build for wasm at all — spec rev 6 §Q2),
-    /// but strafe-jumping is unjudgeable without seeing the speed, so it goes
-    /// to the log: a terminal line on native, the console on web.
+    /// The overlay now draws the same numbers on screen, but this line stays:
+    /// it is the only readout that survives into a redirected log file, which
+    /// is what an unattended `--exit-after` run leaves behind.
     fn report_telemetry(&mut self, now_ms: u64) {
         if now_ms.saturating_sub(self.last_telemetry_ms) < TELEMETRY_INTERVAL_MS {
             return;
@@ -241,6 +286,7 @@ impl App {
         // duration by a scale-of-a-thousand literal.
         let fps_milli = self.frames * 1_000_000 / elapsed_ms.max(1);
         let fps = fps_milli / 1000;
+        self.last_fps = fps as u32;
         self.frames = 0;
 
         let state = self.game.state();

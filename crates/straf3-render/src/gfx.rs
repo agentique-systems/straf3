@@ -415,8 +415,24 @@ impl Gfx {
         self.surface.configure(self.scene.device(), &self.config);
     }
 
-    /// Draw one frame from `camera` and present it.
-    pub fn render(&mut self, camera: &Camera) {
+    /// The device the surface came up on, and the format it was configured
+    /// with.
+    ///
+    /// Both are private fields, and a parent module cannot reach a private
+    /// field, so this is how [`crate::Renderer::with_device`] hands an overlay
+    /// the *surface's* format rather than a guess at it.
+    #[must_use]
+    pub fn device_and_format(&self) -> (&wgpu::Device, wgpu::TextureFormat) {
+        (self.scene.device(), self.config.format)
+    }
+
+    /// Draw one frame from `camera`, hand the recorded frame to `overlay`, and
+    /// present it.
+    ///
+    /// There is no overlay-less variant here on purpose: [`crate::Renderer`]
+    /// already offers one, and a second entry point that skipped the callback
+    /// would be a path along which the overlay could silently stop being drawn.
+    pub fn render_with(&mut self, camera: &Camera, overlay: impl FnOnce(crate::Overlay<'_>)) {
         use wgpu::CurrentSurfaceTexture as Cst;
         let frame = match self.surface.get_current_texture() {
             Cst::Success(t) | Cst::Suboptimal(t) => t,
@@ -447,6 +463,18 @@ impl Gfx {
             self.config.width,
             self.config.height,
         );
+        // The overlay appends to the same encoder, so it costs no extra submit
+        // and cannot be drawn under the world. `scene.draw` takes `&mut
+        // self.scene` and has finished by here, so the shared borrows below
+        // are fine.
+        overlay(crate::Overlay {
+            device: self.scene.device(),
+            queue: self.scene.queue(),
+            encoder: &mut encoder,
+            target: &view,
+            width: self.config.width,
+            height: self.config.height,
+        });
         self.scene.queue().submit(Some(encoder.finish()));
         // wgpu 30 moved presentation onto the queue.
         self.scene.queue().present(frame);

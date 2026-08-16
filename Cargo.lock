@@ -2305,6 +2305,7 @@ dependencies = [
  "console_log",
  "env_logger",
  "log",
+ "straf3-devtools",
  "straf3-map",
  "straf3-platform",
  "straf3-render",
