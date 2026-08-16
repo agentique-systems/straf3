@@ -405,6 +405,18 @@ cmd 50 127 64 0 - 0 92.5
     }
 
     #[test]
+    fn an_arena_recording_round_trips_to_the_arena() {
+        // The `world` directive is written for `Unrepresentable` worlds too
+        // now (record.rs), and this parser already understands `arena` — so
+        // an arena recording, unlike a straf3-headless run, replays in the
+        // world it was actually recorded in.
+        let recorder = Recorder::new(TickRate::HZ_125, vec3(s(0.0), s(0.0), s(24.0)), s(90.0));
+        let text = recorder.to_fixture(WorldSpec::Unrepresentable("arena"), "cpm");
+        let fixture = parse(&text).unwrap();
+        assert_eq!(fixture.world, WorldChoice::Arena);
+    }
+
+    #[test]
     fn a_hostile_frame_schedule_produces_the_identical_trace() {
         // Criterion 5, as an equality between two traces rather than a claim.
         let fixture = parse(FIXTURE).unwrap();
