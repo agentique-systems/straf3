@@ -2359,7 +2359,6 @@ dependencies = [
 name = "straf3-replay"
 version = "0.1.0"
 dependencies = [
- "serde",
  "straf3-sim",
 ]
 

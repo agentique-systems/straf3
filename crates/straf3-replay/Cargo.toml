@@ -1,16 +1,49 @@
 [package]
 name = "straf3-replay"
-description = "Input recording and playback."
+description = "The .s3d recording format: a saved run, bound to the geometry and physics it was made against."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[lib]
+# cdylib so `wasm32-unknown-unknown` produces a `.wasm` the cross-target check
+# can instantiate with a raw `WebAssembly.instantiate` and no wasm-bindgen —
+# nothing between the simulation and the digest that comes back. rlib because
+# it is also an ordinary library that the rest of the workspace links.
+#
+# Same arrangement as `tools/det-runner`, and for the same reason. It is on the
+# real crate rather than on a shim next to it on purpose: the point of the
+# check is that the browser reproduces a run through *this* code, and a shim
+# would be a second thing that could drift from it.
+crate-type = ["cdylib", "rlib"]
+
 # BELOW THE LINE. Enforced by `cargo xtask check-seam`.
 #
-# Note the direction: replay depends on sim, never the reverse. Replay may
-# touch the filesystem; sim may not.
+# Note the direction: replay depends on sim, never the reverse.
+#
+# It depends on nothing else, and in particular not on `serde`, which this
+# crate used to declare and never used. The `.s3d` layout is written out byte
+# by byte in `codec.rs` because byte-identity between a 64-bit native target
+# and 32-bit wasm is a *requirement* of the format (criterion 7), not a
+# property to be hoped for; a derive would put that guarantee inside a
+# third-party crate's encoding choices, where a point release could change it
+# and invalidate every saved personal best without anything failing.
+#
+# It also depends on nothing that touches the filesystem. Like
+# `straf3_map::compile`, this crate takes and returns bytes: reading and
+# writing files is the caller's job, above the seam. That is what lets the
+# browser build load a `.s3d` it fetched over HTTP through the exact code path
+# the native client uses — and what lets the cross-target check below run the
+# whole format inside a `.wasm` with no imports at all.
 [dependencies]
 straf3-sim.workspace = true
-serde.workspace = true
+
+# The cross-target check (criterion 7): the same recording, round-tripped and
+# re-simulated on linux-gnu, linux-musl, windows-gnu and wasm32, must agree on
+# every number. Built and run by `crosstarget/verify.sh`; the wasm side is the
+# library's raw C-ABI exports, so it is not a binary there.
+[[bin]]
+name = "straf3-s3d-crosstarget"
+path = "bin/crosstarget.rs"
