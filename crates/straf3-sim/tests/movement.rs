@@ -282,11 +282,7 @@ fn perfect_strafe<W: World>(
         let cmd = UserCmd {
             forward_move: if axis == Axis::Forward { 127 } else { 0 },
             right_move: if axis == Axis::Strafe { 127 } else { 0 },
-            view: ViewAngles {
-                pitch: s(0.0),
-                yaw,
-                roll: s(0.0),
-            },
+            view: ViewAngles::from_degrees(s(0.0), yaw, s(0.0)),
             ..still()
         };
         st = step(&st, &cmd, world, profile);
@@ -312,11 +308,7 @@ fn hold_in_air(
 ) -> SimState {
     let cmd = UserCmd {
         forward_move: 127,
-        view: ViewAngles {
-            pitch: s(0.0),
-            yaw,
-            roll: s(0.0),
-        },
+        view: ViewAngles::from_degrees(s(0.0), yaw, s(0.0)),
         ..still()
     };
     run(
@@ -636,11 +628,7 @@ fn air_control_is_refused_when_a_strafe_key_is_also_held() {
     let diagonal = UserCmd {
         forward_move: 127,
         right_move: 127,
-        view: ViewAngles {
-            pitch: s(0.0),
-            yaw: s(20.0),
-            roll: s(0.0),
-        },
+        view: ViewAngles::from_degrees(s(0.0), s(20.0), s(0.0)),
         ..still()
     };
     let world = straf3_sim::world::EmptyWorld;
@@ -1003,11 +991,7 @@ fn an_inside_corner_stops_the_player_instead_of_leaking() {
     // Drive north-east into the corner for two seconds.
     let into_corner = UserCmd {
         forward_move: 127,
-        view: ViewAngles {
-            pitch: s(0.0),
-            yaw: s(45.0),
-            roll: s(0.0),
-        },
+        view: ViewAngles::from_degrees(s(0.0), s(45.0), s(0.0)),
         ..still()
     };
     let end = run(&base, &vec![into_corner; 250], &world, &p);

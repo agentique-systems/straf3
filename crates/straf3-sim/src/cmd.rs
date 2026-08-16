@@ -3,7 +3,7 @@
 //! This module carries spec decision D2. Read [`UserCmd::duration_ms`] and
 //! [`TickRate`] before changing anything here.
 
-use crate::num::Scalar;
+use crate::num::{Scalar, s};
 
 /// The simulation's command rate — an explicit, recorded parameter.
 ///
@@ -138,15 +138,153 @@ impl Buttons {
 ///
 /// Strafejumping is *entirely* about the relationship between view angle and
 /// velocity, so this is the input field the whole game turns on.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+///
+/// # Why 16 bits per axis (contract item C3)
+///
+/// Each axis is one of 65 536 evenly spaced directions — Q3's `ANGLE2SHORT` —
+/// giving [`ANGLE_RESOLUTION`], about 0.0055°, which is roughly a twentieth of
+/// the smallest motion a default-sensitivity mouse can report.
+///
+/// The point is not the wire size, though the format gets it for free. Mouse
+/// input is a stream of deltas accumulated into an angle, and if the recorded
+/// value is whatever `f32` that accumulator happens to hold, its value depends
+/// on the order and magnitude of every delta since the run began. Two clients
+/// with the same *intent* have no reason to produce the same number, and a
+/// recording is only exactly reproducible if the number it carries is exactly
+/// the number that was simulated. Quantising here — at the command boundary,
+/// where the input becomes physics — makes the input space finite and removes
+/// the whole question. There is no representation in which a recording can
+/// round-trip imperfectly, because the recorded value *is* the simulated one.
+///
+/// Quantising here and not at the input sample is deliberate: the platform
+/// layer's accumulator stays a full-precision angle, so mouse motion still
+/// feels continuous and repeated small deltas still add up. Only the command
+/// it hands over is snapped.
+///
+/// The second reason is range. [`crate::num::sin_cos`] reduces its argument in
+/// `f64`, which caps cancellation at 53 bits and so loses accuracy for
+/// arguments past a few thousand degrees. A `u16` cannot express an angle
+/// outside one turn, so a session that turns for an hour cannot walk the view
+/// angle out into that region — the degraded range is unreachable by
+/// construction rather than by a convention someone has to remember.
+///
+/// # Reading them
+///
+/// The physics wants degrees: [`Self::pitch_degrees`], [`Self::yaw_degrees`]
+/// and [`Self::roll_degrees`] are `SHORT2ANGLE`, and return a value in
+/// `[0, 360)`. Everything that consumes them goes through trigonometry, for
+/// which 315° and −45° are the same direction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct ViewAngles {
-    /// Look up/down. Negative is up, as in Quake.
-    pub pitch: Scalar,
-    /// Look left/right.
-    pub yaw: Scalar,
-    /// Roll. Player input never sets this; it exists because the simulation
-    /// may (tilt effects, and it keeps the type a complete orientation).
-    pub roll: Scalar,
+    /// Look up/down, as a 16-bit angle. Negative is up, as in Quake — which
+    /// after quantisation means looking up is just under 65 536, not below
+    /// zero. Use [`Self::pitch_degrees`] to read it.
+    pub pitch: u16,
+    /// Look left/right, as a 16-bit angle. See [`Self::yaw_degrees`].
+    pub yaw: u16,
+    /// Roll, as a 16-bit angle. Player input never sets this; it exists
+    /// because the simulation may (tilt effects, and it keeps the type a
+    /// complete orientation).
+    pub roll: u16,
+}
+
+/// Degrees per unit of a 16-bit angle: 360/65536, about 0.0055°.
+///
+/// Exact in binary — 360/65536 is 45·2⁻¹³ — which is what makes
+/// [`short_to_angle`] an exact operation rather than an approximate one.
+pub const ANGLE_RESOLUTION: Scalar = s(360.0 / 65536.0);
+
+/// 16-bit angle units per degree: 65536/360. The reciprocal of
+/// [`ANGLE_RESOLUTION`], and unlike it *not* exactly representable — which is
+/// why [`angle_to_short`] rounds to nearest rather than truncating.
+const SHORTS_PER_DEGREE: Scalar = s(65536.0 / 360.0);
+
+/// Quantise an angle in degrees to Q3's 16-bit form (`ANGLE2SHORT`).
+///
+/// Angles outside one turn wrap into it, so this is total: every `Scalar`,
+/// including a negative one, has an answer. (`NaN` and the infinities are not
+/// meaningful view angles; they land on a value rather than trapping, because
+/// float-to-integer casts in Rust saturate.)
+///
+/// # Why round-to-nearest and not Q3's truncation
+///
+/// Q3 wrote `(int)(x * 65536 / 360) & 65535` — a truncation. Truncating is not
+/// idempotent here: `65536/360` is not exactly representable, so
+/// `short_to_angle` followed by a truncating `angle_to_short` lands a hair
+/// below the original short about half the time and truncation then throws the
+/// whole unit away. That would make a recording that is *written* as degrees
+/// and *read back* as shorts lose a step per round trip, which is exactly the
+/// property C3 exists to guarantee. Rounding to nearest recovers the original
+/// short for all 65 536 of them — asserted exhaustively in this module's
+/// tests.
+///
+/// The rounding adds a half and truncates rather than calling `round`, which
+/// is the trick [`crate::num`] uses for the same reason: it reaches no libm
+/// entry point, so the result is fixed by IEEE arithmetic alone and cannot
+/// differ between a glibc build and a wasm one.
+#[inline]
+#[must_use]
+pub fn angle_to_short(degrees: Scalar) -> u16 {
+    let scaled = degrees * SHORTS_PER_DEGREE;
+    let half = if scaled < s(0.0) { s(-0.5) } else { s(0.5) };
+    // `as i64` saturates rather than wrapping or trapping, which is what keeps
+    // this total for absurd inputs; the mask is Q3's `& 65535`, and it is what
+    // folds an angle outside one turn back into it.
+    ((scaled + half) as i64 & 0xffff) as u16
+}
+
+/// The angle a 16-bit view angle stands for, in degrees `[0, 360)`
+/// (`SHORT2ANGLE`).
+///
+/// Exact: [`ANGLE_RESOLUTION`] is a power-of-two fraction and the product
+/// needs at most 22 bits of mantissa, so no rounding happens at all.
+#[inline]
+#[must_use]
+pub fn short_to_angle(short: u16) -> Scalar {
+    s(f32::from(short)) * ANGLE_RESOLUTION
+}
+
+impl ViewAngles {
+    /// Looking along +X, level, no roll.
+    pub const LEVEL: Self = Self {
+        pitch: 0,
+        yaw: 0,
+        roll: 0,
+    };
+
+    /// Quantise angles in degrees. See [`angle_to_short`].
+    #[must_use]
+    pub fn from_degrees(pitch: Scalar, yaw: Scalar, roll: Scalar) -> Self {
+        Self {
+            pitch: angle_to_short(pitch),
+            yaw: angle_to_short(yaw),
+            roll: angle_to_short(roll),
+        }
+    }
+
+    /// Level, no roll, looking along `yaw` degrees.
+    #[must_use]
+    pub fn looking_along(yaw: Scalar) -> Self {
+        Self::from_degrees(s(0.0), yaw, s(0.0))
+    }
+
+    /// Look up/down in degrees, `[0, 360)`. Up is just under 360.
+    #[must_use]
+    pub fn pitch_degrees(self) -> Scalar {
+        short_to_angle(self.pitch)
+    }
+
+    /// Look left/right in degrees, `[0, 360)`.
+    #[must_use]
+    pub fn yaw_degrees(self) -> Scalar {
+        short_to_angle(self.yaw)
+    }
+
+    /// Roll in degrees, `[0, 360)`.
+    #[must_use]
+    pub fn roll_degrees(self) -> Scalar {
+        short_to_angle(self.roll)
+    }
 }
 
 /// One command: everything the player did during one tick, and how long that
@@ -208,11 +346,7 @@ impl UserCmd {
             right_move: 0,
             up_move: 0,
             buttons: Buttons::NONE,
-            view: ViewAngles {
-                pitch: 0.0,
-                yaw: 0.0,
-                roll: 0.0,
-            },
+            view: ViewAngles::LEVEL,
         }
     }
 
@@ -246,6 +380,86 @@ mod tests {
         assert!(TickRate::from_hz(0).is_none());
         assert!(TickRate::from_hz(1001).is_none());
         assert_eq!(TickRate::from_hz(1000).unwrap().command_millis(), 1);
+    }
+
+    /// The property every recording rests on: a 16-bit angle, written out as
+    /// degrees and quantised again, is the *same* 16-bit angle. Exhaustive,
+    /// because "almost always" is not a property a replay format can be built
+    /// on — and because the obvious implementation (Q3's truncating
+    /// `ANGLE2SHORT`) fails this for roughly half of the 65 536.
+    #[test]
+    fn every_short_survives_a_round_trip_through_degrees() {
+        for short in 0..=u16::MAX {
+            assert_eq!(
+                angle_to_short(short_to_angle(short)),
+                short,
+                "short {short} did not come back"
+            );
+        }
+    }
+
+    #[test]
+    fn the_scale_is_quakes_angle2short() {
+        // The four cardinal directions, at the exact shorts Q3's macro gives.
+        assert_eq!(angle_to_short(s(0.0)), 0);
+        assert_eq!(angle_to_short(s(90.0)), 16_384);
+        assert_eq!(angle_to_short(s(180.0)), 32_768);
+        assert_eq!(angle_to_short(s(270.0)), 49_152);
+        assert_eq!(short_to_angle(16_384), s(90.0));
+        assert_eq!(short_to_angle(49_152), s(270.0));
+    }
+
+    #[test]
+    fn angles_outside_one_turn_wrap_into_it() {
+        // What makes the sin_cos accuracy argument hold by construction: no
+        // view angle can escape one turn, however long the session.
+        assert_eq!(angle_to_short(s(-90.0)), angle_to_short(s(270.0)));
+        assert_eq!(angle_to_short(s(360.0)), 0);
+        assert_eq!(angle_to_short(s(45.0) + s(720.0)), angle_to_short(s(45.0)));
+        assert_eq!(angle_to_short(s(-45.0)), 57_344); // 65 536 − 8 192
+    }
+
+    #[test]
+    fn the_resolution_is_finer_than_a_mouse_can_ask_for() {
+        // Q3's m_yaw · cl_sensitivity default is 0.11°/count. One quantum is
+        // ~0.0055°, so the smallest motion a mouse can report is still 20
+        // distinct angles wide: quantising cannot be felt.
+        assert!(ANGLE_RESOLUTION < s(0.11) / s(20.0));
+        assert_eq!(short_to_angle(1), ANGLE_RESOLUTION);
+        // Adjacent shorts are adjacent angles — no gaps, no repeats.
+        assert_ne!(angle_to_short(s(0.0)), angle_to_short(ANGLE_RESOLUTION));
+    }
+
+    #[test]
+    fn quantising_lands_on_the_nearest_representable_angle() {
+        // Half a quantum below a short rounds down to it, half above rounds
+        // to the next: the error is never more than half a quantum, which is
+        // the strongest statement a quantiser can make.
+        for short in [0_u16, 1, 4_095, 16_384, 32_768, 65_535] {
+            let exact = short_to_angle(short);
+            let nudge = ANGLE_RESOLUTION * s(0.4);
+            assert_eq!(angle_to_short(exact + nudge), short);
+            if short > 0 {
+                assert_eq!(angle_to_short(exact - nudge), short);
+            }
+        }
+    }
+
+    #[test]
+    fn a_still_command_is_looking_along_x() {
+        let cmd = UserCmd::still(8);
+        assert_eq!(cmd.view, ViewAngles::LEVEL);
+        assert_eq!(cmd.view.yaw_degrees(), s(0.0));
+        assert_eq!(cmd.view.pitch_degrees(), s(0.0));
+    }
+
+    #[test]
+    fn from_degrees_and_back_agrees_with_the_free_functions() {
+        let v = ViewAngles::from_degrees(s(-12.5), s(137.25), s(3.0));
+        assert_eq!(v.pitch, angle_to_short(s(-12.5)));
+        assert_eq!(v.yaw_degrees(), short_to_angle(angle_to_short(s(137.25))));
+        assert_eq!(ViewAngles::looking_along(s(90.0)).yaw, 16_384);
+        assert_eq!(ViewAngles::looking_along(s(90.0)).roll, 0);
     }
 
     #[test]

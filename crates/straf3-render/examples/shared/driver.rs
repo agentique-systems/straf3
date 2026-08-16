@@ -101,11 +101,7 @@ impl Autopilot {
             } else {
                 Buttons::NONE
             },
-            view: ViewAngles {
-                pitch: s(0.0),
-                yaw: SPAWN_YAW + TURN_RATE * seconds,
-                roll: s(0.0),
-            },
+            view: ViewAngles::from_degrees(s(0.0), SPAWN_YAW + TURN_RATE * seconds, s(0.0)),
         }
     }
 

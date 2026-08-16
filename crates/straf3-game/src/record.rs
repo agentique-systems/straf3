@@ -105,10 +105,21 @@ impl Recorder {
     /// count — a minute of play is 7 500 commands, and standing still is one
     /// line either way.
     ///
-    /// Angles are printed with `{:?}`, which is Rust's shortest
-    /// round-trippable form for `f32`: the parsed value is *bit-identical* to
-    /// the one recorded, which is the only reason the two checksums can be
-    /// compared at all.
+    /// # Angles
+    ///
+    /// View angles are 16-bit in the command (contract item C3) and are
+    /// written here as the degrees they stand for, with `{:?}` — Rust's
+    /// shortest round-trippable form for `f32`. The file therefore stays
+    /// human-readable and diffable, and the round trip is still exact: the
+    /// printed value is one of the 65 536 representable angles, it parses back
+    /// to the identical `f32`, and re-quantising it recovers the identical
+    /// short (`straf3_sim::cmd`'s exhaustive round-trip test is the guarantee).
+    ///
+    /// The alternative — printing the raw shorts — would be smaller but would
+    /// silently change the meaning of every `cmd` line already written: an old
+    /// `90` means 90°, and a reader expecting shorts would take it for 0.49°
+    /// and run a different session while looking like it had run the recorded
+    /// one. Compactness belongs in the binary replay format, not here.
     #[must_use]
     pub fn to_fixture(&self, world: WorldSpec, profile_name: &str) -> String {
         let mut out = String::with_capacity(64 * self.commands.len() + 512);
@@ -153,9 +164,9 @@ impl Recorder {
                 cmd.right_move,
                 cmd.up_move,
                 button_spec(cmd.buttons),
-                cmd.view.pitch,
-                cmd.view.yaw,
-                cmd.view.roll,
+                cmd.view.pitch_degrees(),
+                cmd.view.yaw_degrees(),
+                cmd.view.roll_degrees(),
             ));
             index += repeat;
         }
@@ -237,6 +248,13 @@ mod tests {
         // The recording is only worth anything if the parsed angle is the same
         // bits as the recorded one — a truncated decimal would replay to a
         // different checksum and the whole exercise would prove nothing.
+        //
+        // Since C3 the recorded angle is a 16-bit short, so the property has
+        // two halves and both are checked here: the printed degrees parse back
+        // to the identical `f32`, and that `f32` re-quantises to the identical
+        // short. Awkward *inputs* are used on purpose — they are quantised on
+        // the way into the command, and it is the quantised value, not the
+        // input, that has to survive the file.
         let mut rec = recorder();
         let awkward = [
             s(1.0 / 3.0),
@@ -244,25 +262,32 @@ mod tests {
             s(179.999_98),
             s(0.1) + s(0.2),
             s(1.234_567_9e-7),
+            s(359.999_97),
         ];
         for yaw in awkward {
             rec.push(UserCmd {
-                view: ViewAngles {
-                    pitch: s(0.0),
-                    yaw,
-                    roll: s(0.0),
-                },
+                view: ViewAngles::looking_along(yaw),
                 ..UserCmd::still_at(TickRate::HZ_125)
             });
         }
         let text = rec.to_fixture(WorldSpec::Flat(s(0.0)), "cpm");
-        for (line, expected) in text
+        let recorded: Vec<UserCmd> = rec.commands().to_vec();
+        for (line, original) in text
             .lines()
             .filter(|l| l.starts_with("cmd "))
-            .zip(awkward.iter())
+            .zip(recorded.iter())
         {
             let field: f32 = line.split_whitespace().nth(7).unwrap().parse().unwrap();
-            assert_eq!(field.to_bits(), expected.to_bits(), "{line}");
+            assert_eq!(
+                field.to_bits(),
+                original.view.yaw_degrees().to_bits(),
+                "printed degrees are not the recorded ones: {line}"
+            );
+            assert_eq!(
+                straf3_sim::angle_to_short(field),
+                original.view.yaw,
+                "re-quantising the printed degrees lost the short: {line}"
+            );
         }
     }
 

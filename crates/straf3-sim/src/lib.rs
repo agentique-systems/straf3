@@ -97,7 +97,9 @@ pub mod state;
 pub mod step;
 pub mod world;
 
-pub use cmd::{Buttons, TickRate, UserCmd, ViewAngles};
+pub use cmd::{
+    ANGLE_RESOLUTION, Buttons, TickRate, UserCmd, ViewAngles, angle_to_short, short_to_angle,
+};
 pub use profile::PhysicsProfile;
 pub use state::{GroundState, PlayerState, RunState, SimState, Timers};
 pub use step::{run, step, step_in_place};

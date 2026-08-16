@@ -154,11 +154,17 @@ pub fn parse(text: &str) -> Result<Fixture, String> {
                     right_move: axis(&f, 3).map_err(&at)?,
                     up_move: axis(&f, 4).map_err(&at)?,
                     buttons: parse_buttons(f.get(5).copied().unwrap_or("-")).map_err(&at)?,
-                    view: ViewAngles {
-                        pitch: num(&f, 6).unwrap_or(s(0.0)),
-                        yaw: num(&f, 7).unwrap_or(yaw),
-                        roll: num(&f, 8).unwrap_or(s(0.0)),
-                    },
+                    // Angles are written as degrees and quantised on the way
+                    // in (contract item C3). A file that was written by the
+                    // recorder already holds representable angles, so this is
+                    // the identity for them; a hand-written one is snapped to
+                    // the nearest representable angle rather than being run at
+                    // a precision no command could have carried.
+                    view: ViewAngles::from_degrees(
+                        num(&f, 6).unwrap_or(s(0.0)),
+                        num(&f, 7).unwrap_or(yaw),
+                        num(&f, 8).unwrap_or(s(0.0)),
+                    ),
                 };
                 cmds.reserve(repeat as usize);
                 for _ in 0..repeat {
@@ -356,7 +362,10 @@ cmd 50 127 64 0 - 0 92.5
         assert_eq!(fixture.cmds[100].up_move, 127);
         assert!(fixture.cmds[100].buttons.contains(Buttons::JUMP));
         assert_eq!(fixture.cmds[150].right_move, 64);
-        assert_eq!(fixture.cmds[150].view.yaw, s(92.5));
+        assert_eq!(
+            fixture.cmds[150].view.yaw,
+            straf3_sim::angle_to_short(s(92.5))
+        );
     }
 
     #[test]
@@ -391,8 +400,11 @@ cmd 50 127 64 0 - 0 92.5
                 Buttons::NONE
             };
             cmd.up_move = if i % 7 == 0 { 127 } else { 0 };
-            cmd.view.yaw = s(90.0) + s(i as f32) / s(3.0);
-            cmd.view.pitch = s(-1.0) / s((i + 1) as f32);
+            cmd.view = ViewAngles::from_degrees(
+                s(-1.0) / s((i + 1) as f32),
+                s(90.0) + s(i as f32) / s(3.0),
+                s(0.0),
+            );
             recorder.push(cmd);
         }
 
@@ -402,6 +414,83 @@ cmd 50 127 64 0 - 0 92.5
         for (parsed, original) in fixture.cmds.iter().zip(recorder.commands()) {
             assert_eq!(parsed, original);
         }
+    }
+
+    /// Contract item C3, end to end: a run recorded through the 16-bit view
+    /// angle, written to a file and replayed from it reproduces the *same
+    /// simulation*, not merely the same commands.
+    ///
+    /// Command equality (the test above) is the necessary half; this is the
+    /// sufficient one. It compares the checksum at every tick rather than at
+    /// the last, because a divergence can reconverge — a run has been measured
+    /// matching on its final state while 29 of 1200 intermediate states
+    /// differed, and an end-state comparison would have called that identical.
+    ///
+    /// The yaws are deliberately not representable angles: they are what an
+    /// accumulating mouse would produce, quantised at the command boundary,
+    /// and it is the quantised value the file has to carry back.
+    #[test]
+    fn a_recorded_run_replays_to_the_same_digest_at_every_tick() {
+        let spawn = vec3(s(0.0), s(0.0), s(24.0));
+        let spawn_yaw = s(90.0);
+        let mut recorder = Recorder::new(TickRate::HZ_125, spawn, spawn_yaw);
+
+        // A minute-and-a-half of strafejumping: turning continuously, jumping
+        // on a rhythm, with a pitch that sweeps through level.
+        let mut cmd = UserCmd::still_at(TickRate::HZ_125);
+        for i in 0..1_000 {
+            let t = s(i as f32);
+            cmd.forward_move = 127;
+            cmd.right_move = if (i / 40) % 2 == 0 { 127 } else { -127 };
+            let jumping = i % 11 == 0;
+            cmd.buttons = if jumping {
+                Buttons::JUMP
+            } else {
+                Buttons::NONE
+            };
+            cmd.up_move = if jumping { 127 } else { 0 };
+            cmd.view =
+                ViewAngles::from_degrees(s(-20.0) + t * s(0.037), spawn_yaw + t * s(0.31), s(0.0));
+            recorder.push(cmd);
+        }
+
+        let live = replay(
+            &Fixture {
+                rate: TickRate::HZ_125,
+                profile: PhysicsProfile::cpm(),
+                profile_name: "cpm".to_owned(),
+                world: WorldChoice::Flat,
+                spawn,
+                yaw: spawn_yaw,
+                cmds: recorder.commands().to_vec(),
+            },
+            &ReplayOptions::default(),
+        )
+        .unwrap();
+
+        let text = recorder.to_fixture(WorldSpec::Flat(s(0.0)), "cpm");
+        let from_file = replay(&parse(&text).unwrap(), &ReplayOptions::default()).unwrap();
+
+        assert_eq!(live.len(), 1_001);
+        assert_eq!(live.len(), from_file.len());
+        for (tick, (a, b)) in live.iter().zip(&from_file).enumerate() {
+            assert_eq!(a.checksum(), b.checksum(), "diverged at tick {tick}");
+        }
+
+        // And the run is a real one — a digest agreeing about nothing
+        // happening would prove nothing. Past `max_speed` is the meaningful
+        // threshold rather than an arbitrary number: ground movement cannot
+        // exceed it, so the player is only there by strafejumping, which is
+        // the code path where the view angle actually matters.
+        let last = live.last().unwrap();
+        let speed = (last.player.velocity.x * last.player.velocity.x
+            + last.player.velocity.y * last.player.velocity.y)
+            .sqrt();
+        assert!(
+            speed > PhysicsProfile::cpm().max_speed,
+            "the reference run never left the ground speed cap: {speed}"
+        );
+        assert_ne!(live[0].checksum(), last.checksum());
     }
 
     #[test]

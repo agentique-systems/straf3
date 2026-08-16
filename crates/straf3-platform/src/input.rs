@@ -19,6 +19,11 @@
 //!
 //! Getting this backwards is the failure mode that compiles cleanly and
 //! breaks replay equivalence silently, which is why it has its own test.
+//!
+//! The accumulator is full-precision and the *command* is 16-bit
+//! ([`MouseLook::angles`], contract item C3). That split is the point: snap
+//! the accumulator instead and every mouse delta smaller than a quantum
+//! rounds to nothing, so a slow turn never happens.
 
 use straf3_sim::ViewAngles;
 use straf3_sim::num::{Scalar, s};
@@ -137,13 +142,18 @@ impl MouseLook {
     /// Roll is always zero: player input never rolls the view
     /// ([`ViewAngles::roll`] exists for the simulation's benefit, not the
     /// mouse's).
+    ///
+    /// # This is where the angle becomes 16-bit
+    ///
+    /// [`ViewAngles`] is quantised to Q3's 16-bit form (contract item C3), and
+    /// this call is the boundary it happens at: the accumulator above stays
+    /// full-precision, so a stream of sub-quantum mouse deltas still adds up
+    /// to a turn and the mouse still feels continuous, and only the command
+    /// handed to the simulation is snapped. Quantising [`Self::apply_motion`]
+    /// instead would round every delta to nothing and the view would stick.
     #[must_use]
-    pub const fn angles(&self) -> ViewAngles {
-        ViewAngles {
-            pitch: self.pitch,
-            yaw: self.yaw,
-            roll: s(0.0),
-        }
+    pub fn angles(&self) -> ViewAngles {
+        ViewAngles::from_degrees(self.pitch, self.yaw, s(0.0))
     }
 
     /// Look up/down, in degrees. Negative is up.
@@ -431,8 +441,43 @@ mod tests {
     fn angles_leave_with_no_roll() {
         let mut look = MouseLook::looking_along(s(45.0));
         look.apply_motion(s(10.0), s(10.0));
-        assert_eq!(look.angles().roll, s(0.0));
-        assert_eq!(look.angles().yaw, look.yaw());
-        assert_eq!(look.angles().pitch, look.pitch());
+        assert_eq!(look.angles().roll, 0);
+        assert_eq!(
+            look.angles(),
+            ViewAngles::from_degrees(look.pitch(), look.yaw(), s(0.0))
+        );
+    }
+
+    #[test]
+    fn the_accumulator_keeps_full_precision_so_small_motions_still_add_up() {
+        // The failure mode quantising invites: snap the *accumulator* and
+        // every delta smaller than a quantum rounds to nothing, so a slow
+        // mouse never turns at all. Only the command is snapped, so 400 of
+        // these still add up to the 44° they should.
+        let mut look = MouseLook::looking_along(s(0.0));
+        let before = look.angles();
+        look.apply_motion(s(0.01), s(0.0));
+        // One 0.01-count motion is 0.0011°, a fifth of a quantum: too small to
+        // move the command, but it is not lost — it is still in the
+        // accumulator.
+        assert_eq!(look.angles(), before);
+        assert_ne!(look.yaw(), s(0.0));
+
+        for _ in 0..3_999 {
+            look.apply_motion(s(0.01), s(0.0));
+        }
+        // 4000 · 0.01 · 0.11°/count = 4.4°, turning right, so yaw falls. The
+        // tolerance is 0.02° and not 0.001° because `wrap_degrees` sends every
+        // negative intermediate out to ~360 and back, where an `f32` has a
+        // coarser ulp; over 4000 events that loses about 0.005°. That is the
+        // accumulator's own rounding and it is exactly why the *command* is
+        // quantised rather than trusted — nothing here reaches the physics
+        // except through `angles()`.
+        assert!((look.yaw() - s(-4.4)).abs() < s(0.02), "{}", look.yaw());
+        assert_eq!(
+            look.angles(),
+            ViewAngles::from_degrees(s(0.0), look.yaw(), s(0.0))
+        );
+        assert_ne!(look.angles(), before);
     }
 }

@@ -31,11 +31,11 @@ fn autopilot(state: &SimState, rate: TickRate, turn_rate: Scalar) -> UserCmd {
         } else {
             Buttons::NONE
         },
-        view: ViewAngles {
-            pitch: s(0.0),
-            yaw: SPAWN_YAW + turn_rate * (state.time_ms as Scalar / s(1000.0)),
-            roll: s(0.0),
-        },
+        view: ViewAngles::from_degrees(
+            s(0.0),
+            SPAWN_YAW + turn_rate * (state.time_ms as Scalar / s(1000.0)),
+            s(0.0),
+        ),
     }
 }
 
@@ -143,11 +143,7 @@ fn the_player_can_run_up_the_gentle_ramp_onto_the_platform() {
             right_move: 0,
             up_move: 0,
             buttons: Buttons::NONE,
-            view: ViewAngles {
-                pitch: s(0.0),
-                yaw: s(0.0),
-                roll: s(0.0),
-            },
+            view: ViewAngles::from_degrees(s(0.0), s(0.0), s(0.0)),
         };
         step_in_place(&mut state, &cmd, &ARENA, &profile);
         highest = highest.max(state.player.origin.z);
@@ -230,11 +226,7 @@ fn holding_forward_from_the_spawn_goes_somewhere() {
             right_move: 0,
             up_move: 0,
             buttons: Buttons::NONE,
-            view: ViewAngles {
-                pitch: s(0.0),
-                yaw: SPAWN_YAW,
-                roll: s(0.0),
-            },
+            view: ViewAngles::from_degrees(s(0.0), SPAWN_YAW, s(0.0)),
         };
         step_in_place(&mut state, &cmd, &ARENA, &profile);
     }

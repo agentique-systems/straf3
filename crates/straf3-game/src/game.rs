@@ -271,7 +271,10 @@ mod tests {
         game.respawn();
         assert_eq!(game.state().player.origin, vec3(s(0.0), s(0.0), s(24.0)));
         assert_eq!(game.state().player.velocity, straf3_sim::num::ZERO);
-        assert_eq!(game.state().player.view.yaw, looking);
+        assert_eq!(
+            game.state().player.view.yaw,
+            straf3_sim::angle_to_short(looking)
+        );
     }
 
     #[test]

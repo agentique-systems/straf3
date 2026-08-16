@@ -219,9 +219,9 @@ impl Run {
                 cmd.right_move,
                 cmd.up_move,
                 render_buttons(cmd.buttons),
-                render_scalar(cmd.view.pitch),
-                render_scalar(cmd.view.yaw),
-                render_scalar(cmd.view.roll),
+                render_scalar(cmd.view.pitch_degrees()),
+                render_scalar(cmd.view.yaw_degrees()),
+                render_scalar(cmd.view.roll_degrees()),
             );
             i += repeat;
         }
@@ -470,11 +470,7 @@ pub fn arena_runs() -> Vec<Run> {
             } else {
                 Buttons::NONE
             },
-            view: ViewAngles {
-                pitch: s(0.0),
-                yaw: s(0.9) * t,
-                roll: s(0.0),
-            },
+            view: ViewAngles::from_degrees(s(0.0), s(0.9) * t, s(0.0)),
         });
     }
 
@@ -554,11 +550,7 @@ fn strafe_jump(name: &'static str, profile: Profile) -> Run {
         cmds.push(UserCmd {
             duration_ms: ms,
             forward_move: 127,
-            view: ViewAngles {
-                pitch: s(0.0),
-                yaw: s(0.0),
-                roll: s(0.0),
-            },
+            view: ViewAngles::from_degrees(s(0.0), s(0.0), s(0.0)),
             ..UserCmd::still_at(rate)
         });
     }
@@ -579,11 +571,7 @@ fn strafe_jump(name: &'static str, profile: Profile) -> Run {
             forward_move: 0,
             right_move: 127,
             buttons: Buttons::NONE,
-            view: ViewAngles {
-                pitch: s(0.0),
-                yaw,
-                roll: s(0.0),
-            },
+            view: ViewAngles::from_degrees(s(0.0), yaw, s(0.0)),
             ..UserCmd::still_at(rate)
         });
     }
@@ -621,11 +609,7 @@ fn airborne_turn_empty() -> Run {
                 } else {
                     Buttons::NONE
                 },
-                view: ViewAngles {
-                    pitch: s(-20.0) + s(0.13) * t,
-                    yaw: s(1.7) * t,
-                    roll: s(0.05) * t,
-                },
+                view: ViewAngles::from_degrees(s(-20.0) + s(0.13) * t, s(1.7) * t, s(0.05) * t),
             }
         })
         .collect();
