@@ -45,7 +45,9 @@ use std::sync::OnceLock;
 
 use straf3_sim::num::{s, vec3};
 use straf3_sim::world::FlatGround;
-use straf3_sim::{Buttons, PhysicsProfile, SimState, TickRate, UserCmd, step_in_place};
+use straf3_sim::{
+    Buttons, PhysicsProfile, SimState, TickRate, UserCmd, angle_to_short, step_in_place,
+};
 
 /// Bumped when the report text format changes in a way a reader must notice.
 /// `xtask` refuses to compare reports that do not agree on it, which is what
@@ -219,14 +221,21 @@ fn cmd_for(case: &Case, i: u32, grounded: bool) -> UserCmd {
     let rate = TickRate::from_hz(case.hz).expect("reference case rate is in 1..=1000");
     let mut cmd = UserCmd::still_at(rate);
 
-    cmd.view.yaw = match case.yaw {
+    // C3: view angles are 16-bit at the command boundary. The cases are
+    // authored in degrees because that is what makes them readable as
+    // movement, and quantised here — at the boundary, exactly where a real
+    // producer quantises — rather than being written as short literals. The
+    // wrap in `angle_to_short` is load-bearing for the stepping cases:
+    // `Yaw::Step(0.37)` passes 360° around command 973, and the mask folds it
+    // back into one turn instead of handing a growing angle to `sin_cos`.
+    cmd.view.yaw = angle_to_short(match case.yaw {
         Yaw::Fixed(deg) => s(deg),
         Yaw::Step(deg) => s(i as f32) * s(deg),
-    };
-    cmd.view.pitch = match case.pitch {
+    });
+    cmd.view.pitch = angle_to_short(match case.pitch {
         Pitch::Level => s(0.0),
         Pitch::Sweep => s(-45.0) + s((i % 180) as f32) * s(0.5),
-    };
+    });
 
     if case.still {
         return cmd;
