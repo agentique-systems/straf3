@@ -101,6 +101,94 @@ pub fn to_bits(v: Scalar) -> u32 {
     v.to_bits()
 }
 
+/// π/2 split into two `f64` pieces, so the reduction subtracts exactly
+/// representable quantities: `PIO2_HI` is the `f64` nearest π/2, `PIO2_LO` the
+/// residual it left behind.
+const PIO2_HI: f64 = core::f64::consts::FRAC_PI_2;
+const PIO2_LO: f64 = 6.123_233_995_736_766e-17;
+const TWO_OVER_PI: f64 = core::f64::consts::FRAC_2_PI;
+
+/// Reduce `x` radians to `(quadrant, remainder)` with `|remainder| ≤ π/4`,
+/// using only IEEE-specified arithmetic.
+///
+/// The rounding of `x·2/π` to the nearest integer is done by adding ±0.5 and
+/// truncating rather than by calling `round`, so that no libm entry point is
+/// reached even for the reduction.
+///
+/// Float-to-integer casts in Rust saturate, which is what keeps this total:
+/// an infinite or NaN argument produces a quadrant rather than a trap, and the
+/// polynomial then propagates NaN. That behaviour is identical on every
+/// target, including wasm, where rustc emits the saturating truncation
+/// instructions rather than the trapping ones.
+fn reduce(x: f64) -> (i64, f64) {
+    let scaled = x * TWO_OVER_PI;
+    let q = (scaled + if scaled >= 0.0 { 0.5 } else { -0.5 }) as i64;
+    let qf = q as f64;
+    let r = (x - qf * PIO2_HI) - qf * PIO2_LO;
+    (q, r)
+}
+
+/// The Taylor series for sine, to r⁹, evaluated in Horner form.
+fn poly_sin(r: f64) -> f64 {
+    let r2 = r * r;
+    // r - r³/6 + r⁵/120 - r⁷/5040 + r⁹/362880
+    r * (1.0
+        + r2 * (-1.0 / 6.0 + r2 * (1.0 / 120.0 + r2 * (-1.0 / 5040.0 + r2 * (1.0 / 362_880.0)))))
+}
+
+/// The Taylor series for cosine, to r⁸, evaluated in Horner form.
+fn poly_cos(r: f64) -> f64 {
+    let r2 = r * r;
+    // 1 - r²/2 + r⁴/24 - r⁶/720 + r⁸/40320
+    1.0 + r2 * (-0.5 + r2 * (1.0 / 24.0 + r2 * (-1.0 / 720.0 + r2 * (1.0 / 40_320.0))))
+}
+
+/// Sine and cosine of an angle in radians.
+///
+/// Not `f32::sin_cos`. std's implementation is whatever libm the target links,
+/// and those disagree: glibc differs from the statically-linked `libm` that
+/// wasm and musl builds use, by 1 ulp on roughly 1.3% of angles. A probe
+/// measured that gap corrupting a recorded run after about 14 seconds of play
+/// — enough to make a browser recording unverifiable on a glibc server.
+///
+/// Cody-Waite argument reduction plus Taylor polynomials, using only
+/// `+ - * /`. Every operation is IEEE-specified and correctly rounded, so this
+/// is identical on every conforming target by construction — which is a
+/// stronger promise than "we all call the same library", and it costs no
+/// dependency. Q3 shipped its own tables for substantially this reason.
+///
+/// # Accuracy is not the goal
+///
+/// The physics is defined as whatever this function returns. What cannot be
+/// tolerated is two answers, not error against the real sine. The measured
+/// numbers, for the record: within 1 ulp of both glibc's and musl's `sinf`
+/// and `cosf` for every `f32` angle below 8192°, degrading past that (12 ulp
+/// by 8192° for cosine, by 16384° for sine, and further beyond) because the
+/// reduction's cancellation is bounded by `f64`'s 53 bits however precisely
+/// π/2 is stored. Angles that large are unreachable once view angles are
+/// 16-bit at the command boundary, and the degradation is deterministic
+/// regardless — it is an accuracy limit, not a determinism one.
+///
+/// # This is not fixed-point-swap-clean
+///
+/// Unlike the rest of this module, the body names `f64` directly. A
+/// fixed-point [`Scalar`] would need this rewritten rather than retyped —
+/// which is the correct outcome: a fixed-point simulation wants a table or a
+/// CORDIC, not a Taylor series in a wider float.
+#[inline]
+#[must_use]
+pub fn sin_cos(radians: Scalar) -> (Scalar, Scalar) {
+    let (q, r) = reduce(f64::from(radians));
+    let (sp, cp) = (poly_sin(r), poly_cos(r));
+    let (sin, cos) = match q.rem_euclid(4) {
+        0 => (sp, cp),
+        1 => (cp, -sp),
+        2 => (-sp, -cp),
+        _ => (-cp, sp),
+    };
+    (sin as Scalar, cos as Scalar)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -117,5 +205,147 @@ mod tests {
         // The reason determinism tests compare bits and not values: these two
         // are `==` but are not the same state.
         assert_ne!(to_bits(s(0.0)), to_bits(s(-0.0)));
+    }
+
+    /// Degrees to radians, byte-for-byte the expression `step.rs` uses.
+    ///
+    /// Reproduced rather than imported because the constant is private to the
+    /// module that owns `angle_vectors`. Both are compile-time folded from the
+    /// identical expression, so this is the same `f32`, and the sweeps below
+    /// therefore feed [`sin_cos`] exactly the arguments the simulation does —
+    /// not idealised radian values chosen for convenience.
+    const DEG_TO_RAD: f32 = core::f32::consts::PI * 2.0 / 360.0;
+
+    /// Distance between two `f32`s counted in representable values.
+    ///
+    /// Sign-magnitude is remapped to a monotone ordering first, so the count
+    /// stays meaningful across zero.
+    fn ulp_gap(a: f32, b: f32) -> u32 {
+        let ordered = |v: f32| -> i64 {
+            let bits = i64::from(v.to_bits() as i32);
+            if bits < 0 {
+                i64::from(i32::MIN) - bits
+            } else {
+                bits
+            }
+        };
+        (ordered(a) - ordered(b)).unsigned_abs() as u32
+    }
+
+    /// Worst-case gap against the host's libm over a bit-pattern sweep of
+    /// degree values, returned as `(sin, cos)`.
+    ///
+    /// Strided over `f32` bit patterns rather than over evenly spaced reals,
+    /// because that is what samples every octave equally — a linear sweep
+    /// spends almost all its samples in the largest octave and would barely
+    /// probe small angles at all.
+    fn worst_gap_over_degrees(from_bits: u32, to_bits_incl: u32, stride: u32) -> (u32, u32) {
+        let mut worst = (0, 0);
+        let mut bits = from_bits;
+        while bits <= to_bits_incl {
+            for magnitude in [f32::from_bits(bits), -f32::from_bits(bits)] {
+                let radians = magnitude * DEG_TO_RAD;
+                let (own_sin, own_cos) = sin_cos(radians);
+                let (libm_sin, libm_cos) = radians.sin_cos();
+                worst.0 = worst.0.max(ulp_gap(own_sin, libm_sin));
+                worst.1 = worst.1.max(ulp_gap(own_cos, libm_cos));
+            }
+            bits += stride;
+        }
+        worst
+    }
+
+    /// Spec acceptance criterion 1: within 1 ULP of libm across a dense sweep.
+    ///
+    /// The domain stops at 8192° because that is where a prior exhaustive
+    /// probe (`probes/dettrig-accuracy/`, 570,429,352 samples against a
+    /// double-double reference) measured the first crossing above 1 ULP —
+    /// cosine at the 8192° octave, sine one octave later. Sweeping past it
+    /// would assert a bound this implementation is known not to meet, and
+    /// deliberately does not need to: see [`sin_cos`]'s own docs, and note
+    /// that view angles that large are unreachable once they are 16-bit at
+    /// the command boundary.
+    ///
+    /// This compares against *the host's* libm, whichever that is. glibc and
+    /// musl were both measured within 1 ULP of true here, so both satisfy it.
+    #[test]
+    fn sin_cos_is_within_one_ulp_of_libm_across_the_reachable_domain() {
+        // 2^-10° up to 8192°. Below 2^-10, sin(x) == x to full f32 precision
+        // for any competent implementation; the spot checks below cover it.
+        let (sin_gap, cos_gap) = worst_gap_over_degrees(0x3a80_0000, 0x4600_0000, 503);
+        assert!(
+            sin_gap <= 1 && cos_gap <= 1,
+            "sin_cos drifted from libm: worst sin gap {sin_gap} ulp, cos {cos_gap} ulp",
+        );
+    }
+
+    /// The angles a player actually holds, swept every representable value.
+    #[test]
+    fn sin_cos_is_within_one_ulp_of_libm_over_one_full_turn() {
+        // Every f32 degree magnitude in [256, 512) — a whole octave straddling
+        // the 360° a view angle lives in, exhaustively, no stride.
+        let (sin_gap, cos_gap) = worst_gap_over_degrees(0x4380_0000, 0x4400_0000, 1);
+        assert!(
+            sin_gap <= 1 && cos_gap <= 1,
+            "sin_cos drifted from libm near one turn: sin {sin_gap} ulp, cos {cos_gap} ulp",
+        );
+    }
+
+    #[test]
+    fn sin_cos_reproduces_the_quadrant_identities() {
+        let quarter = core::f32::consts::FRAC_PI_2;
+        for turn in -8i32..=8 {
+            let x = quarter * turn as f32;
+            let (sin, cos) = sin_cos(x);
+            let expected = match turn.rem_euclid(4) {
+                0 => (0.0, 1.0),
+                1 => (1.0, 0.0),
+                2 => (0.0, -1.0),
+                _ => (-1.0, 0.0),
+            };
+            // The argument itself is only the f32 nearest a multiple of π/2,
+            // so the exact identity is not reachable; 1e-6 is far tighter than
+            // any tolerance the movement tests use and still passes.
+            assert!(
+                (sin - expected.0).abs() < 1e-6 && (cos - expected.1).abs() < 1e-6,
+                "quadrant {turn}: got {sin}, {cos}, wanted {expected:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn sin_cos_is_total_on_the_values_that_break_naive_reduction() {
+        // A trapping float-to-int cast in the reduction would abort on these.
+        // Rust's casts saturate, so each one lands somewhere defined and the
+        // same somewhere on every target. Only NaN-ness is asserted, not which
+        // NaN: the point is that nothing traps and nothing is platform-chosen.
+        for x in [f32::INFINITY, f32::NEG_INFINITY, f32::NAN, 1e38, -1e38] {
+            let (sin, cos) = sin_cos(x);
+            assert!(
+                sin.is_nan() == cos.is_nan() || (sin.abs() <= 1.0 && cos.abs() <= 1.0),
+                "sin_cos({x}) produced an inconsistent pair: {sin}, {cos}",
+            );
+        }
+        assert_eq!(to_bits(sin_cos(0.0).0), to_bits(0.0));
+        assert_eq!(sin_cos(0.0).1, 1.0);
+    }
+
+    #[test]
+    fn sin_cos_matches_libm_on_tiny_and_subnormal_arguments() {
+        for x in [
+            f32::MIN_POSITIVE,
+            f32::from_bits(1),
+            1e-20,
+            1e-10,
+            -1e-10,
+            1e-4,
+        ] {
+            let (own_sin, own_cos) = sin_cos(x);
+            let (libm_sin, libm_cos) = x.sin_cos();
+            assert!(
+                ulp_gap(own_sin, libm_sin) <= 1 && ulp_gap(own_cos, libm_cos) <= 1,
+                "tiny argument {x:e}: got {own_sin:e}/{own_cos}, libm {libm_sin:e}/{libm_cos}",
+            );
+        }
     }
 }

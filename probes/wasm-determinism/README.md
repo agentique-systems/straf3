@@ -1,5 +1,15 @@
 # wasm determinism probe
 
+> **Superseded by the fix it designed.** Everything below measures the tree as
+> it was *before* contract item C1 landed, when `angle_vectors` still called
+> `f32::sin_cos`. It now calls `num::sin_cos`, so this probe's `build.rs` has
+> no call sites left to redirect: it detects that, emits a `cargo:warning`,
+> and applies no patch — which makes its `patched_sim` module an exact copy of
+> the real sim and every patched-vs-stock figure it reports a tautology. The
+> crate still builds and its harness (including `web/`) still works; the
+> results in this file are not reproducible against the current tree. For the
+> post-C1 numbers, see `probes/c1-owned-trig/`.
+
 Answers spec rev 5 §L: **does `straf3-sim` produce bit-identical
 `SimState::checksum()` results in a browser (wasm32) and on a native x86-64
 verification server?**

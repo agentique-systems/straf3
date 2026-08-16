@@ -143,6 +143,35 @@ const FORBIDDEN_SIM_SOURCE: &[(&str, &str)] = &[
     ),
 ];
 
+/// Transcendental functions the simulation may not call, anywhere in
+/// `crates/straf3-sim/src/` except `num.rs`.
+///
+/// # Why this is a rule and not a review note
+///
+/// `f32::sin_cos` is whichever libm the target links, and libm `sinf`/`cosf`
+/// are not IEEE-754-specified: glibc and the statically-linked `libm` that
+/// wasm and musl builds use disagree by 1 ulp on roughly 1.3% of angles. A
+/// probe measured that gap diverging a recorded run after about 14 seconds of
+/// play, which is enough to make a browser recording unverifiable on a glibc
+/// server. `num::sin_cos` exists to replace them, using only IEEE-specified
+/// arithmetic (contract item C1).
+///
+/// Fixing the three call sites once is worth nothing without this: the next
+/// `.sin()` written anywhere in the physics silently reintroduces the whole
+/// problem, and it would look like ordinary code while doing it.
+///
+/// `num.rs` is exempt because it is where a deterministic replacement has to
+/// be written and tested — its tests compare against libm on purpose.
+/// `sqrt` is absent deliberately: it *is* IEEE-specified and correctly
+/// rounded, so `normalize` may keep calling it.
+const TRANSCENDENTALS: &[&str] = &[
+    "sin", "cos", "sin_cos", "tan", "asin", "acos", "atan2", "exp", "ln", "powf",
+];
+
+/// The one file under `straf3-sim/src/` allowed to hold the arithmetic these
+/// functions would otherwise be reached for.
+const TRANSCENDENTAL_HOME: &str = "num.rs";
+
 /// A single seam violation, phrased so the fix is obvious.
 #[derive(Debug, Clone)]
 pub struct Violation {
@@ -591,7 +620,8 @@ fn check_sim_source(root: &Path, report: &mut Report) {
         return;
     }
     report.notes.push(format!(
-        "straf3-sim: scanned {} source file(s) for std escapes",
+        "straf3-sim: scanned {} source file(s) for std escapes and \
+         transcendental calls outside {TRANSCENDENTAL_HOME}",
         files.len()
     ));
 
@@ -651,7 +681,85 @@ fn check_sim_source(root: &Path, report: &mut Report) {
                 is_source: true,
             });
         }
+
+        // 3. Transcendental calls (contract item C1). Skipped for the one file
+        //    that is allowed to hold the replacement and test it against libm.
+        let is_home = file.file_name().is_some_and(|n| n == TRANSCENDENTAL_HOME);
+        if !is_home {
+            for (lineno, pattern) in transcendental_hits(&code) {
+                report.violations.push(Violation {
+                    crate_name: "straf3-sim".to_string(),
+                    offender: pattern,
+                    reason: format!(
+                        "libm is not IEEE-specified and differs between targets \
+                         (glibc vs wasm/musl) — use `num::sin_cos`, or add the \
+                         arithmetic to {TRANSCENDENTAL_HOME}"
+                    ),
+                    how: format!("{rel}:{lineno}"),
+                    is_source: true,
+                });
+            }
+        }
     }
+}
+
+/// Every transcendental call in already-normalised source, as
+/// `(line number, the text that matched)`.
+///
+/// Matching happens on the file with **all whitespace removed**, carrying a
+/// parallel index back to line numbers. That is what makes the rule hold up:
+/// a raw-line `contains(".sin(")` misses `x . sin ( )`, and — far more likely
+/// — misses the rustfmt-wrapped method chain
+///
+/// ```text
+/// let (s, c) = (yaw * DEG_TO_RAD)
+///     .sin_cos();
+/// ```
+///
+/// which is not a bypass anyone has to intend. The `use`-expansion pass above
+/// is no help here either, since these are method calls with no import to see.
+///
+/// Both the method form (`.sin(`) and the fully-qualified form (`f32::sin(`,
+/// and the `Scalar` alias for it) are matched, because UFCS is the one-line
+/// way around a method-only rule. `num::sin_cos(..)` is deliberately *not*
+/// matched: calling the owned implementation is the entire point.
+fn transcendental_hits(code: &str) -> Vec<(usize, String)> {
+    let mut dense = String::with_capacity(code.len());
+    let mut line_of: Vec<usize> = Vec::with_capacity(code.len());
+    let mut line = 1usize;
+    for ch in code.chars() {
+        if ch == '\n' {
+            line += 1;
+        }
+        if ch.is_whitespace() {
+            continue;
+        }
+        dense.push(ch);
+        line_of.push(line);
+    }
+
+    let mut hits: Vec<(usize, String)> = Vec::new();
+    for name in TRANSCENDENTALS {
+        for form in [
+            format!(".{name}("),
+            format!("f32::{name}("),
+            format!("f64::{name}("),
+            format!("Scalar::{name}("),
+        ] {
+            for (byte_idx, _) in dense.match_indices(&form) {
+                // Rare enough (usually zero) that counting chars per hit is
+                // cheaper than carrying a byte-indexed map for every file.
+                let char_idx = dense[..byte_idx].chars().count();
+                let lineno = line_of.get(char_idx).copied().unwrap_or(1);
+                hits.push((lineno, form.clone()));
+            }
+        }
+    }
+
+    // One finding per line per matched form.
+    hits.sort();
+    hits.dedup();
+    hits
 }
 
 /// Blank out comments and the contents of string/char literals, preserving
@@ -1104,6 +1212,72 @@ mod tests {
         assert!(!flags(
             "use core::f32;\nuse crate::profile::PhysicsProfile;\npub fn step(dt_ms: u32) {}"
         ));
+    }
+
+    /// Run the C1 transcendental scan the way `check_sim_source` does.
+    fn trig(src: &str) -> Vec<(usize, String)> {
+        transcendental_hits(&strip_comments_and_literals(src))
+    }
+
+    /// The regression this rule exists for: the exact line C1 removed from
+    /// `angle_vectors`, written again.
+    #[test]
+    fn a_reintroduced_sin_cos_is_caught() {
+        let hits = trig("let (sy, cy) = (yaw * DEG_TO_RAD).sin_cos();");
+        assert_eq!(hits, vec![(1, ".sin_cos(".to_string())]);
+    }
+
+    /// Every function in the table, and the line number each is reported on.
+    #[test]
+    fn every_transcendental_in_the_table_is_caught() {
+        for name in TRANSCENDENTALS {
+            let src = format!("fn f(x: Scalar) -> Scalar {{ x.{name}(1.0) }}");
+            assert!(!trig(&src).is_empty(), "`.{name}(` was not caught: {src}",);
+        }
+        let hits = trig("let a = 1;\nlet b = x.sin();\nlet c = y.cos();");
+        assert_eq!(
+            hits,
+            vec![(2, ".sin(".to_string()), (3, ".cos(".to_string())]
+        );
+    }
+
+    /// A method-only rule is one `rustfmt` away from silence: a wrapped chain
+    /// puts `.sin_cos()` on its own line with the receiver on the one before.
+    /// UFCS is the deliberate version of the same bypass.
+    #[test]
+    fn formatting_and_ufcs_do_not_hide_a_transcendental() {
+        assert!(!trig("let v = (yaw * DEG_TO_RAD)\n    .sin_cos();").is_empty());
+        assert!(!trig("let v = x . sin ( ) ;").is_empty());
+        assert!(!trig("let v = f32::sin_cos(x);").is_empty());
+        assert!(!trig("let v = f64::atan2(y, x);").is_empty());
+        assert!(!trig("let v = Scalar::powf(x, 2.0);").is_empty());
+    }
+
+    /// The rule must not fire on the code around it, or it gets deleted.
+    #[test]
+    fn arithmetic_and_the_owned_implementation_stay_clean() {
+        // sqrt is IEEE-specified and correctly rounded, so `normalize` keeps it.
+        assert!(trig("let (v, l) = ((x * x + y * y).sqrt(), 1.0);").is_empty());
+        // Calling the replacement is the point of the rule, not a breach of it.
+        assert!(trig("let (sy, cy) = num::sin_cos(yaw * DEG_TO_RAD);").is_empty());
+        assert!(trig("let (sy, cy) = crate::num::sin_cos(yaw);").is_empty());
+        // Ordinary integer and float arithmetic, and unrelated method names.
+        assert!(trig("let d = v.dot(n);\nlet m = a.min(b).max(c);").is_empty());
+        assert!(trig("let e = state.expected(4);\nlet t = p.tangent();").is_empty());
+        // Prose about the rule must not trip the rule.
+        assert!(trig("// never call .sin_cos() here\nlet a = 1;").is_empty());
+        assert!(trig("let s = \".sin_cos(\";").is_empty());
+    }
+
+    /// `num.rs` is exempt, and the exemption is by file name — so it is the
+    /// scan caller that has to apply it, not the scanner.
+    #[test]
+    fn the_exempt_file_is_named_and_the_scanner_itself_is_not_selective() {
+        assert_eq!(TRANSCENDENTAL_HOME, "num.rs");
+        // The scanner flags this text; `check_sim_source` is what declines to
+        // ask it about num.rs. Pinned so the exemption cannot silently widen
+        // into "the scanner ignores sin_cos everywhere".
+        assert!(!trig("let (s, c) = x.sin_cos();").is_empty());
     }
 
     /// `libm v0.2.16` (a package) and `glam feature \"nostd-libm\"` (a feature)
