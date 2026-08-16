@@ -9,6 +9,36 @@
 > crate still builds and its harness (including `web/`) still works; the
 > results in this file are not reproducible against the current tree. For the
 > post-C1 numbers, see `probes/c1-owned-trig/`.
+>
+> **What the harness reports today.** `./run-all.sh` on the post-C1 + post-C3
+> tree (`a31deaa`; C3 made `ViewAngles` 16-bit, which moves every digest
+> below):
+>
+> | | |
+> |---|---|
+> | spawn checksum | `c0800ec9609f2adf` |
+> | grand, 6 cases × 1200 commands | `8ef878e7762b5981` |
+> | agreeing platforms | native glibc, native musl, Node V8 12.4.254.21-node.35, headless Chrome 146 |
+>
+> All four agree at **every** command, not merely at the fold, and those six
+> case finals are byte-identical to the first six produced by the independent
+> runner behind `cargo xtask determinism`. Two separately authored harnesses
+> reaching the same numbers is what rules out a bug shared between a runner
+> and its comparator.
+>
+> The fault line this probe was written to find is still measurable and has
+> not been fixed — only routed around. Over the 200 000-angle sweep, raw
+> `f32::sin_cos` digests `b71c58a6cda8908b` on glibc against
+> `e935a7fa1bbd2d37` on musl, Node and Chrome, at 1 ULP; the owned `sin_cos`
+> digests `ed430df756584863` on all four. That is why the seam rule forbidding
+> transcendentals in `straf3-sim` outside `num.rs` is load-bearing rather than
+> hygiene.
+>
+> The files in `results/` are deliberately **not** refreshed to the numbers
+> above: they are the pre-C1 measurement that justified C1 existing, and
+> overwriting them would destroy that record. `run-all.sh` does rewrite them,
+> so restore with `git checkout -- probes/wasm-determinism/results/` after a
+> run.
 
 Answers spec rev 5 §L: **does `straf3-sim` produce bit-identical
 `SimState::checksum()` results in a browser (wasm32) and on a native x86-64

@@ -6,6 +6,7 @@ fn main() -> ExitCode {
     let argv: Vec<String> = std::env::args().skip(2).collect();
     match std::env::args().nth(1).as_deref() {
         Some("check-seam") => check_seam(),
+        Some("check-probes") => check_probes(&argv),
         Some("determinism") => determinism(&argv),
         Some(other) => {
             eprintln!("unknown command: {other}");
@@ -38,6 +39,20 @@ usage: cargo xtask <command>
                    forbidden outright, and its libm-family features are
                    forbidden when `glam/std` is absent (only then do they
                    change float results).
+
+  check-probes Compile every crate under probes/. They are standalone by
+               design — each has its own [workspace] and Cargo.lock — so no
+               --workspace command builds them, and two of them stopped
+               compiling when C3 changed ViewAngles to 16-bit without the
+               tree ever going red. Probes are discovered by listing the
+               directory, not from a list here, so a new one is covered
+               without editing xtask.
+
+               Options:
+                 --list              show what was discovered, compile nothing
+                 --all-features      also compile `optional` path deps
+                 --only <dir>        check only this probe (repeatable)
+                 --skip <dir>        skip this probe, loudly (repeatable)
 
   determinism  Run one reference command stream through straf3-sim on every
                target the project ships or verifies on — glibc, musl,
@@ -77,6 +92,30 @@ fn determinism(argv: &[String]) -> ExitCode {
         }
         Err(e) => {
             eprintln!("determinism check could not run: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn check_probes(argv: &[String]) -> ExitCode {
+    println!(
+        "checking that every crate under probes/ still compiles against this tree...\n\
+         nothing in `cargo check --workspace` builds them, so this is the only\n\
+         thing standing between a probe and silent rot.\n"
+    );
+    match xtask::probes::run(argv) {
+        Ok(true) => ExitCode::SUCCESS,
+        Ok(false) => {
+            eprintln!(
+                "\nA probe no longer compiles. That probe's evidence cannot be\n\
+                 reproduced until it does — and because probes are what settle\n\
+                 empirical questions here, a broken one silently removes the\n\
+                 ability to check the thing it was written to check."
+            );
+            ExitCode::FAILURE
+        }
+        Err(e) => {
+            eprintln!("probe check could not run: {e}");
             ExitCode::FAILURE
         }
     }
