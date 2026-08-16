@@ -53,6 +53,14 @@ pub struct Options {
     pub rate: TickRate,
     /// Record every command produced, for replay.
     pub record: bool,
+    /// Where personal bests are kept, or `None` to neither load nor save one.
+    ///
+    /// With a directory set, the session loads the best run saved for this map
+    /// and this profile, races it as a ghost, and writes a new file whenever a
+    /// finished run beats it. Recording is turned on for the whole session as a
+    /// consequence — a run that was not recorded cannot be saved, and a player
+    /// does not know in advance which attempt is going to be the good one.
+    pub pb_dir: Option<String>,
     /// Close the window after this much wall time, in milliseconds.
     ///
     /// Not a gameplay feature: it is what makes an unattended run possible, so
@@ -72,6 +80,7 @@ impl Default for Options {
             profile_name: "cpm".to_owned(),
             rate: crate::tick::DEFAULT_RATE,
             record: false,
+            pb_dir: Some(crate::pb::DEFAULT_DIR.to_owned()),
             exit_after_ms: None,
             window: WindowConfig::straf3(),
         }
@@ -80,6 +89,19 @@ impl Default for Options {
 
 /// How often the console line reporting speed is printed, in wall ms.
 const TELEMETRY_INTERVAL_MS: u64 = 1_000;
+
+/// `m:ss.mmm`, by integer division only.
+///
+/// The overlay has its own copy of this (`straf3_devtools::format_clock_ms`)
+/// and this is not a duplicate of it by accident: the overlay is behind the
+/// `render` feature, and a `--no-default-features` build still finishes runs
+/// and still saves times, so the log line cannot depend on it. Whole
+/// milliseconds throughout — a run time never becomes a float (spec: no float
+/// seconds, anywhere).
+fn clock_ms(ms: u32) -> String {
+    let rest = ms % 60_000;
+    format!("{}:{:02}.{:03}", ms / 60_000, rest / 1_000, rest % 1_000)
+}
 
 /// The application: a window, a clock, a session, and (maybe) a renderer.
 pub struct App {
@@ -92,6 +114,27 @@ pub struct App {
     primed: bool,
     last_telemetry_ms: u64,
     frames: u64,
+    /// Where this session's personal best is read from and written to, once
+    /// the world and the profile are known. `None` when personal bests are off
+    /// or the world cannot produce a time.
+    pb_path: Option<String>,
+    /// The best saved run for this map and profile, as loaded.
+    ///
+    /// Kept beside the ghost because the two answer different questions: this
+    /// one says *what the time to beat is*, and is what a new run is compared
+    /// against; the ghost is where that run *was*, which only exists if the
+    /// recording could actually be re-simulated here.
+    personal_best: Option<straf3_replay::Recording>,
+    /// The personal best, re-simulated and ready to race.
+    ghost: Option<crate::ghost::Ghost>,
+    /// Whether the run currently on the clock has already been saved.
+    ///
+    /// A finished run stays finished until the player respawns, so without
+    /// this the same run would be re-saved on every frame after the line.
+    run_saved: bool,
+    /// Milliseconds ahead of (negative) or behind (positive) the ghost, as of
+    /// the last frame.
+    split_ms: Option<i32>,
     /// The last frame rate [`App::report_telemetry`] computed, for the overlay.
     ///
     /// The overlay draws every frame and the rate is only measured once a
@@ -134,9 +177,21 @@ impl App {
             spawn,
             spawn_yaw,
         );
-        if options.record {
+        // A personal best needs the commands of whichever attempt turns out to
+        // be the good one, and nobody knows that in advance — so recording is
+        // on for the whole session whenever personal bests are.
+        let pb_path = options.pb_dir.as_ref().map(|dir| {
+            crate::pb::path_in(dir, world.name(), &options.profile_name)
+        });
+        if options.record || pb_path.is_some() {
             game.record();
         }
+
+        let (personal_best, ghost) = match &pb_path {
+            Some(path) => Self::load_personal_best(path, world, &options.profile),
+            None => (None, None),
+        };
+
         Self {
             options: Options { world, ..options },
             window: None,
@@ -146,6 +201,11 @@ impl App {
             primed: false,
             last_telemetry_ms: 0,
             frames: 0,
+            pb_path,
+            personal_best,
+            ghost,
+            run_saved: false,
+            split_ms: None,
             last_fps: 0,
             #[cfg(feature = "render")]
             renderer: None,
@@ -154,10 +214,165 @@ impl App {
         }
     }
 
+    /// Read the saved personal best for this world, and re-simulate it into a
+    /// ghost.
+    ///
+    /// Every way this can fail is a log line and a session that plays on. A
+    /// missing file is the ordinary case (nobody has run the course yet); a
+    /// file that will not decode, or that was set on geometry this build no
+    /// longer compiles to, is a real finding and is *said out loud* — but none
+    /// of them is a reason to refuse to start the game.
+    fn load_personal_best(
+        path: &str,
+        world: WorldChoice,
+        profile: &PhysicsProfile,
+    ) -> (
+        Option<straf3_replay::Recording>,
+        Option<crate::ghost::Ghost>,
+    ) {
+        let recording = match crate::pb::fetch(path) {
+            Ok(recording) => recording,
+            Err(crate::pb::PbError::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => {
+                log::info!("no personal best saved at {path} yet — this session sets it");
+                return (None, None);
+            }
+            Err(e) => {
+                log::warn!("ignoring the personal best at {path}: {e}");
+                return (None, None);
+            }
+        };
+
+        let Some(world_id) = world.world_id() else {
+            log::warn!("no world identity for {world:?}, so {path} cannot be raced");
+            return (Some(recording), None);
+        };
+
+        // `&world.world()` and not `world.world()`: the recording is checked
+        // against the identity of exactly these hulls, which is the C6 promise
+        // the ghost depends on.
+        match crate::ghost::Ghost::from_recording(&recording, &world.world(), &world_id, profile) {
+            Ok(ghost) => {
+                log::info!(
+                    "personal best {} — racing it as a ghost over {} re-simulated states",
+                    clock_ms(ghost.run_time_ms()),
+                    ghost.sample_count(),
+                );
+                (Some(recording), Some(ghost))
+            }
+            Err(e) => {
+                // The case worth being loud about: the map was recompiled, so
+                // the saved run is a time on geometry that no longer exists.
+                log::warn!("the personal best at {path} cannot be raced here: {e}");
+                (Some(recording), None)
+            }
+        }
+    }
+
+    /// Save the run that has just finished, if it beat the one on disk.
+    ///
+    /// The recording is *made* here rather than accumulated as the run went:
+    /// `straf3_replay::Recording::record` re-simulates the commands and takes
+    /// the digest from that, so the file's digest belongs to the file's own
+    /// command stream by construction. A recorder that folded the digest live
+    /// would produce a plausible file for a stream it had dropped a command
+    /// from.
+    fn save_personal_best_if_better(&mut self) {
+        let (Some(path), Some(recorder)) = (self.pb_path.clone(), self.game.recorder()) else {
+            return;
+        };
+        let Some(world_id) = self.options.world.world_id() else {
+            return;
+        };
+
+        let recording = straf3_replay::Recording::record(
+            recorder.start(),
+            recorder.commands().to_vec(),
+            &self.game.world(),
+            world_id.clone(),
+            &self.options.profile,
+            self.options.profile_name.clone(),
+        );
+
+        let candidate = recording.claimed().run_time_ms;
+        let current = self
+            .personal_best
+            .as_ref()
+            .and_then(|r| r.claimed().run_time_ms);
+        if !crate::pb::beats(candidate, current) {
+            if let (Some(new), Some(old)) = (candidate, current) {
+                log::info!(
+                    "run {} — personal best {} stands, by {} ms",
+                    clock_ms(new),
+                    clock_ms(old),
+                    new - old
+                );
+            }
+            return;
+        }
+
+        if let Err(e) = crate::pb::store(&path, &recording) {
+            log::error!("could not write the personal best to {path}: {e}");
+            return;
+        }
+        match current {
+            Some(old) => log::info!(
+                "NEW PERSONAL BEST {} — {} ms faster than {}, saved to {path}",
+                clock_ms(candidate.unwrap_or(0)),
+                old - candidate.unwrap_or(0),
+                clock_ms(old),
+            ),
+            None => log::info!(
+                "FIRST TIME SET {} — saved to {path}",
+                clock_ms(candidate.unwrap_or(0))
+            ),
+        }
+
+        // Race the new best from the next attempt: the ghost is rebuilt from
+        // the run just saved, by re-simulating it exactly as a loaded file
+        // would be.
+        match crate::ghost::Ghost::from_recording(
+            &recording,
+            &self.game.world(),
+            &world_id,
+            &self.options.profile,
+        ) {
+            Ok(ghost) => self.ghost = Some(ghost),
+            Err(e) => log::warn!("the run just saved cannot be raced back: {e}"),
+        }
+        self.personal_best = Some(recording);
+    }
+
+    /// Where the run stands against the ghost, this frame.
+    ///
+    /// `None` before the start line, and whenever there is no ghost — the
+    /// overlay then draws no split at all rather than `+0.000`, which would
+    /// claim the player was level with a personal best that is not there.
+    fn update_split(&mut self) {
+        let state = self.game.state();
+        let (Some(elapsed_ms), Some(ghost)) = (state.run.elapsed_ms(state.time_ms), &mut self.ghost)
+        else {
+            self.split_ms = None;
+            return;
+        };
+        self.split_ms = Some(ghost.split_ms(state.player.origin, elapsed_ms));
+    }
+
     /// The session, for a caller that wants the recording out of it afterwards.
     #[must_use]
     pub const fn game(&self) -> &Game<&'static dyn World> {
         &self.game
+    }
+
+    /// The ghost being raced, if a personal best was loaded and re-simulated.
+    #[must_use]
+    pub const fn ghost(&self) -> Option<&crate::ghost::Ghost> {
+        self.ghost.as_ref()
+    }
+
+    /// The split against the ghost as of the last frame.
+    #[must_use]
+    pub const fn split_ms(&self) -> Option<i32> {
+        self.split_ms
     }
 
     /// The options this app was built with, after availability fallbacks.
@@ -185,6 +400,16 @@ impl App {
         self.game.advance(delta.delta_ms);
         self.frames += 1;
 
+        // In this order, and all of it before the frame is drawn: crossing the
+        // finish line may replace the ghost being raced, and the split is what
+        // the overlay is about to be handed.
+        if !self.run_saved && matches!(self.game.state().run, straf3_sim::RunState::Finished { .. })
+        {
+            self.run_saved = true;
+            self.save_personal_best_if_better();
+        }
+        self.update_split();
+
         if let Some(limit) = self.options.exit_after_ms
             && delta.timing.elapsed_ms >= limit
         {
@@ -201,23 +426,45 @@ impl App {
             if self.hud.is_none() {
                 self.hud = renderer.with_device(straf3_devtools::Hud::new);
             }
-            // The split is the one number the simulation cannot know. No ghost
-            // is loaded yet, so it is `None` and the overlay draws no split at
+            // The split is the one number the simulation cannot know: it is a
+            // comparison with a run that happened on a different day. `None`
+            // when no ghost is loaded, and the overlay then draws no split at
             // all rather than `+0.000`, which would claim the player was level
             // with a personal best that is not there.
-            let split_ms: Option<i32> = None;
             let sample = straf3_devtools::TelemetrySample::of(self.game.state())
                 .with_fps(self.last_fps)
-                .with_split_ms(split_ms);
+                .with_split_ms(self.split_ms);
+            // Where the ghost is right now: its own run-elapsed time, matched
+            // to the player's, so the two leave the start line together
+            // however long either of them loitered at the spawn.
+            let ghost = self.ghost.as_ref().map(|ghost| {
+                let elapsed = self
+                    .game
+                    .state()
+                    .run
+                    .elapsed_ms(self.game.state().time_ms)
+                    .unwrap_or(0);
+                let at = ghost.sample_at(elapsed);
+                let hull = self.options.profile.hull(at.crouched);
+                straf3_render::GhostPose {
+                    origin: at.origin,
+                    yaw: at.yaw,
+                    half_extents: hull.half_extents,
+                    center_offset: hull.center_offset,
+                }
+            });
             let pixels_per_point = self
                 .window
                 .as_ref()
                 .map_or(1.0, |w| w.scale_factor() as f32);
             let hud = self.hud.as_mut();
-            renderer.render_with(
-                &self.game.previous().player,
-                &self.game.state().player,
-                straf3_render::InterpolationAlpha(self.game.alpha()),
+            renderer.render_frame(
+                straf3_render::Frame {
+                    prev: &self.game.previous().player,
+                    curr: &self.game.state().player,
+                    alpha: straf3_render::InterpolationAlpha(self.game.alpha()),
+                    ghost,
+                },
                 |o| {
                     if let Some(hud) = hud {
                         hud.draw(
@@ -259,6 +506,24 @@ impl App {
             state.player.origin.z,
             state.checksum(),
         );
+        // The run itself, said in the units a player thinks in — and said even
+        // when nothing was saved, so a session that ended mid-run does not look
+        // like a session that never started one.
+        match state.run {
+            straf3_sim::RunState::NotStarted => log::info!("no run: the start line was not crossed"),
+            straf3_sim::RunState::Running { .. } => log::info!(
+                "run unfinished: {} on the clock at the finish line",
+                clock_ms(state.run.elapsed_ms(state.time_ms).unwrap_or(0))
+            ),
+            straf3_sim::RunState::Finished { .. } => log::info!(
+                "run {}{}",
+                clock_ms(state.run.elapsed_ms(state.time_ms).unwrap_or(0)),
+                match self.split_ms {
+                    Some(split) => format!(" ({split:+} ms against the ghost)"),
+                    None => String::new(),
+                }
+            ),
+        }
         if self.game.step().dropped_total_ms() > 0 {
             log::warn!(
                 "{} ms of wall time was dropped to the per-frame tick cap over this session",
@@ -290,9 +555,23 @@ impl App {
         self.frames = 0;
 
         let state = self.game.state();
+        // The run clock and the split ride on the same line rather than on one
+        // of their own: a log with one line a second is readable, and a log
+        // with three is a wall.
+        let run = match state.run.elapsed_ms(state.time_ms) {
+            Some(ms) => format!(
+                "   run {}{}",
+                clock_ms(ms),
+                match self.split_ms {
+                    Some(split) => format!(" {split:+} ms"),
+                    None => String::new(),
+                }
+            ),
+            None => String::new(),
+        };
         log::info!(
             "speed {:>6.1} ups   origin ({:>8.1} {:>8.1} {:>8.1})   {}   \
-             tick {}   sim {} ms   {} fps",
+             tick {}   sim {} ms   {} fps{run}",
             self.game.horizontal_speed(),
             state.player.origin.x,
             state.player.origin.y,
@@ -438,6 +717,15 @@ impl ApplicationHandler for App {
                     }
                     PhysicalKey::Code(KeyCode::KeyR) => {
                         self.game.respawn();
+                        // A new attempt: the run clock is back at NotStarted,
+                        // the recorder has started again from the spawn, and
+                        // the ghost has to be matched from the start line
+                        // rather than from wherever the last attempt died.
+                        self.run_saved = false;
+                        self.split_ms = None;
+                        if let Some(ghost) = &mut self.ghost {
+                            ghost.rewind();
+                        }
                         log::info!("respawned");
                         return;
                     }

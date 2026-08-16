@@ -42,7 +42,9 @@
 
 pub mod app;
 pub mod game;
+pub mod ghost;
 pub mod input_map;
+pub mod pb;
 pub mod record;
 pub mod replay;
 pub mod scene;
@@ -50,6 +52,7 @@ pub mod tick;
 
 pub use app::{App, Options, run};
 pub use game::Game;
+pub use ghost::{Ghost, GhostError};
 pub use input_map::command_from_input;
 pub use record::{Recorder, WorldSpec};
 pub use replay::{Fixture, ReplayOptions, TRACE_HEADER, trace_line};

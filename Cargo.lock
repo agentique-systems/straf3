@@ -2309,6 +2309,7 @@ dependencies = [
  "straf3-map",
  "straf3-platform",
  "straf3-render",
+ "straf3-replay",
  "straf3-sim",
  "wasm-bindgen",
  "web-sys",

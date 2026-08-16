@@ -50,6 +50,7 @@
 #![warn(clippy::all)]
 
 pub mod camera;
+pub mod ghost;
 mod gfx;
 pub mod mesh;
 
@@ -62,12 +63,33 @@ use winit::window::Window;
 
 pub use camera::Camera;
 pub use gfx::Scene;
+pub use ghost::{GHOST_COLOR, GhostPose};
 
 /// How far between two simulation states the rendered frame sits, `0.0..=1.0`.
 ///
 /// Rendering interpolates; it never advances the simulation (spec D2).
 #[derive(Debug, Clone, Copy)]
 pub struct InterpolationAlpha(pub f32);
+
+/// Everything one frame draws: the two simulation states to interpolate the
+/// eye between, and the recorded run's player if one is being raced.
+///
+/// A struct rather than four parameters because the ghost is optional and the
+/// two states are not, and a bare `Option` argument at a call site says
+/// nothing about which of them it is.
+pub struct Frame<'a> {
+    /// The simulation state one tick ago.
+    pub prev: &'a PlayerState,
+    /// The current simulation state.
+    pub curr: &'a PlayerState,
+    /// How far between them this frame sits.
+    pub alpha: InterpolationAlpha,
+    /// Where the ghost is this frame, if a personal best is loaded.
+    ///
+    /// Already resolved and interpolated by the caller: this crate has no
+    /// opinion about how a recorded run's clock lines up with the live one.
+    pub ghost: Option<ghost::GhostPose>,
+}
 
 /// A frame that has had the world drawn into it and has not been submitted yet.
 ///
@@ -213,21 +235,23 @@ impl Renderer {
     /// making it the caller's problem would put a `cfg(target_arch)` in every
     /// event loop.
     pub fn render(&mut self, prev: &PlayerState, curr: &PlayerState, alpha: InterpolationAlpha) {
-        self.render_with(prev, curr, alpha, |_| {});
+        self.render_frame(
+            Frame {
+                prev,
+                curr,
+                alpha,
+                ghost: None,
+            },
+            |_| {},
+        );
     }
 
-    /// As [`render`](Self::render), calling `overlay` after the world has been
-    /// recorded and before the frame is submitted.
+    /// Draw one frame: the world, the ghost if `frame` carries one, then
+    /// whatever `overlay` records — all into one encoder, submitted once.
     ///
-    /// The overlay is handed the same encoder, so it costs no extra submit and
-    /// cannot be drawn under the world.
-    pub fn render_with(
-        &mut self,
-        prev: &PlayerState,
-        curr: &PlayerState,
-        alpha: InterpolationAlpha,
-        overlay: impl FnOnce(Overlay<'_>),
-    ) {
+    /// Does nothing until the device exists, exactly as [`render`](Self::render)
+    /// does.
+    pub fn render_frame(&mut self, frame: Frame<'_>, overlay: impl FnOnce(Overlay<'_>)) {
         let mut slot = self.gfx.borrow_mut();
         let Some(g) = slot.as_mut() else {
             return;
@@ -235,7 +259,11 @@ impl Renderer {
         if let Some((w, h)) = self.pending_size.take() {
             g.resize(w, h);
         }
-        g.render_with(&Camera::between(prev, curr, alpha), overlay);
+        g.render_with(
+            &Camera::between(frame.prev, frame.curr, frame.alpha),
+            frame.ghost.as_ref(),
+            overlay,
+        );
     }
 
     /// Run `f` with the device and the surface's texture format, once they

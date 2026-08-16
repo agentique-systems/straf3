@@ -93,10 +93,26 @@ impl<W: World> Game<W> {
     ///
     /// The view is left where the player is looking — respawning should not
     /// also spin the camera.
+    ///
+    /// # The recording starts again with it
+    ///
+    /// A respawn is **not** a command: it moves the player without anything in
+    /// the command stream saying so. A recording that spanned one would
+    /// therefore not re-simulate — replaying it would run the pre-respawn
+    /// commands from the *new* state and land somewhere nobody went. So the
+    /// recorder is reset here, and every attempt is its own recording, which is
+    /// also exactly what a personal best wants to be.
     pub fn respawn(&mut self) {
         self.state = SimState::spawned_at(self.spawn, self.input.look.yaw());
         self.state.player.view = self.input.look.angles();
         self.previous = self.state;
+        if self.recorder.is_some() {
+            self.recorder = Some(Recorder::new(
+                self.step.rate(),
+                self.spawn,
+                self.input.look.yaw(),
+            ));
+        }
     }
 
     /// Advance the session by `elapsed_ms` of wall time.

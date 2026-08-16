@@ -47,6 +47,7 @@ use std::sync::OnceLock;
 // past it for the collider type would be a second opinion about which crate
 // owns that answer.
 use straf3_map::{CompileError, CompiledMap, HullWorld, Warning};
+use straf3_replay::WorldId;
 use straf3_sim::World;
 use straf3_sim::num::{Scalar, Vec3, s, vec3};
 use straf3_sim::world::{EmptyWorld, FlatGround};
@@ -73,6 +74,10 @@ const FLAT_SPAWN_YAW: Scalar = s(90.0);
 /// is what turns that owned value into the `&'static dyn World` the simulation
 /// wants, without rebuilding it per frame or per replay.
 pub struct LoadedMap {
+    /// What to call this map — the `.map` file's stem, normally. Carried
+    /// because a recording's [`WorldId`] names the world it was made in, and a
+    /// personal best is filed under it.
+    pub name: String,
     /// Everything the compiler produced: hulls, mesh, triggers, entities.
     pub map: CompiledMap,
     /// The same hulls, as something [`straf3_sim::step_in_place`] can sweep.
@@ -98,7 +103,7 @@ static MAP: OnceLock<LoadedMap> = OnceLock::new();
 /// [`WorldChoice`] cannot express two maps, so a second one would be a caller
 /// bug rather than a recoverable condition, and silently keeping the first is
 /// the behaviour that cannot produce a world/mesh mismatch.
-pub fn install(source: &str) -> Result<&'static LoadedMap, CompileError> {
+pub fn install(name: &str, source: &str) -> Result<&'static LoadedMap, CompileError> {
     if let Some(existing) = MAP.get() {
         log::warn!("a map is already installed; keeping it and ignoring the second");
         return Ok(existing);
@@ -112,7 +117,12 @@ pub fn install(source: &str) -> Result<&'static LoadedMap, CompileError> {
     report(&map);
 
     let collider = map.collider();
-    Ok(MAP.get_or_init(|| LoadedMap { map, collider }))
+    let name = name.to_owned();
+    Ok(MAP.get_or_init(|| LoadedMap {
+        name,
+        map,
+        collider,
+    }))
 }
 
 /// Say out loud what the compiler decided on the author's behalf.
@@ -238,13 +248,45 @@ impl WorldChoice {
         }
     }
 
+    /// What a `.s3d` recording binds itself to when it is made in this world.
+    ///
+    /// This is contract item C6's end of the deal, and the single place the
+    /// obligation `straf3_replay::Recording::record` cannot check for itself is
+    /// discharged: the digest handed over is the one belonging to the very
+    /// hulls [`Self::world`] returns, taken from the same [`LoadedMap`]. A
+    /// recompiled map has a different digest, so a personal best set on the old
+    /// geometry is refused rather than raced.
+    ///
+    /// `None` for [`Self::Map`] with no map installed — the same
+    /// mis-sequenced-caller case [`Self::world`] answers with the flat plane,
+    /// except that here there is no honest answer to give, and inventing one
+    /// would bind a recording to a world nobody played in.
+    #[must_use]
+    pub fn world_id(self) -> Option<WorldId> {
+        match self {
+            Self::Map => loaded().map(|l| WorldId::map(&l.name, l.map.collision_digest())),
+            Self::Flat => Some(WorldId::flat(s(0.0))),
+            Self::Empty => Some(WorldId::Empty),
+        }
+    }
+
+    /// What to call this world in a file name.
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Map => loaded().map_or("map", |l| l.name.as_str()),
+            Self::Flat => "flat",
+            Self::Empty => "empty",
+        }
+    }
+
     /// How a recording should describe this world.
     ///
     /// A map is `Unrepresentable` because `straf3-headless` has no spelling for
     /// one, exactly as the arena was. Binding a recording to the map's
-    /// [`collision_digest`](CompiledMap::collision_digest) — so that replaying
-    /// against a *recompiled* map is detected rather than silently trusted — is
-    /// C6's job and belongs in the `.s3d` format, not in this enum.
+    /// [`collision_digest`](CompiledMap::collision_digest) is
+    /// [`Self::world_id`]'s job and lives in the `.s3d` format, not in this
+    /// enum.
     #[must_use]
     pub const fn spec(self) -> WorldSpec {
         match self {

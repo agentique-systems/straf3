@@ -20,6 +20,7 @@ use wgpu::util::DeviceExt as _;
 use winit::window::Window;
 
 use crate::camera::Camera;
+use crate::ghost::{GhostPipeline, GhostPose};
 use crate::mesh::{GpuMesh, Vertex};
 
 /// Depth format. `Depth32Float` is the one format guaranteed on WebGPU's
@@ -64,6 +65,9 @@ pub struct Scene {
     bind_group: wgpu::BindGroup,
     depth: wgpu::TextureView,
     depth_size: (u32, u32),
+    /// The recorded run's player. Built unconditionally — see
+    /// [`GhostPipeline`].
+    ghost: GhostPipeline,
 }
 
 impl Scene {
@@ -193,6 +197,7 @@ impl Scene {
         });
 
         let depth = depth_view(&device, width.max(1), height.max(1));
+        let ghost = GhostPipeline::new(&device, format, DEPTH_FORMAT);
 
         Self {
             device,
@@ -205,6 +210,7 @@ impl Scene {
             bind_group,
             depth,
             depth_size: (width.max(1), height.max(1)),
+            ghost,
         }
     }
 
@@ -269,7 +275,12 @@ impl Scene {
                 view: &self.depth,
                 depth_ops: Some(wgpu::Operations {
                     load: wgpu::LoadOp::Clear(1.0),
-                    store: wgpu::StoreOp::Discard,
+                    // Stored, not discarded: [`Scene::draw_ghost`] runs a
+                    // second pass over the same frame and tests against this
+                    // depth, so that a ghost behind a wall is behind the wall.
+                    // Discarding it made the world's own pass marginally
+                    // cheaper and made every later pass impossible.
+                    store: wgpu::StoreOp::Store,
                 }),
                 stencil_ops: None,
             }),
@@ -282,6 +293,37 @@ impl Scene {
         pass.set_vertex_buffer(0, self.vertices.slice(..));
         pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
         pass.draw_indexed(0..self.index_count, 0, 0..1);
+    }
+
+    /// Record a recorded run's player into `target`, over a world already drawn
+    /// there by [`Self::draw`] at the same size and with the same camera.
+    ///
+    /// A second pass rather than an extra draw inside the first: it is
+    /// translucent and must be blended over finished pixels, and it must be
+    /// depth-tested against the world it is standing in rather than sorted
+    /// against it.
+    pub fn draw_ghost(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+        camera: &Camera,
+        width: u32,
+        height: u32,
+        pose: &GhostPose,
+    ) {
+        self.ensure_depth(width, height);
+        let aspect = width as Scalar / height.max(1) as Scalar;
+        self.ghost.draw(
+            crate::ghost::GhostFrame {
+                queue: &self.queue,
+                encoder,
+                target,
+                depth: &self.depth,
+                camera,
+                aspect,
+            },
+            pose,
+        );
     }
 }
 
@@ -426,13 +468,19 @@ impl Gfx {
         (self.scene.device(), self.config.format)
     }
 
-    /// Draw one frame from `camera`, hand the recorded frame to `overlay`, and
-    /// present it.
+    /// Draw one frame from `camera` — the world, then `ghost` if there is one,
+    /// then whatever `overlay` records — and present it.
     ///
-    /// There is no overlay-less variant here on purpose: [`crate::Renderer`]
-    /// already offers one, and a second entry point that skipped the callback
-    /// would be a path along which the overlay could silently stop being drawn.
-    pub fn render_with(&mut self, camera: &Camera, overlay: impl FnOnce(crate::Overlay<'_>)) {
+    /// There is no simpler variant here on purpose: [`crate::Renderer`] already
+    /// offers one, and a second entry point that skipped the ghost or the
+    /// overlay would be a path along which either could silently stop being
+    /// drawn.
+    pub fn render_with(
+        &mut self,
+        camera: &Camera,
+        ghost: Option<&GhostPose>,
+        overlay: impl FnOnce(crate::Overlay<'_>),
+    ) {
         use wgpu::CurrentSurfaceTexture as Cst;
         let frame = match self.surface.get_current_texture() {
             Cst::Success(t) | Cst::Suboptimal(t) => t,
@@ -463,6 +511,18 @@ impl Gfx {
             self.config.width,
             self.config.height,
         );
+        // After the world, so it blends over finished pixels; before the
+        // overlay, so the readout is never behind the thing it is reporting on.
+        if let Some(pose) = ghost {
+            self.scene.draw_ghost(
+                &mut encoder,
+                &view,
+                camera,
+                self.config.width,
+                self.config.height,
+                pose,
+            );
+        }
         // The overlay appends to the same encoder, so it costs no extra submit
         // and cannot be drawn under the world. `scene.draw` takes `&mut
         // self.scene` and has finished by here, so the shared borrows below

@@ -31,7 +31,7 @@ mod native {
     use straf3_game::app::Options;
     use straf3_game::replay::ReplayOptions;
     use straf3_game::scene::WorldChoice;
-    use straf3_sim::{PhysicsProfile, TickRate};
+    use straf3_sim::{PhysicsProfile, RunState, TickRate};
 
     const USAGE: &str = "\
 usage: straf3 [options]                     open a window and play
@@ -46,6 +46,11 @@ usage: straf3 [options]                     open a window and play
   --rate <hz>                 command rate, 1..=1000 (default 125)
   --record <file>             write every command produced to <file>, in
                               straf3-headless's input format
+  --pb-dir <dir>              where personal bests are kept (default runs/).
+                              The best saved run for this map and profile is
+                              raced as a ghost, and a finished run that beats
+                              it is written there as <map>.<profile>.s3d
+  --no-pb                     neither load a ghost nor save a personal best
   --exit-after <ms>           close the window after <ms> of wall time, so an
                               unattended run can be recorded and replayed
   -h, --help                  this
@@ -61,6 +66,10 @@ replay options (no window is opened and no GPU adapter is created):
 
 Controls: WASD move, mouse look, Space jump, Ctrl crouch, Shift walk,
           click to capture the mouse, Esc to release, R to respawn.
+
+R starts a new attempt: the clock resets, the ghost goes back to the start
+line, and the recording begins again — a respawn is not a command, so a
+recording that spanned one could not be replayed.
 ";
 
     pub fn main() -> ExitCode {
@@ -96,7 +105,13 @@ Controls: WASD move, mouse look, Space jump, Ctrl crouch, Shift walk,
         if options.session.world == WorldChoice::Map {
             match std::fs::read_to_string(&options.map_path) {
                 Ok(source) => {
-                    if let Err(e) = straf3_game::scene::install(&source) {
+                    // The map's name is its file stem, and it is what a
+                    // personal best is filed under and what a `.s3d` says it
+                    // was set on. Only the name: the identity that decides
+                    // whether a saved run may be raced is the compiled
+                    // collision digest, not this.
+                    let name = map_name(&options.map_path);
+                    if let Err(e) = straf3_game::scene::install(&name, &source) {
                         eprintln!("straf3: cannot compile {}: {e}", options.map_path);
                     }
                 }
@@ -139,6 +154,14 @@ Controls: WASD move, mouse look, Space jump, Ctrl crouch, Shift walk,
 
     /// Where the course lives when `--map` is not given.
     const DEFAULT_MAP: &str = "assets/maps/coil.map";
+
+    /// The map's name: its file stem, with the directory and the extension
+    /// taken off.
+    fn map_name(path: &str) -> String {
+        std::path::Path::new(path)
+            .file_stem()
+            .map_or_else(|| "map".to_owned(), |s| s.to_string_lossy().into_owned())
+    }
 
     /// Replay a recorded file with no window and no adapter.
     ///
@@ -212,6 +235,39 @@ Controls: WASD move, mouse look, Space jump, Ctrl crouch, Shift walk,
         println!("final state");
         println!("  tick          {}", final_state.tick);
         println!("  time          {} ms", final_state.time_ms);
+        // The run clock, which is the point of the exercise and is not the same
+        // number as `time`: `time` is how long the session has been simulated,
+        // this is how long the *run* took. Nothing here prints a time for an
+        // unfinished attempt — that matches `straf3_replay::Outcome::run_time_ms`,
+        // which is `Some` only for a finished run, and two places reporting the
+        // same fact should agree about when the fact exists.
+        match final_state.run {
+            RunState::NotStarted => {
+                println!("  run           not started (no start volume was crossed)");
+            }
+            RunState::Running { started_at_ms } => {
+                println!(
+                    "  run           started at {started_at_ms} ms, unfinished ({} ms so far)",
+                    final_state.time_ms.saturating_sub(started_at_ms)
+                );
+            }
+            RunState::Finished {
+                started_at_ms,
+                finished_at_ms,
+            } => {
+                let ms = finished_at_ms - started_at_ms;
+                // Whole milliseconds first, because that is what a script
+                // should read; the seconds in brackets are for a person, and
+                // they are integer division, not a float (spec: no float
+                // seconds, anywhere).
+                println!(
+                    "  run           {ms} ms  ({}.{:03} s, start {started_at_ms} ms, \
+                     finish {finished_at_ms} ms)",
+                    ms / 1000,
+                    ms % 1000
+                );
+            }
+        }
         println!(
             "  origin        {:.6} {:.6} {:.6}",
             final_state.player.origin.x, final_state.player.origin.y, final_state.player.origin.z
@@ -278,6 +334,8 @@ Controls: WASD move, mouse look, Space jump, Ctrl crouch, Shift walk,
                     record_to = Some(value()?);
                     session.record = true;
                 }
+                "--pb-dir" => session.pb_dir = Some(value()?),
+                "--no-pb" => session.pb_dir = None,
                 "--exit-after" => {
                     let ms = value()?;
                     session.exit_after_ms = Some(

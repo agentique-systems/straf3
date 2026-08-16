@@ -59,6 +59,13 @@ path = "examples/offscreen/main.rs"
 name = "window"
 path = "examples/window/main.rs"
 
+# The ghost, drawn into a texture and differenced against the same frame
+# without it — so "a recorded run is rendered beside the live player" is a
+# pixel count rather than a claim about what somebody saw (criterion 8).
+[[example]]
+name = "ghost-offscreen"
+path = "examples/ghost-offscreen/main.rs"
+
 # cdylib so wasm-bindgen has a module to process. This target is also the
 # stage-D bundle criterion 2 asks for: the real renderer, straf3-platform,
 # gltf, and the below-the-line crates arriving through straf3-map. Stage D was

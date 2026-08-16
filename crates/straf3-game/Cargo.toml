@@ -38,6 +38,10 @@ path = "src/main.rs"
 [dependencies]
 straf3-sim.workspace = true
 straf3-map.workspace = true
+# The `.s3d` format. Not optional: a personal best and the ghost it becomes are
+# the point of a timed run, and a `--no-default-features` build still records
+# and still saves one — it just cannot draw it.
+straf3-replay.workspace = true
 straf3-platform.workspace = true
 winit.workspace = true
 log.workspace = true

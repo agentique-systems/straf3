@@ -88,6 +88,21 @@ impl Recorder {
         &self.commands
     }
 
+    /// The state this recording began from, as the `.s3d` format states it.
+    ///
+    /// The same three values [`Recorder::new`] was given. A `.s3d` carries the
+    /// spawn itself rather than looking it up from the map, because moving a
+    /// spawn marker deliberately does not change a map's collision identity —
+    /// so the recording has to say where the run actually began.
+    #[must_use]
+    pub const fn start(&self) -> straf3_replay::RunStart {
+        straf3_replay::RunStart {
+            rate: self.rate,
+            spawn: self.spawn,
+            yaw: self.spawn_yaw,
+        }
+    }
+
     /// How many commands are recorded.
     #[must_use]
     pub fn len(&self) -> usize {
