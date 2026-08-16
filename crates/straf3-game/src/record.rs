@@ -17,11 +17,12 @@
 //! `straf3-headless` knows two worlds: `empty` and `flat <z>`. It does not
 //! know the arena, and it must not be taught to — the arena lives above the
 //! line, in `straf3-render`, and the headless runner is below it. So a session
-//! recorded *in the arena* is replayable in-process (through
-//! [`crate::Game::apply`], which is the same `step_in_place` call) but not
-//! through `straf3-headless`. [`WorldSpec::Unrepresentable`] makes that
-//! visible in the file itself rather than letting a fixture silently claim a
-//! world it did not run in.
+//! recorded *in the arena* is replayable in-process, through
+//! `straf3 --replay` (which already parses `world arena`), but not through
+//! `straf3-headless`. [`WorldSpec::Unrepresentable`] writes the world's name
+//! into the file regardless — omitting it would make `straf3-headless` (and
+//! any other reader defaulting on a missing directive) silently run the
+//! wrong world instead of refusing a name it does not know.
 
 use straf3_sim::num::{Scalar, Vec3};
 use straf3_sim::{Buttons, TickRate, UserCmd};
@@ -35,10 +36,11 @@ pub enum WorldSpec {
     Flat(Scalar),
     /// A world `straf3-headless` has no spelling for — the arena.
     ///
-    /// The name is written into the file as a comment, and no `world`
-    /// directive is emitted, so feeding the file to `straf3-headless` produces
-    /// a run in *its* default world rather than a silent claim to have
-    /// reproduced this one.
+    /// The name is written into the file as the `world` directive, same as
+    /// any other world. `straf3-headless` does not recognise it and refuses
+    /// the file by name rather than defaulting to a different world it never
+    /// ran — that refusal is `straf3-headless`'s, not a fact this recorder
+    /// can enforce by omission.
     Unrepresentable(&'static str),
 }
 
@@ -120,21 +122,16 @@ impl Recorder {
         out.push_str(&format!("# world {world}\n"));
         if let WorldSpec::Unrepresentable(name) = world {
             out.push_str(&format!(
-                "# NOTE: `straf3-headless` has no spelling for the `{name}` world, so no\n\
-                 # `world` directive is written here and this file will NOT reproduce\n\
-                 # the recorded run under it. Replay it in-process instead.\n"
+                "# NOTE: `straf3-headless` has no spelling for the `{name}` world. It will\n\
+                 # refuse this file by name rather than silently run it in a different\n\
+                 # one. Replay it with `straf3 --replay` instead.\n"
             ));
         }
         out.push('\n');
 
         out.push_str(&format!("rate {}\n", self.rate.hz()));
         out.push_str(&format!("profile {profile_name}\n"));
-        match world {
-            WorldSpec::Empty | WorldSpec::Flat(_) => {
-                out.push_str(&format!("world {world}\n"));
-            }
-            WorldSpec::Unrepresentable(_) => {}
-        }
+        out.push_str(&format!("world {world}\n"));
         out.push_str(&format!(
             "spawn {:?} {:?} {:?}\n",
             self.spawn.x, self.spawn.y, self.spawn.z
@@ -270,13 +267,30 @@ mod tests {
     }
 
     #[test]
-    fn a_world_headless_cannot_spell_is_flagged_rather_than_faked() {
+    fn a_world_headless_cannot_spell_is_written_by_name_not_omitted() {
+        // Superseded design: this directive used to be omitted so that
+        // `straf3-headless` would silently fall back to its default `Flat`
+        // world instead of erroring — which just made the wrong answer
+        // silent in every reader, including `straf3 --replay`, which
+        // already understands `arena` and was needlessly blinded by the
+        // omission. Now the name is written like any other world, and it is
+        // `straf3-headless`'s own unknown-world error that refuses it.
         let text = recorder().to_fixture(WorldSpec::Unrepresentable("arena"), "cpm");
         assert!(text.contains("# world arena"));
-        assert!(text.contains("will NOT reproduce"));
-        // The crucial bit: no `world` directive, so headless cannot be fooled
-        // into thinking it ran the same geometry.
-        assert!(!text.lines().any(|l| l.starts_with("world ")));
+        assert!(text.contains("refuse this file by name"));
+        // The crucial bit: the `world` directive IS written, so a reader
+        // that understands `arena` (`straf3 --replay`) can use it, and a
+        // reader that does not (`straf3-headless`) sees the real name and
+        // can refuse it rather than silently defaulting.
+        assert!(text.lines().any(|l| l == "world arena"));
+    }
+
+    #[test]
+    fn an_arena_recordings_note_says_headless_refuses_it() {
+        let text = recorder().to_fixture(WorldSpec::Unrepresentable("arena"), "cpm");
+        assert!(text.contains("straf3-headless"));
+        assert!(text.contains("refuse"));
+        assert!(text.contains("straf3 --replay"));
     }
 
     #[test]
