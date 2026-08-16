@@ -1,7 +1,13 @@
 //! Workspace automation for straf3.
 //!
-//! The only thing in here that matters is [`seam`], which enforces the
-//! one-directional dependency rule from spec section 4 against the real
-//! resolved dependency graph.
+//! Two checks live here, and both enforce a property the project cannot
+//! verify by reading code:
+//!
+//! - [`seam`] enforces the one-directional dependency rule from spec
+//!   section 4 against the real resolved dependency graph.
+//! - [`determinism`] runs one reference command stream on every target the
+//!   project ships or verifies on and fails if their rolling digests differ
+//!   (architecture item C2).
 
+pub mod determinism;
 pub mod seam;

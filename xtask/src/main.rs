@@ -3,8 +3,10 @@
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
+    let argv: Vec<String> = std::env::args().skip(2).collect();
     match std::env::args().nth(1).as_deref() {
         Some("check-seam") => check_seam(),
+        Some("determinism") => determinism(&argv),
         Some(other) => {
             eprintln!("unknown command: {other}");
             usage();
@@ -36,8 +38,48 @@ usage: cargo xtask <command>
                    forbidden outright, and its libm-family features are
                    forbidden when `glam/std` is absent (only then do they
                    change float results).
+
+  determinism  Run one reference command stream through straf3-sim on every
+               target the project ships or verifies on — glibc, musl,
+               windows-gnu and wasm32 under Node — and fail if they do not
+               all agree. The comparison is a digest folded over EVERY
+               command, not the final state: a measured probe case diverged
+               mid-run and re-converged, and an end-state comparison would
+               have certified it as reproducible.
+
+               Options:
+                 --only <triple>     check only this target (repeatable)
+                 --skip <triple>     skip this target, loudly (repeatable)
+                 --emit <file>       write one target's report to a file
+                 --compare <files>   compare reports emitted elsewhere
+
+               CI uses --emit on a Linux runner and a Windows runner, then
+               --compare, so the Windows binary is executed on Windows.
 "
     );
+}
+
+fn determinism(argv: &[String]) -> ExitCode {
+    println!(
+        "checking cross-target determinism (architecture item C2)...\n\
+         one reference stream, every target, compared by a digest folded over\n\
+         every command rather than by the final state.\n"
+    );
+    match xtask::determinism::run(argv) {
+        Ok(true) => ExitCode::SUCCESS,
+        Ok(false) => {
+            eprintln!(
+                "\nThe simulation does not compute the same bits on every target.\n\
+                 A recorded run cannot be verified and a ghost cannot be trusted\n\
+                 while this is true. See docs/web/ARCHITECTURE.md items C1 and C2."
+            );
+            ExitCode::FAILURE
+        }
+        Err(e) => {
+            eprintln!("determinism check could not run: {e}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 fn check_seam() -> ExitCode {

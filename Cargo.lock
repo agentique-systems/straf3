@@ -2738,6 +2738,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "straf3-det-runner"
+version = "0.1.0"
+dependencies = [
+ "straf3-sim",
+]
+
+[[package]]
 name = "straf3-devtools"
 version = "0.1.0"
 dependencies = [
