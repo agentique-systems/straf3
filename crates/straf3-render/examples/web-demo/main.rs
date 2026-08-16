@@ -2,9 +2,12 @@
 //!
 //! Built as a `cdylib` for `wasm32-unknown-unknown` and bundled with
 //! `wasm-bindgen`. This target is also the **stage-D bundle** spec rev 6 §P2
-//! left unmeasured: it links `straf3-render`, `straf3-platform`, `gltf`, and
-//! `parry3d` arriving transitively through `straf3-map`, which is the
-//! combination nobody had a number for. See `web/` next to this file.
+//! left unmeasured: it links `straf3-render`, `straf3-platform`, `gltf` and the
+//! below-the-line crates through `straf3-map`, which is the combination nobody
+//! had a number for. §P2 named `parry3d` as the weight it feared here, arriving
+//! transitively down that path; parry was never called and is no longer a
+//! dependency, so it is not in this number and cannot inflate it. See `web/`
+//! next to this file.
 //!
 //! Two things differ from native, and only two:
 //!

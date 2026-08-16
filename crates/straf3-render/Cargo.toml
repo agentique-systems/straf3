@@ -61,7 +61,10 @@ path = "examples/window/main.rs"
 
 # cdylib so wasm-bindgen has a module to process. This target is also the
 # stage-D bundle criterion 2 asks for: the real renderer, straf3-platform,
-# gltf, and parry3d arriving transitively through straf3-map.
+# gltf, and the below-the-line crates arriving through straf3-map. Stage D was
+# once expected to be dominated by parry3d reaching the bundle down that same
+# path; parry is no longer a dependency of anything, so the number is the game's
+# own code plus gltf and wgpu.
 [[example]]
 name = "web-demo"
 path = "examples/web-demo/main.rs"

@@ -47,9 +47,13 @@ straf3-devtools = { path = "crates/straf3-devtools" }
 # breaks the bit-identical results determinism depends on (spec section 4).
 glam = "0.33.3"
 
-# Swept convex-vs-static queries. Spec section 4 makes this conditional on a
-# determinism audit before we commit to it.
-parry3d = "0.30.2"
+# Swept convex-vs-static queries were going to come from parry3d, conditional on
+# the determinism audit spec section 4 asks for. That audit never became worth
+# running: straf3-collision answers the `World` seam with a hand-written Q3 brush
+# tracer instead (see its src/lib.rs), so parry was declared and called by
+# nothing. It is no longer a workspace dependency. Re-adding it means running the
+# audit first — and, since C8 raised the bar to bit-identical *across targets*,
+# auditing that too.
 
 # Rigid bodies for props/doors/ragdolls ONLY. Deliberately not a dependency of
 # any crate below the line, and never of straf3-sim: the character controller

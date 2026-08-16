@@ -8,13 +8,18 @@
 //!
 //! It is a trait **defined here**, in `straf3-sim`, rather than a concrete
 //! type imported from `straf3-collision`, for a reason spec section 4 states
-//! outright: parry is used for swept queries *subject to a determinism audit
-//! before we commit to it*. If the physics called parry directly, that audit
-//! would have no cheap answer — a "no" would mean rewriting movement code.
-//! With the query behind a trait the simulation owns, the answer is: write a
-//! different implementor. `straf3-sim` does not depend on `straf3-collision`
-//! at all, and `cargo xtask check-seam` will show parry3d absent from its
-//! dependency tree.
+//! outright: a geometry library — parry3d was the candidate — would have been
+//! used for swept queries *subject to a determinism audit before we commit to
+//! it*. If the physics called such a library directly, that audit would have no
+//! cheap answer: a "no" would mean rewriting movement code. With the query
+//! behind a trait the simulation owns, the answer is: write a different
+//! implementor.
+//!
+//! That is what happened. `straf3-collision` answers with a hand-written Q3
+//! brush tracer, the audit never had to be run, and parry3d is no longer a
+//! workspace dependency at all. The seam is what made that reversible, and it
+//! still is: `straf3-sim` does not depend on `straf3-collision`, and
+//! `cargo xtask check-seam` holds its dependency tree to glam alone.
 //!
 //! The direction matters too. The *consumer* declares the interface, so the
 //! shape is driven by what the physics needs, not by what a collision library

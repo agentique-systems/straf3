@@ -12,11 +12,13 @@ publish.workspace = true
 #
 # The dependency list is deliberately one entry long. In particular this crate
 # does NOT depend on straf3-collision, even though collision is also below the
-# line: straf3-collision pulls in parry3d, and spec section 4 makes parry
-# conditional on a determinism audit. The simulation asks about geometry
-# through the `World` trait it defines itself (src/world.rs), so whichever
-# crate ends up answering — parry, a hand-rolled brush tracer, or a test stub —
-# is a decision that can be revisited without touching physics.
+# line. The simulation asks about geometry through the `World` trait it defines
+# itself (src/world.rs), so whichever crate ends up answering — a hand-rolled
+# brush tracer, a geometry library, or a test stub — is a decision that can be
+# revisited without touching physics. That seam already paid for itself once:
+# spec section 4 made parry3d conditional on a determinism audit, collision
+# answered by hand instead, and parry left the workspace without the simulation
+# noticing.
 #
 # Adding a dependency here is an architectural change, not a convenience.
 [dependencies]

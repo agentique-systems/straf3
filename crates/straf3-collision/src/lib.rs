@@ -16,7 +16,7 @@
 //! [`winding`] for turning planes back into polygons, and [`hull`] for the
 //! bevel planes a swept *box* needs that a swept *point* does not.
 //!
-//! # Why it is hand-written, and why parry3d is still in the manifest
+//! # Why it is hand-written, and why there is no geometry library here
 //!
 //! `World`'s contract is *pure and deterministic, bit-identical*. ARCHITECTURE
 //! C8 adds to it: identical **across targets**, because a run recorded in a
@@ -25,18 +25,18 @@
 //! work-stealing parallelism, and any `f32::sin`/`cos`/`tan`/`exp`/`powf` or
 //! SIMD path that exists on one target and not another.
 //!
-//! "Is parry deterministic?" was already an open question the spec made
-//! conditional on an audit. "Is parry deterministic *across targets*?" is a
-//! materially harder one, and the whole point of the `World` seam is that it can
-//! stay unanswered cheaply. So this crate answers by hand. Every operation in
-//! the trace loop is an IEEE add, subtract, multiply, divide, compare or square
-//! root, in a fixed order, over a fixed list.
+//! `parry3d` was the candidate, and "is parry deterministic?" was already an
+//! open question the spec made conditional on an audit. "Is parry deterministic
+//! *across targets*?" is a materially harder one, and the whole point of the
+//! `World` seam is that it can stay unanswered cheaply. So this crate answers by
+//! hand. Every operation in the trace loop is an IEEE add, subtract, multiply,
+//! divide, compare or square root, in a fixed order, over a fixed list.
 //!
-//! `parry3d` remains a declared dependency and is used by nothing. Its manifest
-//! comment says it is confined here so a determinism audit has one place to
-//! look; leaving it declared keeps that true, and keeps the decision reversible.
-//! It is not on the trace path and must not become so without that being called
-//! out as an architectural change rather than an implementation detail.
+//! Because the answer is hand-written, parry was declared and called by nothing,
+//! so it is no longer a dependency of this crate or of the workspace. The seam
+//! is what keeps that decision reversible — not the manifest line. Putting any
+//! geometry library on the trace path means running the across-target audit
+//! first, and is an architectural change rather than an implementation detail.
 //!
 //! # Where the geometry comes from
 //!

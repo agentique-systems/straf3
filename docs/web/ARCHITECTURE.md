@@ -82,8 +82,10 @@ protocol constraint, which §3.2 already implements.
 7. **Browser play is small, and its bundle shape is decided.** A working WebGPU skeleton — canvas,
    surface, adapter, swapchain, render loop — is **132 KiB** of gzipped wasm and ran in Chrome 146.
    Rev 6 §Q2 fixed the shape: WebGPU only, no compiled-in WebGL2 fallback (it costs 595 KiB and
-   `wgpu` was measured to crash rather than degrade when it fires), no `egui`. One number is still
-   missing — stage D, the game crates with `parry3d` — and Wave 3 produces it (§1.5, C9).
+   `wgpu` was measured to crash rather than degrade when it fires), no `egui`. Stage D — the whole
+   game — has since been measured at **131 KiB** of gzipped wasm, *smaller* than the skeleton
+   (`probes/wasm-render/sizes.txt`). The `parry3d` weight §P2 feared never existed: nothing called
+   it, the linker dropped it, and it is no longer a dependency at all.
 
 8. **Verification cannot tell a copied run from an original, and the document says so.** A `.s3d`
    re-simulates identically whoever uploads it, and no client-side computation can bind identity
@@ -304,11 +306,17 @@ layer, and we are not shipping it (rev 6 §Q2; C9).
   is both the largest available saving (−1.83 MiB) and the right call on its own terms: the devtools
   overlay is speedometer, graphs and trace telemetry, which is cheaper as DOM over the canvas.
 
-**What remains open on the render side is one number: stage D** — the game crates plus `gltf`, with
-`parry3d` arriving transitively through `straf3-map`/`straf3-collision`. The probe seat's worktree
-was destroyed before it could measure it. That is the figure most likely to move the picture, and
-Wave 3 produces it as a side effect of criterion 2. Stage A being 132 KiB does not bound stage D;
-`parry3d` in particular is unmeasured here and is the single largest unknown in the web bundle.
+**Stage D is no longer open.** It was the last number missing on the render side — the game crates
+plus `gltf`, with `parry3d` expected to arrive transitively through `straf3-map`/`straf3-collision` —
+and the first probe seat's worktree was destroyed before it could measure it. It has since been
+measured: **131 369 B of gzipped wasm plus 14 262 B of gzipped JS**, against stage A's 134 829 +
+11 728. The complete renderer, simulation and collision are *smaller* than the empty skeleton, which
+bought a `log`/`console_log` facade that `straf3-render` does not
+(`probes/wasm-render/sizes.txt`).
+
+`parry3d` — expected to be the single largest unknown in the bundle — turned out to weigh nothing:
+`straf3-collision` answers the trace by hand and never called it, so the linker dropped it whole. It
+has since been removed from the workspace outright, so the figure above cannot drift back.
 
 ---
 
@@ -750,10 +758,12 @@ must also produce identical results on wasm and native.** Concretely, whatever a
 avoid `f32::sin/cos/tan/exp/powf` for the same reason `straf3-sim` now does, and must not use SIMD
 paths that exist on one target and not another.
 
-This is a live constraint on the parry evaluation that spec section 4 makes conditional: **"is parry
-deterministic?" is now "is parry deterministic *across targets*?"**, which is a materially harder
+This was a live constraint on the parry evaluation that spec section 4 made conditional: **"is parry
+deterministic?" became "is parry deterministic *across targets*?"**, which is a materially harder
 question. A hand-written brush tracer over convex hulls — which is what the compiled-map path wants
-anyway, and what Q3 itself did — sidesteps it.
+anyway, and what Q3 itself did — sidesteps it, and that is the route C8 took. The evaluation was
+never run, because nothing came to depend on its answer; `parry3d` has been dropped from the
+workspace, and re-adding it puts the across-targets question back on the table.
 
 C4 adds a second requirement to the same contract, and it is the one an implementor is most likely
 to get wrong by writing the obvious code: **`Trace::triggers` must report only the volumes the hull
@@ -841,11 +851,12 @@ of gzipped wasm for a working WebGPU skeleton in Chrome 146 (§1.5) — and rev 
   elements positioned over the canvas. `straf3-render` must therefore not depend on `egui`, and any
   telemetry it exposes must be readable as plain values a host page can render.
 
-**The one number still missing is stage D**: the game crates plus `gltf`, with `parry3d` arriving
-transitively through `straf3-map`/`straf3-collision`. 132 KiB bounds nothing about it. Wave 3's
-acceptance criterion 2 produces it, and if it comes back large, the response is a dependency
-question (does the web build need `parry3d` at all, or does it ship precompiled hulls?) rather than
-a reopening of the backend decision.
+**Stage D — once the one number still missing** — is measured: the game crates plus `gltf` are
+131 369 B of gzipped wasm, marginally *under* stage A's skeleton
+(`probes/wasm-render/sizes.txt`). The contingency this paragraph used to hold — "if it comes back
+large, ask whether the web build needs `parry3d` at all, or ships precompiled hulls" — was never
+needed and is now moot: `parry3d` was called by nothing, contributed ~0 bytes, and has been removed
+from the workspace. The backend decision was never in question.
 
 **This item is Wave 3's contract.** Rev 6 §S sets Wave 3 as the first playable straf3, and its
 acceptance criteria 3 and 5 are C9 restated from the other side: input captured as the same
@@ -1674,9 +1685,9 @@ sentimental:
 
 The risk this paragraph used to carry — that `wgpu`/`winit` might not cross-compile to web at a
 tolerable size — **has been measured away.** A working WebGPU skeleton is 132 KiB of gzipped wasm
-and it ran in Chrome 146 (§1.5). The residual is stage D: the game crates with `parry3d` arriving
-transitively, which nobody has weighed. If that comes back large it is a dependency question for the
-web build, not a reason to reorder — the sim and input path are unaffected either way.
+and it ran in Chrome 146 (§1.5). The residual — stage D, the game crates with `parry3d` expected to
+arrive transitively — has since been weighed too, at 131 KiB: no larger than the skeleton, and with
+no `parry3d` in it at all, that crate having been called by nothing and since removed.
 
 **Order:**
 
@@ -1954,11 +1965,12 @@ streams at three mouse-jitter levels, measuring bit-packed size and then `zlib` 
 
 **Could still invalidate parts of this:**
 
-- **Stage D — the game crates plus `gltf`, with `parry3d` arriving transitively.** Never measured;
-  the probe seat's worktree was destroyed before it got there. Stage A's 132 KiB bounds nothing
-  about it, and `parry3d` is the largest unknown. Wave 3's criterion 2 produces the number. If it is
-  bad, the response is a dependency question for the web build (precompiled hulls instead of a
-  tracer in the bundle) rather than a change to C9's backend decision or to §9.2's ordering.
+- ~~**Stage D — the game crates plus `gltf`, with `parry3d` arriving transitively.**~~ **RESOLVED,
+  and it did not invalidate anything.** It sat here unmeasured because the first probe seat's
+  worktree was destroyed before it got there. Measured since: 131 369 B gzipped wasm, marginally
+  under stage A's skeleton (`probes/wasm-render/sizes.txt`). `parry3d`, named here as the largest
+  unknown, weighed ~0 — `straf3-collision` traces by hand and never called it — and has since been
+  removed from the workspace. No dependency question for the web build, no change to C9 or §9.2.
 - **That the ticket and digest mitigations in §8.3 are worth their friction.** They rest on a
   judgement about attacker economics, not a measurement: that requiring a live attempt per
   submission moves copying from scriptable to manual. If copying turns out to be popular anyway,

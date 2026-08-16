@@ -26,3 +26,12 @@ stage-d-straf3-render-webgpu-probe-equivalent profile=release(--probe-equivalent
 # reference and straf3-map::compile is unimplemented), so the linker drops
 # them. Rev 6 §P2's "stage D including parry3d" is therefore still unmeasured,
 # and stays open until straf3-collision stops being a stub.
+#
+# ── CLOSED. straf3-collision is no longer a stub, and the answer did not move ──
+# ARCHITECTURE C8 landed the real tracer: Q3's CM_TraceThroughBrush transcribed
+# by hand, over convex hulls, in straf3-collision. It calls parry3d nowhere —
+# that was the point, since C8 requires bit-identical results ACROSS targets and
+# parry had never been audited for that. So parry stayed at ~0 bytes after the
+# stub became real, and "stage D including parry3d" is not a measurement anyone
+# can take: parry3d has now been removed from the workspace outright. The
+# numbers above are stage D, final, with no dead physics library behind them.
