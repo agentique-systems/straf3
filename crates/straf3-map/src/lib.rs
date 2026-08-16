@@ -128,7 +128,11 @@ pub use crate::mesh::{Mesh, MeshVertex};
 // The collision primitives belong to `straf3-collision`, which owns the trace
 // that consumes them (C8). They are re-exported because a caller holding a
 // `CompiledMap` should not have to name a second crate to read a hull out of it.
-pub use straf3_collision::{Hull, HullWorld, Plane};
+pub use straf3_collision::{Hull, HullWorld, Plane, TriggerHull};
+// For the same reason one level further down: `collider()`'s contract is
+// written in `TriggerSet`, and a caller reading `HullWorld::trigger_coverage`
+// to ask whether a map can be timed needs to name it.
+pub use straf3_sim::world::TriggerSet;
 
 /// A compiled map: convex hulls for collision, plus what rendering and the run
 /// clock need.
@@ -277,6 +281,19 @@ pub enum Warning {
     /// The map has geometry but no `target_startTimer` / `target_stopTimer`
     /// pair, so nothing in it can produce a time.
     NoTimerTriggers,
+    /// More `target_checkpoint` volumes than [`TriggerSet`] has bits for
+    /// ([`TriggerSet::MAX_CHECKPOINTS`]). The volumes are still in
+    /// [`CompiledMap::triggers`]; what they lose is a bit in the collider, so
+    /// [`CompiledMap::collider`] leaves them out and crossing one splits
+    /// nothing.
+    ///
+    /// The compiler says so rather than dropping them in silence: a run that
+    /// is missing its 31st split looks exactly like a player who missed it.
+    TooManyCheckpoints {
+        /// How many checkpoints have no bit. They are the ones latest in
+        /// source order, since numbering follows source order.
+        dropped: usize,
+    },
 }
 
 /// Errors produced while compiling `.map` source.
@@ -449,6 +466,15 @@ pub fn compile(source: &str) -> Result<CompiledMap, CompileError> {
     if !out.has_timing() {
         out.warnings.push(Warning::NoTimerTriggers);
     }
+    let dropped = out
+        .triggers
+        .iter()
+        .filter(|t| matches!(t.kind, TriggerKind::Checkpoint(_)))
+        .filter(|t| t.kind.trigger_set().is_none())
+        .count();
+    if dropped > 0 {
+        out.warnings.push(Warning::TooManyCheckpoints { dropped });
+    }
     Ok(out)
 }
 
@@ -548,10 +574,36 @@ impl CompiledMap {
     /// collider that owns its geometry and can outlive the `CompiledMap` — the
     /// browser drops the source text and the entity table after loading.
     ///
+    /// The timing volumes go in alongside the solids, in source order, as
+    /// [`TriggerHull`]s carrying the [`TriggerSet`] bits
+    /// [`TriggerKind::trigger_set`] assigns. They are a separate list inside
+    /// [`HullWorld`] and are never traced as solid: a player runs *through* a
+    /// finish line. This is what makes [`straf3_sim::step_in_place`] advance
+    /// the run clock — it is driven by the geometry, through `Trace::triggers`,
+    /// with no second query and nothing above the seam deciding when a run
+    /// started.
+    ///
+    /// A volume whose kind has no bit — a teleporter, a jump pad, an
+    /// unrecognised trigger — is left out rather than given a spare bit. The
+    /// one case where that is a loss rather than a classification is a
+    /// checkpoint past [`TriggerSet::MAX_CHECKPOINTS`], and `compile` reports
+    /// it as [`Warning::TooManyCheckpoints`].
+    ///
     /// [`World`]: straf3_sim::world::World
     #[must_use]
     pub fn collider(&self) -> HullWorld {
-        HullWorld::new(self.hulls.clone())
+        let mut volumes = Vec::new();
+        for trigger in &self.triggers {
+            let Some(set) = trigger.kind.trigger_set() else {
+                continue;
+            };
+            // One trigger entity may own several brushes; each is a piece of
+            // the same volume and carries the same bits.
+            for hull in &trigger.hulls {
+                volumes.push(TriggerHull::new(set, hull.clone()));
+            }
+        }
+        HullWorld::new(self.hulls.clone()).with_triggers(volumes)
     }
 }
 
