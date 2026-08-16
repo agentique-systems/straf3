@@ -1,0 +1,83 @@
+A = native-x86_64-linux
+B = node-v8-12.4.254.21-node.35
+spawn checksum:  A c0800ec9609f2adf  B c0800ec9609f2adf  MATCH
+grand checksum:  A 9353a522e0a60466  B 9353a522e0a60466  MATCH
+patched-sim grand (own trig in AngleVectors): A 9353a522e0a60466  B 9353a522e0a60466  MATCH — the fix closes the gap end to end
+
+── per-case ────────────────────────────────────────────────
+cpm-strafe-turn    final MATCH   A 675e9976a65a5a55 B 675e9976a65a5a55  — identical at all 1200 commands
+    patched: MATCH  675e9976a65a5a55 / 675e9976a65a5a55  — own trig moves this case on 0/1200 commands (A), 0/1200 (B)
+vq3-strafe-turn    final MATCH   A 4dfc6a880f2a324a B 4dfc6a880f2a324a  — identical at all 1200 commands
+    patched: MATCH  4dfc6a880f2a324a / 4dfc6a880f2a324a  — own trig moves this case on 0/1200 commands (A), 0/1200 (B)
+cpm-yaw-0          final MATCH   A bb37eb766040d1d5 B bb37eb766040d1d5  — identical at all 1200 commands
+    patched: MATCH  bb37eb766040d1d5 / bb37eb766040d1d5  — own trig moves this case on 0/1200 commands (A), 0/1200 (B)
+cpm-yaw-90         final MATCH   A 0d8e4c9e0a7bb86f B 0d8e4c9e0a7bb86f  — identical at all 1200 commands
+    patched: MATCH  0d8e4c9e0a7bb86f / 0d8e4c9e0a7bb86f  — own trig moves this case on 0/1200 commands (A), 0/1200 (B)
+cpm-still          final MATCH   A e9f6b392a6c63bf0 B e9f6b392a6c63bf0  — identical at all 1200 commands
+    patched: MATCH  e9f6b392a6c63bf0 / e9f6b392a6c63bf0  — own trig moves this case on 0/1200 commands (A), 0/1200 (B)
+cpm-fine-turn      final MATCH   A 7026ae91bc6aa27c B 7026ae91bc6aa27c  — identical at all 1200 commands
+    patched: MATCH  7026ae91bc6aa27c / 7026ae91bc6aa27c  — own trig moves this case on 0/1200 commands (A), 0/1200 (B)
+
+── raw operations, over 977 probe angles ──────────────
+sin_cos.sin      12/977 angles differ
+    deg=13  A=3e665992 (0.22495105862617493)  B=3e665991 (0.22495104372501373)  1 ULP
+    deg=19  A=3ea6b0df (0.32556816935539246)  B=3ea6b0de (0.32556813955307007)  1 ULP
+    deg=22  A=3ebfcc70 (0.3746066093444824)  B=3ebfcc6f (0.37460657954216003)  1 ULP
+    deg=42.5  A=3f2cf37b (0.6755902171134949)  B=3f2cf37a (0.6755901575088501)  1 ULP
+    deg=140.5  A=3f22d607 (0.6360782980918884)  B=3f22d606 (0.6360782384872437)  1 ULP
+    deg=141.5  A=3f1f5d1e (0.6225146055221558)  B=3f1f5d1d (0.622514545917511)  1 ULP
+    deg=168.5  A=3e4c271a (0.19936791062355042)  B=3e4c2719 (0.19936789572238922)  1 ULP
+    deg=169.5  A=3e3a9bf8 (0.18223559856414795)  B=3e3a9bf7 (0.18223558366298676)  1 ULP
+    … 4 more
+    max 1 ULP; degree range 13 … 192.5
+sin_cos.cos      4/977 angles differ
+    deg=46.5  A=3f303802 (0.6883546113967896)  B=3f303801 (0.6883545517921448)  1 ULP
+    deg=103  A=be66598f (-0.22495101392269135)  B=be66598e (-0.22495099902153015)  1 ULP
+    deg=302.5  A=3f098c79 (0.5372996926307678)  B=3f098c7a (0.5372997522354126)  1 ULP
+    deg=47.36000061035156  A=3f2d696a (0.6773897409439087)  B=3f2d6969 (0.6773896813392639)  1 ULP
+    max 1 ULP; degree range 46.5 … 302.5
+sin              12/977 angles differ
+    deg=13  A=3e665992 (0.22495105862617493)  B=3e665991 (0.22495104372501373)  1 ULP
+    deg=19  A=3ea6b0df (0.32556816935539246)  B=3ea6b0de (0.32556813955307007)  1 ULP
+    deg=22  A=3ebfcc70 (0.3746066093444824)  B=3ebfcc6f (0.37460657954216003)  1 ULP
+    deg=42.5  A=3f2cf37b (0.6755902171134949)  B=3f2cf37a (0.6755901575088501)  1 ULP
+    deg=140.5  A=3f22d607 (0.6360782980918884)  B=3f22d606 (0.6360782384872437)  1 ULP
+    deg=141.5  A=3f1f5d1e (0.6225146055221558)  B=3f1f5d1d (0.622514545917511)  1 ULP
+    deg=168.5  A=3e4c271a (0.19936791062355042)  B=3e4c2719 (0.19936789572238922)  1 ULP
+    deg=169.5  A=3e3a9bf8 (0.18223559856414795)  B=3e3a9bf7 (0.18223558366298676)  1 ULP
+    … 4 more
+    max 1 ULP; degree range 13 … 192.5
+cos              4/977 angles differ
+    deg=46.5  A=3f303802 (0.6883546113967896)  B=3f303801 (0.6883545517921448)  1 ULP
+    deg=103  A=be66598f (-0.22495101392269135)  B=be66598e (-0.22495099902153015)  1 ULP
+    deg=302.5  A=3f098c79 (0.5372996926307678)  B=3f098c7a (0.5372997522354126)  1 ULP
+    deg=47.36000061035156  A=3f2d696a (0.6773897409439087)  B=3f2d6969 (0.6773896813392639)  1 ULP
+    max 1 ULP; degree range 46.5 … 302.5
+sqrt             identical at every angle
+deg*DEG_TO_RAD   identical at every angle
+det_sin (fix)    identical at every angle
+det_cos (fix)    identical at every angle
+
+── f64 operations ──────────────────────────────────────────
+f64 sin          36/977 angles differ
+    deg=34  A=3fe1e4e8820638a3 (0.559192899659838)  B=3fe1e4e8820638a4 (0.5591928996598381)
+    deg=36.5  A=3fe308c9c9df33a3 (0.59482278278448)  B=3fe308c9c9df33a4 (0.5948227827844801)
+    deg=42  A=3fe56984949e12ad (0.669130602138997)  B=3fe56984949e12ac (0.6691306021389969)
+    deg=47  A=3fe7673fde74cbc7 (0.7313536972854927)  B=3fe7673fde74cbc8 (0.7313536972854928)
+f64 cos          33/977 angles differ
+    deg=29.5  A=3febd9f4314c4d08 (0.870355697903876)  B=3febd9f4314c4d09 (0.8703556979038761)
+    deg=40.5  A=3fe8553ee626ae7a (0.7604059691561382)  B=3fe8553ee626ae7b (0.7604059691561383)
+    deg=41.5  A=3fe7f771fedd14b3 (0.7489557245068198)  B=3fe7f771fedd14b4 (0.7489557245068199)
+    deg=42.5  A=3fe797c6a64b55ca (0.7372773406920541)  B=3fe797c6a64b55c9 (0.737277340692054)
+f64 sqrt         identical at every angle
+
+normalize (x/sqrt(len²)): identical at all 64 vectors
+trig digests: ≠ ≠ ≠ ≠ = = = =  (sin_cos.sin, sin_cos.cos, sin, cos, sqrt, deg*DEG_TO_RAD, det_sin (fix), det_cos (fix))
+
+── signed-zero / NaN edge cases (max, min, clamp, abs, div) ─
+    all 16 identical (incl. NaN bit payloads)
+
+── 200 000-angle sweep, -720°…+720° ────────────────────────
+libm sin/cos digest:  A b71c58a6cda8908b  B e935a7fa1bbd2d37  DIFFER
+own-trig digest:      A ed430df756584863  B ed430df756584863  MATCH
+own trig vs this platform's libm: max ULP sin 1/1, cos 1/1; disagreeing angles 3.19% (A) vs 2.00% (B)

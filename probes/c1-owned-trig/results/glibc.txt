@@ -1,0 +1,28 @@
+   Compiling straf3-sim v0.1.0 (/home/cairon/.agentique-console/worktrees/as_39d7c8f31acb472dbdec/seat-trig/crates/straf3-sim)
+   Compiling c1-owned-trig v0.1.0 (/home/cairon/.agentique-console/worktrees/as_39d7c8f31acb472dbdec/seat-trig/probes/c1-owned-trig)
+    Finished `release` profile [optimized] target(s) in 3.06s
+     Running `target/release/verify`
+# C1 verification — straf3_sim::num::sin_cos
+
+target            x86_64-linux (host libm: glibc)
+domain            |degrees| in [2^-10, 2^24], both signs
+stride            every 1 f32 bit pattern
+samples           570425346
+threads           8
+elapsed           1.9s
+
+## 1. Against the reference it was designed from
+
+probes/wasm-determinism/src/dettrig.rs::det_sin_cos, included verbatim:
+samples differing in any bit: 0
+
+## 2. Against the host's libm
+
+worst ULP over the whole swept domain     sin 1131, cos 1185
+worst ULP for |degrees| <= 8192           sin 1, cos 1
+
+## 3. Cross-target digest of every output
+
+0x20064597458820de   (thread-count independent; compare against another target)
+
+PASS: bit-identical to the reference on every sample swept.

@@ -951,10 +951,17 @@ impl<'a, W: World + ?Sized> Pmove<'a, W> {
 /// Up is not returned because the movement code never uses it. Note that
 /// Quake's "right" points along -Y at yaw 0, which is not a mistake to be
 /// tidied — the sign is baked into every recorded `right_move`.
+///
+/// These are the only transcendental calls in the simulation, and they go
+/// through [`num::sin_cos`] rather than `f32::sin_cos` because std's is
+/// whichever libm the target links, and those disagree in the last bit — a
+/// browser recording stops matching a glibc server after about 14 seconds of
+/// play. `cargo xtask check-seam` fails the build if a `.sin_cos()` is written
+/// here again.
 fn angle_vectors(pitch: Scalar, yaw: Scalar, roll: Scalar) -> (Vec3, Vec3) {
-    let (sy, cy) = (yaw * DEG_TO_RAD).sin_cos();
-    let (sp, cp) = (pitch * DEG_TO_RAD).sin_cos();
-    let (sr, cr) = (roll * DEG_TO_RAD).sin_cos();
+    let (sy, cy) = num::sin_cos(yaw * DEG_TO_RAD);
+    let (sp, cp) = num::sin_cos(pitch * DEG_TO_RAD);
+    let (sr, cr) = num::sin_cos(roll * DEG_TO_RAD);
 
     let forward = vec3(cp * cy, cp * sy, -sp);
     let right = vec3(-sr * sp * cy + cr * sy, -sr * sp * sy - cr * cy, -sr * cp);

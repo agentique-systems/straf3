@@ -1,0 +1,29 @@
+# Standalone on purpose, same reasoning as the two probes next door: the empty
+# [workspace] table excludes this crate from the root workspace, so it cannot
+# collide with anything landing in crates/.
+[workspace]
+
+[package]
+name = "c1-owned-trig"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "verify"
+path = "src/main.rs"
+
+[dependencies]
+# The landed implementation under test: `straf3_sim::num::sin_cos`.
+straf3-sim = { path = "../../crates/straf3-sim" }
+
+# `probes/wasm-determinism` is NOT a dependency, deliberately. Its build.rs
+# patches a build-time copy of straf3-sim's step.rs and asserts it finds three
+# `.sin_cos()` call sites there — which C1 has now removed, so that crate no
+# longer builds against this tree, by design. Its `dettrig.rs` is instead
+# pulled in by `#[path]` in src/main.rs: the same file, byte for byte, with no
+# copy to drift and no build script to run.
+
+[profile.release]
+opt-level = 3
+lto = true
