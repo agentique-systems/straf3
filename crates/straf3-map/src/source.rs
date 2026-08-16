@@ -20,12 +20,16 @@
 //!   thing (q3map2 hands both formats to the same `PlaneFromPoints`), and what
 //!   is dropped is the texture-alignment matrix, which is out of scope this
 //!   wave anyway.
-//! - **`patchDef2` / `patchDef3`** are **dropped**, and every one is counted
-//!   and reported as [`Warning::PatchDropped`]. This is a real loss and must
-//!   not be quiet: a Quake 3 patch is collidable, so a map whose route runs
-//!   over a curved ramp will have a hole where the ramp was. Tessellating
-//!   Bézier patches into hulls is a larger piece of work than the rest of this
-//!   compiler and is not in C7's five requirements.
+//! - **`patchDef2` / `patchDef3`** are parsed only far enough to be skipped —
+//!   they are **dropped**, never tessellated — and every one is counted and
+//!   reported as [`Warning::PatchDropped`]. This is a real loss and must not be
+//!   quiet: a Quake 3 patch is collidable, so a map whose route runs over a
+//!   curved ramp will have a hole where the ramp was. The count is what
+//!   [`PatchLoss`] grades, because a map that loses an arch and a map that
+//!   loses a thousand ramps are different outcomes, not different magnitudes of
+//!   one. Tessellating Bézier patches into hulls is a larger piece of work than
+//!   the rest of this compiler, is not in C7's five requirements, and is a
+//!   Wave 5 question.
 //!
 //! # Why the untouched path is byte-for-byte untouched
 //!
@@ -35,6 +39,7 @@
 //! stream and would report a syntax error on the wrong line.
 //!
 //! [`Warning::PatchDropped`]: crate::Warning::PatchDropped
+//! [`PatchLoss`]: crate::PatchLoss
 
 /// One lexical token of `.map` text.
 ///

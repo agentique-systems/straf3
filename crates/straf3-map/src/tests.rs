@@ -530,12 +530,52 @@ fn a_patch_is_dropped_loudly() {
     let compiled = compile(&map).unwrap();
     assert_eq!(compiled.hulls.len(), 1, "the box survives");
     assert!(
-        compiled
-            .warnings
-            .contains(&Warning::PatchDropped { count: 1 }),
+        compiled.warnings.contains(&Warning::PatchDropped {
+            count: 1,
+            severity: PatchLoss::Partial,
+        }),
         "a dropped patch is missing collision and must be reported: {:?}",
         compiled.warnings
     );
+    assert_eq!(compiled.patch_loss(), Some((1, PatchLoss::Partial)));
+}
+
+/// A map that loses most of its curves must say so in its *type*, not only in
+/// a number the caller has to know how to read.
+#[test]
+fn wholesale_patch_loss_is_distinguishable_from_a_missing_arch() {
+    let patch = "{\npatchDef2\n{\ncommon/caulk\n( 3 3 0 0 0 )\n(\n( ( 0 0 0 0 0 ) ( 0 0 0 0 0 ) \
+                 ( 0 0 0 0 0 ) )\n)\n}\n}\n";
+    let compile_with = |n: usize| {
+        let world = box_brush([-64, -64, -16], [64, 64, 0], "base_floor/tile") + &patch.repeat(n);
+        let map = brush_entity("worldspawn", &[], &[world])
+            + &point_entity("info_player_deathmatch", &[("origin", "0 0 24")]);
+        compile(&map).unwrap()
+    };
+
+    // Just under: decorative curves are missing, the map still plays.
+    let few = compile_with(SUBSTANTIAL_PATCH_LOSS - 1);
+    assert_eq!(
+        few.patch_loss(),
+        Some((SUBSTANTIAL_PATCH_LOSS - 1, PatchLoss::Partial))
+    );
+
+    // At the threshold, and well past it: this map's geometry is absent.
+    for n in [SUBSTANTIAL_PATCH_LOSS, 706, 1123] {
+        let many = compile_with(n);
+        assert_eq!(
+            many.patch_loss(),
+            Some((n, PatchLoss::Substantial)),
+            "{n} dropped patches is not a blemish"
+        );
+        // The brush geometry is still compiled — the warning is the signal, and
+        // the compiler does not start refusing maps it used to accept.
+        assert_eq!(many.hulls.len(), 1);
+    }
+
+    // And a clean map claims no loss at all, rather than Partial-with-zero.
+    let clean = compile_with(0);
+    assert_eq!(clean.patch_loss(), None);
 }
 
 #[test]

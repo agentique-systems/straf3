@@ -8,6 +8,13 @@
 //! entities whose `target` names them. The player spawns at
 //! `info_player_deathmatch` or `info_player_start`.
 //!
+//! Those two are what a Defrag map carries, and they are preferred, but they
+//! are not all a map may carry: a team or CTF map often declares only
+//! `info_player_team1` / `info_player_team2` or `team_CTF_redplayer` /
+//! `team_CTF_blueplayer`, and a compiler that reads only the first two rejects
+//! it as having nowhere to stand. All six are read, in the preference order
+//! [`SPAWN_CLASSNAMES`] fixes.
+//!
 //! The indirection is the part worth understanding, because it is why a trigger
 //! cannot be classified by looking at it: the brush that the player crosses
 //! says only `"target" "t1"`, and what `t1` *is* lives in a different entity
@@ -242,7 +249,31 @@ pub const SPAWN_CLEARANCE: f32 = 0.125;
 /// `info_player_deathmatch` first because that is what Defrag maps use and what
 /// Q3's own FFA spawn selection reads; `info_player_start` is the single-player
 /// entity, present in many maps as a leftover at the same spot.
-const SPAWN_CLASSNAMES: [&str; 2] = ["info_player_deathmatch", "info_player_start"];
+///
+/// The four team entries come last, and the order matters more than it looks.
+/// A team map often carries no FFA spawn at all — `catharsis.map` has six
+/// `info_player_team1` and six `info_player_team2` and nothing else, and was
+/// rejected outright with [`crate::CompileError::NoPlayerSpawn`] until they were
+/// read here. Appending rather than interleaving keeps every map that *does*
+/// have an FFA spawn choosing exactly the spawn it chose before, which is what
+/// makes this change invisible to an existing recording: [`CompiledMap::spawn`]
+/// is `spawns[0]`, and `spawns[0]` only moves for a map that previously had no
+/// spawns to order.
+///
+/// `info_player_intermission` is deliberately absent. It is the end-of-match
+/// camera position, and mappers put it inside the ceiling or out beyond the
+/// walls where a camera can see the level — spawning a player there puts them
+/// in solid.
+///
+/// [`CompiledMap::spawn`]: crate::CompiledMap::spawn
+const SPAWN_CLASSNAMES: [&str; 6] = [
+    "info_player_deathmatch",
+    "info_player_start",
+    "info_player_team1",
+    "info_player_team2",
+    "team_ctf_redplayer",
+    "team_ctf_blueplayer",
+];
 
 /// Every spawn point in the map, best first.
 ///
@@ -410,6 +441,48 @@ mod tests {
         assert_eq!(s[0].origin.x, 100.0, "deathmatch wins over start");
         assert_eq!(s[1].origin.x, 200.0, "then source order");
         assert_eq!(s[2].classname, "info_player_start");
+    }
+
+    #[test]
+    fn a_team_only_map_has_spawns() {
+        // catharsis.map's shape: six team1, six team2, no FFA spawn at all.
+        // Before these classnames were read this compiled to NoPlayerSpawn.
+        let ents = vec![
+            entity("info_player_team1", &[("origin", "0 0 24")]),
+            entity("info_player_team2", &[("origin", "100 0 24")]),
+            entity("team_ctf_redplayer", &[("origin", "200 0 24")]),
+            entity("team_ctf_blueplayer", &[("origin", "300 0 24")]),
+        ];
+        let s = spawns(&ents);
+        assert_eq!(s.len(), 4);
+        assert_eq!(s[0].classname, "info_player_team1");
+        assert_eq!(s[3].classname, "team_ctf_blueplayer");
+    }
+
+    #[test]
+    fn a_team_spawn_never_outranks_an_ffa_one() {
+        // The compatibility guarantee: `spawns[0]` — and therefore
+        // `CompiledMap::spawn`, which is folded into `full_digest` — must not
+        // move for any map that already had an FFA spawn, however many team
+        // entities sit earlier in the file.
+        let ents = vec![
+            entity("info_player_team1", &[("origin", "0 0 24")]),
+            entity("team_ctf_redplayer", &[("origin", "100 0 24")]),
+            entity("info_player_deathmatch", &[("origin", "200 0 24")]),
+            entity("info_player_start", &[("origin", "300 0 24")]),
+        ];
+        let s = spawns(&ents);
+        assert_eq!(s[0].origin.x, 200.0, "deathmatch still wins");
+        assert_eq!(s[1].origin.x, 300.0, "then start");
+        assert_eq!(s[2].origin.x, 0.0, "team entities come after both");
+    }
+
+    #[test]
+    fn an_intermission_camera_is_not_a_spawn() {
+        // It is a viewpoint, and mappers put it in the ceiling or outside the
+        // level. Reading it as a spawn puts the player in solid.
+        let ents = vec![entity("info_player_intermission", &[("origin", "0 0 4096")])];
+        assert!(spawns(&ents).is_empty());
     }
 
     #[test]
