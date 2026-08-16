@@ -24,8 +24,12 @@ This opens a window on the hardcoded arena, under the `cpm` profile at
 ```
 straf3-render: backend=Vulkan adapter="llvmpipe (LLVM 20.1.2, 256 bits)" type=Cpu
 straf3-render: arena is 5044 triangles
-straf3 0.1.0 — world Arena, cpm profile, 125 Hz (8 ms commands). Click to capture the mouse, Esc to release, R to respawn.
+[INFO  straf3_game::app] straf3 0.1.0 — world Arena, cpm profile, 125 Hz (8 ms commands). Click to capture the mouse, Esc to release, R to respawn.
 ```
+
+The first two lines come straight from `straf3-render`, unprefixed; the third
+is a `log::info!` line and carries the logger's `[INFO  straf3_game::app]`
+prefix.
 
 If you also see a line like this, it is WSLg's desktop portal, not straf3 —
 harmless, and unrelated to whether the window works:
@@ -77,6 +81,11 @@ replay options (no window is opened and no GPU adapter is created):
                               equality is what criterion 5 means.
 ```
 
+`--world`, `--profile` and `--rate` only take effect when opening a window.
+A replay always runs under the world, profile and rate recorded in the file
+itself; passing `--profile`/`--rate`/`--world` alongside `--replay` is
+silently ignored, so don't expect them to change what a replay does.
+
 An unattended run, for scripting:
 
 ```
@@ -99,13 +108,17 @@ $ cargo run -p straf3-game --bin straf3 -- --replay /tmp/arena.rec
 ...
   world         Arena
 ...
-  checksum      0x38078f5270e2ecad
+  checksum      0x...
 $ cargo run -p straf3-sim --bin straf3-headless -- /tmp/arena.rec
 straf3-headless: /tmp/arena.rec: line 12: unknown world `arena` (empty|flat <z>)
 ```
 
-The round-trip below uses `--world flat` so both readers can run the same
-file and their checksums can be compared.
+The checksum is elided above because `--exit-after` ends on a wall-clock
+boundary, not a fixed command count — the number of commands it happens to
+record, and so the checksum, varies run to run. That is expected, not a
+sign anything is broken. The round-trip below uses `--world flat` and a
+hand-played session instead, and compares the checksums the two readers
+produce against each other rather than against a number printed here.
 
 Play for a few seconds — strafe, jump — before closing the window; an
 unattended, input-free recording reproduces trivially and proves nothing
