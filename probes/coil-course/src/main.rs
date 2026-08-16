@@ -16,6 +16,12 @@
 //!     `RunState` from geometry alone: a bot that runs the corridor crosses
 //!     `target_startTimer`, both checkpoints and `target_stopTimer` in order,
 //!     and comes out the other side with a `u32` millisecond time.
+//! H6. The *shipped* path does the same. `straf3_map::CompiledMap::collider()`
+//!     — the one call `straf3-game`'s scene and `straf3-render` both go through
+//!     — hands the timing volumes over, so a player in the native client
+//!     produces a time rather than a `RunState` stuck at `NotStarted` forever.
+//!     Evidenced by a command stream this phase writes out and the shipped
+//!     `straf3 --replay` reproduces checksum-for-checksum.
 //!
 //! Any of these can come back false. H3 is the one most likely to: the arithmetic
 //! that produced those numbers is a point-mass ballistic model, and the real
@@ -29,12 +35,23 @@
 //! agree, that is a measurement about *this* course's volumes being generous,
 //! not a licence to use the cheap one.
 //!
-//! # Why this probe does not use `straf3-map`
+//! # Which compiler each phase uses, and why they differ
 //!
-//! It was written while C7 was still in flight, so its brush-to-hull path is an
-//! independent second derivation of the same compile step. That is the point:
-//! when `straf3-map` lands, the two can be compared, and a probe that shared
-//! the compiler could not disagree with it.
+//! **H1–H5 use this file's own brush-to-hull path.** It was written while C7
+//! was still in flight, so it is an independent second derivation of the same
+//! compile step. That is the point: a probe that shared the compiler could not
+//! disagree with it.
+//!
+//! **H6 uses `straf3-map`, deliberately.** Its question is not "is this course
+//! runnable" but "does the thing the game ships hand the timing volumes over",
+//! and only the shipped compiler can answer that. So H6 is the one phase whose
+//! independence would be a bug rather than a virtue.
+//!
+//! The two worlds are *not* the same geometry and are not expected to be:
+//! `compile_hull` adds the bevel planes a swept box needs and `Hull::from_planes`
+//! here does not. So the bot's line differs between H3/H5 and H6, and a command
+//! stream recorded against one does not reproduce in the other. That is why H6
+//! generates its own fixture rather than reusing H3's run.
 //!
 //! # Running it
 //!
@@ -43,8 +60,22 @@
 //! cargo run --release -- ../../assets/maps/coil.map | tee results/coil.txt
 //! ```
 //!
-//! It takes a few minutes: H3's bot brute-forces 180 controls over a 40-tick
-//! lookahead at every 8-tick decision window, all the way to the finish line.
+//! It takes a few minutes: the bot brute-forces 180 controls over a 40-tick
+//! lookahead at every 8-tick decision window, all the way to the finish line,
+//! and H3 and H6 each do it once.
+//!
+//! H6 writes `results/coil-run.txt`. Replaying it through the shipped binary is
+//! the check that closes the loop, and it needs no window and no GPU:
+//!
+//! ```sh
+//! cargo build --release -p straf3-game --bin straf3
+//! ./target/release/straf3 --replay probes/coil-course/results/coil-run.txt \
+//!     --map assets/maps/coil.map
+//! ```
+//!
+//! Its `checksum` line must equal the one H6 prints. `SimState::checksum` folds
+//! `RunState`, so that equality is not merely "the same path" — it is "the same
+//! clock, started and stopped on the same commands".
 
 use std::collections::BTreeMap;
 use std::fs::File;
@@ -212,6 +243,115 @@ fn load(path: &str) -> Course {
     }
 }
 
+/// The same course, compiled by the **shipped** compiler.
+///
+/// H1-H5 run against this file's own brush-to-hull path, which is the point of
+/// them: an independent derivation can disagree with `straf3-map` and say so.
+/// H6 asks a different question — *does the thing the game ships hand the
+/// timing volumes over?* — and that question can only be answered by the thing
+/// the game ships. So this builds its [`Course`] out of
+/// [`straf3_map::CompiledMap::collider`], the single choke point
+/// `straf3-game`'s scene and `straf3-render` both go through.
+///
+/// The two worlds are not the same geometry, and that is expected rather than a
+/// discrepancy: `compile_hull` adds the bevel planes a swept box needs and this
+/// file's `Hull::from_planes` does not. A command stream recorded against one
+/// will not reproduce in the other, which is exactly why the fixture H6 writes
+/// has to be generated here.
+fn shipped_course(source: &str) -> (Course, straf3_map::CompiledMap) {
+    let map = straf3_map::compile(source).expect("the shipped compiler must accept coil.map");
+
+    let triggers = map
+        .triggers
+        .iter()
+        .map(|volume| Trigger {
+            target: volume
+                .target
+                .clone()
+                .unwrap_or_else(|| "<untargeted>".into()),
+            set: volume.kind.trigger_set().unwrap_or(TriggerSet::NONE),
+            resolved: volume
+                .target_classname
+                .clone()
+                .unwrap_or_else(|| "?".into()),
+            mins: volume.bounds.mins,
+            maxs: volume.bounds.maxs,
+        })
+        .collect();
+
+    let course = Course {
+        // The whole assertion of H6 is in this one call: everything downstream
+        // is the same bot, the same mover and the same clock as H3/H5.
+        world: map.collider(),
+        triggers,
+        spawn: map.spawn,
+        spawn_yaw: map.spawn_yaw,
+        textures: Vec::new(),
+    };
+    (course, map)
+}
+
+/// Write `cmds` in `straf3-headless`'s input format, byte-compatible with what
+/// `straf3-game`'s `Recorder::to_fixture` emits.
+///
+/// Written here rather than reused because `straf3-game` is above the seam and
+/// a probe below it cannot depend on the window. The format is a text contract,
+/// so a second writer of it is a check on the contract rather than a fork: if
+/// this drifts, `straf3 --replay` rejects the file by name instead of running a
+/// different session.
+///
+/// Angles go out as degrees via `{:?}`, which is f32's shortest round-tripping
+/// form, and come back through `ViewAngles::from_degrees`, which re-quantises
+/// to the same 16 bits (C3). The checksum comparison in H6 is what proves that
+/// round trip is lossless rather than assuming it.
+fn fixture_text(cmds: &[UserCmd], rate: TickRate, spawn: Vec3, spawn_yaw: Scalar) -> String {
+    let mut out = String::with_capacity(48 * cmds.len() + 512);
+    out.push_str("# Generated by probes/coil-course, phase H6.\n");
+    out.push_str(
+        "# A greedy strafe-jumping bot's run of assets/maps/coil.map, driven against\n\
+         # the SHIPPED collider (`straf3_map::CompiledMap::collider`). Replay it with\n\
+         # `straf3 --replay <this file> --map assets/maps/coil.map` and the final\n\
+         # checksum must equal the one H6 prints -- that equality is what says the\n\
+         # shipped binary crossed the same start and finish volumes this did.\n\n",
+    );
+    out.push_str(&format!("rate {}\n", rate.hz()));
+    out.push_str("profile cpm\n");
+    out.push_str("world map\n");
+    out.push_str(&format!(
+        "spawn {:?} {:?} {:?}\n",
+        spawn.x, spawn.y, spawn.z
+    ));
+    out.push_str(&format!("yaw {spawn_yaw:?}\n\n"));
+    out.push_str("# cmd <repeat> <fwd> <right> <up> <buttons> <pitch> <yaw> <roll>\n");
+
+    let mut index = 0;
+    while index < cmds.len() {
+        let cmd = cmds[index];
+        let mut repeat = 1;
+        while index + repeat < cmds.len() && cmds[index + repeat] == cmd {
+            repeat += 1;
+        }
+        let buttons = if cmd.buttons == Buttons::JUMP {
+            "jump"
+        } else {
+            "-"
+        };
+        out.push_str(&format!(
+            "cmd {} {} {} {} {} {:?} {:?} {:?}\n",
+            repeat,
+            cmd.forward_move,
+            cmd.right_move,
+            cmd.up_move,
+            buttons,
+            cmd.view.pitch_degrees(),
+            cmd.view.yaw_degrees(),
+            cmd.view.roll_degrees(),
+        ));
+        index += repeat;
+    }
+    out
+}
+
 /// Bounds of a brush, from the axis-aligned faces it is authored with.
 fn brush_bounds(brush: &quake_map::Brush) -> (Vec3, Vec3) {
     let planes: Vec<Plane> = brush
@@ -279,6 +419,24 @@ struct Bot {
     rate: TickRate,
     lookahead: u32,
     decide_every: u32,
+    /// Once the player is past `.0` in y, stop running for distance and start
+    /// running *at* the point `.1` — the finish volume's own centre.
+    ///
+    /// Off (`None`) for the measuring phases, whose numbers are about what the
+    /// course affords and must not move because a later phase was added.
+    ///
+    /// H6 turns it on because its job is different: it has to *complete* a run,
+    /// and a finish line is a box with six sides. Maximising `y` alone walks
+    /// past one shoulder of it — observed, ending at x=-143 against a volume
+    /// spanning x=-96..96 with the clock still running — and steering on `x`
+    /// alone walks off the ledge in front of it, observed at z=-125 against a
+    /// volume spanning z=64..768. Neither is a collider that lost a volume, and
+    /// being able to tell those apart is the whole point of the phase.
+    ///
+    /// The switch reads the *current* state, not the candidate future, so every
+    /// control in one decision window is scored on the same scale. Switching on
+    /// the candidate would compare a distance against a y coordinate.
+    funnel: Option<(Scalar, Vec3)>,
 }
 
 #[derive(Clone, Copy)]
@@ -320,6 +478,10 @@ impl Bot {
     /// and did not take must not start the clock — and only the committed call
     /// in [`Bot::run`] keeps it. That is the same distinction `Pmove` draws one
     /// level down between a probe and a committed sweep.
+    ///
+    /// `record`, when given, collects the commands actually issued. Speculation
+    /// passes `None`: a future the bot considered and did not take must not
+    /// reach a recording any more than it may start the clock.
     fn hold(
         &self,
         state: &SimState,
@@ -327,6 +489,7 @@ impl Bot {
         ticks: u32,
         course: &Course,
         profile: &PhysicsProfile,
+        mut record: Option<&mut Vec<UserCmd>>,
     ) -> (SimState, TriggerSet) {
         let mut st = *state;
         let mut touched = TriggerSet::NONE;
@@ -352,6 +515,9 @@ impl Bot {
                 buttons,
                 view: ViewAngles::from_degrees(s(0.0), yaw, s(0.0)),
             };
+            if let Some(rec) = record.as_deref_mut() {
+                rec.push(cmd);
+            }
             touched = touched.with(step_in_place(&mut st, &cmd, &course.world, profile));
         }
         (st, touched)
@@ -366,9 +532,15 @@ impl Bot {
         max_ticks: u32,
         course: &Course,
         profile: &PhysicsProfile,
-    ) -> (SimState, Vec<(u32, Vec3, Scalar)>, Vec<(u32, u32, String)>) {
+    ) -> (
+        SimState,
+        Vec<(u32, Vec3, Scalar)>,
+        Vec<(u32, u32, String)>,
+        Vec<UserCmd>,
+    ) {
         let controls = Self::controls();
         let mut trail = Vec::new();
+        let mut committed: Vec<UserCmd> = Vec::new();
         let mut crossings: Vec<(u32, u32, String)> = Vec::new();
         let mut seen = TriggerSet::NONE;
         let mut ticks = 0;
@@ -378,23 +550,43 @@ impl Bot {
         {
             let mut best = None;
             let mut best_score = Scalar::NEG_INFINITY;
+            // Decided once per window, from the state every candidate shares.
+            let aim_at = self
+                .funnel
+                .filter(|(from_y, _)| state.player.origin.y > *from_y)
+                .map(|(_, centre)| centre);
             for &c in &controls {
-                let (f, _speculative) = self.hold(&state, c, self.lookahead, course, profile);
+                let (f, _speculative) = self.hold(&state, c, self.lookahead, course, profile, None);
                 if !f.player.origin.is_finite() {
                     continue;
                 }
                 let speed = vec3(f.player.velocity.x, f.player.velocity.y, s(0.0)).length();
                 // Progress along the course dominates; speed breaks ties, which
                 // is what stops the bot trading its whole run for one long slide.
-                let score = f.player.origin.y + s(0.25) * speed
-                    - s(0.5) * (f.player.origin.z - state.player.origin.z).min(s(0.0));
+                let score = match aim_at {
+                    // Endgame: get the hull inside the box. Speed still breaks
+                    // ties, at a tenth the weight, so the bot does not stall
+                    // one unit short of the face.
+                    Some(centre) => -(f.player.origin - centre).length() + s(0.1) * speed,
+                    None => {
+                        f.player.origin.y + s(0.25) * speed
+                            - s(0.5) * (f.player.origin.z - state.player.origin.z).min(s(0.0))
+                    }
+                };
                 if score > best_score {
                     best_score = score;
                     best = Some(c);
                 }
             }
             let Some(c) = best else { break };
-            let (next, touched) = self.hold(&state, c, self.decide_every, course, profile);
+            let (next, touched) = self.hold(
+                &state,
+                c,
+                self.decide_every,
+                course,
+                profile,
+                Some(&mut committed),
+            );
             state = next;
             ticks += self.decide_every;
 
@@ -419,7 +611,7 @@ impl Bot {
             let speed = vec3(state.player.velocity.x, state.player.velocity.y, s(0.0)).length();
             trail.push((ticks, state.player.origin, speed));
         }
-        (state, trail, crossings)
+        (state, trail, crossings, committed)
     }
 }
 
@@ -610,12 +802,13 @@ fn main() {
         rate,
         lookahead: 40,
         decide_every: 8,
+        funnel: None,
     };
     let start = SimState::spawned_at(course.spawn, course.spawn_yaw);
     // Run for the finish line, not for a y coordinate: `Bot::run` stops when
     // `RunState` says the clock has stopped. The y limit is only a backstop for
     // a bot that gets past the finish volume without crossing it.
-    let (end, trail, crossings) = bot.run(start, s(3600.0), 20_000, &course, &profile);
+    let (end, trail, crossings, _cmds) = bot.run(start, s(3600.0), 20_000, &course, &profile);
     println!(
         "{:>7} {:>9} {:>9} {:>9} {:>9}",
         "tick", "x", "y", "z", "ups"
@@ -677,6 +870,139 @@ fn main() {
                 ms % 1000
             );
         }
+    }
+
+    // ---- H6: does the SHIPPED collider carry the volumes? ----------------
+    //
+    // Everything above this line runs in a world this file built. A player does
+    // not: they run in `CompiledMap::collider()`'s world, reached through
+    // `straf3-game`'s scene. Until that call attaches the timing volumes, the
+    // clock is correct and never fed, and the difference is invisible from any
+    // test that builds its own world -- including every one above.
+    println!("\n== H6  the shipped collider, and a fixture the shipped binary can replay ==");
+    let source = std::fs::read_to_string(&path).expect("read map source");
+    let (shipped, map) = shipped_course(&source);
+    println!(
+        "straf3-map compiled {} solids, {} trigger volumes, collision digest {:#018x}",
+        map.hulls.len(),
+        map.triggers.len(),
+        map.collision_digest()
+    );
+    for w in &map.warnings {
+        println!("  warning: {w:?}");
+    }
+    let coverage = shipped.world.trigger_coverage();
+    println!(
+        "collider(): {} solid hulls, {} timing volumes, coverage {:#010x}",
+        shipped.world.hulls().len(),
+        shipped.world.triggers().len(),
+        coverage.0
+    );
+    println!(
+        "has_timing()={}  START={}  FINISH={}",
+        map.has_timing(),
+        coverage.contains(TriggerSet::START),
+        coverage.contains(TriggerSet::FINISH)
+    );
+    if !coverage.contains(TriggerSet::START) || !coverage.contains(TriggerSet::FINISH) {
+        println!(
+            "\nH6 FALSIFIED: the shipped collider has no start/finish pair, so a player \
+             in the native client can never produce a time no matter how well they run."
+        );
+    }
+
+    // Aim at the finish line's own centre, read out of the volume rather than
+    // written down here, and stop past its far face rather than at a guess.
+    let finish = shipped
+        .triggers
+        .iter()
+        .find(|t| t.set == TriggerSet::FINISH)
+        .expect("H6 needs a finish volume; coverage said there is one");
+    // The centre of the volume's floor rather than of the volume: coil.map's
+    // finish is 704 units tall and a player crosses it at running height, so
+    // aiming at the middle of the column would aim 350 units into the air.
+    let centre = vec3(
+        s(0.5) * (finish.mins.x + finish.maxs.x),
+        s(0.5) * (finish.mins.y + finish.maxs.y),
+        finish.mins.z + s(48.0),
+    );
+    let aiming = Bot {
+        funnel: Some((finish.mins.y - s(384.0), centre)),
+        ..bot
+    };
+    println!(
+        "finish volume x {:.0}..{:.0}  y {:.0}..{:.0}  z {:.0}..{:.0}",
+        finish.mins.x, finish.maxs.x, finish.mins.y, finish.maxs.y, finish.mins.z, finish.maxs.z
+    );
+    println!(
+        "aiming at {:.0} {:.0} {:.0} once past y={:.0}",
+        centre.x,
+        centre.y,
+        centre.z,
+        finish.mins.y - s(384.0)
+    );
+
+    let shipped_start = SimState::spawned_at(shipped.spawn, shipped.spawn_yaw);
+    let (shipped_end, _shipped_trail, shipped_crossings, cmds) = aiming.run(
+        shipped_start,
+        finish.maxs.y + s(256.0),
+        4_000,
+        &shipped,
+        &profile,
+    );
+    println!(
+        "\nbot committed {} commands at {} Hz ({} ms)",
+        cmds.len(),
+        rate.hz(),
+        shipped_end.time_ms
+    );
+    println!("\n{:>12} {:>10}  volume", "window end", "run ms");
+    for (at, elapsed, name) in &shipped_crossings {
+        println!("{at:>12} {elapsed:>10}  {name}");
+    }
+    match shipped_end.run {
+        RunState::NotStarted => println!("\nclock: never started"),
+        RunState::Running { started_at_ms } => println!(
+            "\nclock: RUNNING, started at {started_at_ms} ms, {} ms elapsed at the cut-off",
+            shipped_end.run.elapsed_ms(shipped_end.time_ms).unwrap_or(0)
+        ),
+        RunState::Finished {
+            started_at_ms,
+            finished_at_ms,
+        } => {
+            let ms = finished_at_ms - started_at_ms;
+            println!(
+                "\nclock: FINISHED  start {started_at_ms} ms  finish {finished_at_ms} ms  \
+                 time {}.{:03} s ({ms} ms, u32)",
+                ms / 1000,
+                ms % 1000
+            );
+        }
+    }
+
+    // The number the shipped binary has to reproduce. `SimState::checksum`
+    // folds `RunState`, so a replay that agrees on this digit-for-digit did not
+    // merely follow the same path -- it started and stopped its clock on the
+    // same commands. That is the whole of H6's evidence, and it needs no change
+    // anywhere above the seam to collect.
+    println!(
+        "\nfinal checksum {:#018x}  (origin {:.3} {:.3} {:.3})",
+        shipped_end.checksum(),
+        shipped_end.player.origin.x,
+        shipped_end.player.origin.y,
+        shipped_end.player.origin.z
+    );
+    let fixture = fixture_text(&cmds, rate, shipped.spawn, shipped.spawn_yaw);
+    let fixture_path = "results/coil-run.txt";
+    match std::fs::write(fixture_path, &fixture) {
+        Ok(()) => println!(
+            "wrote {fixture_path} ({} bytes, {} cmd lines)\n\nverify with:\n  \
+             cargo run --release -p straf3-game --bin straf3 -- \\\n    \
+             --replay probes/coil-course/{fixture_path} --map assets/maps/coil.map",
+            fixture.len(),
+            fixture.lines().filter(|l| l.starts_with("cmd ")).count()
+        ),
+        Err(e) => println!("could not write {fixture_path}: {e}"),
     }
 
     println!("\n== texture families in the compiled solids ==");

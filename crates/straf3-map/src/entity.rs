@@ -27,7 +27,7 @@
 
 use glam::Vec3;
 use straf3_collision::{Hull, trace_hull};
-use straf3_sim::world::{Sweep, Trace};
+use straf3_sim::world::{Sweep, Trace, TriggerSet};
 
 use crate::bounds::Aabb;
 use crate::digest::{Fnv1a, fold_hull};
@@ -130,6 +130,34 @@ pub enum TriggerKind {
 }
 
 impl TriggerKind {
+    /// The simulation's own alphabet for this volume, or `None` for a volume
+    /// the run clock has no bit for.
+    ///
+    /// This is the whole of what `straf3-map` tells `straf3-sim` about a map.
+    /// The simulation does not depend on this crate and never learns that
+    /// `target_startTimer` exists; it reads a bit. That inversion is why the
+    /// clock can live below the seam — see [`TriggerSet`]'s own documentation.
+    ///
+    /// [`Teleport`](Self::Teleport), [`Push`](Self::Push) and
+    /// [`Other`](Self::Other) map to `None` rather than to a spare bit: they
+    /// are recorded geometry, not timing, and giving them a bit would put a
+    /// jump pad in the same alphabet as a finish line.
+    ///
+    /// A checkpoint past [`TriggerSet::MAX_CHECKPOINTS`] also yields `None`.
+    /// That is the one case where `None` means *lost* rather than *not
+    /// timing*, and [`CompiledMap::collider`](crate::CompiledMap::collider)
+    /// records a [`Warning::TooManyCheckpoints`](crate::Warning) for it at
+    /// compile time rather than dropping it in silence.
+    #[must_use]
+    pub const fn trigger_set(self) -> Option<TriggerSet> {
+        match self {
+            Self::Start => Some(TriggerSet::START),
+            Self::Finish => Some(TriggerSet::FINISH),
+            Self::Checkpoint(index) => TriggerSet::checkpoint(index),
+            Self::Teleport | Self::Push | Self::Other => None,
+        }
+    }
+
     /// A stable tag for the digest. Explicit numbers, not `as u32` on the
     /// variant order: reordering the enum must not change a map's identity.
     const fn tag(self) -> u32 {

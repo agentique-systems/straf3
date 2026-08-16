@@ -1,19 +1,49 @@
-== provenance ==
-published   2026-08-16, re-run in full from probes/coil-course/src/main.rs
-tree        wave 4 stage 2, after C3 (16-bit view angles) and the C4 run clock
-command     cargo run --release -- ../../assets/maps/coil.map
-
-Supersedes the pre-C3 publication. Two numbers moved and both moved because of
-C3, not because of anything the run clock did: H3's bot now ends at y=1796 z=145
-where it used to end at y=1792 z=143. Its 4416 ms to y=1780 and its 783 ups peak
-are unchanged. The angle quantisation changes which yaw the bot's search can
-actually ask for, so a greedy search over a coarser alphabet lands a few units
-elsewhere; nothing about the movement model moved, and `cargo xtask determinism`
-still folds to e0cd098aa4af9ba2 on all four targets.
-
-H5 is new, and H3 is longer than it was: the bot now runs to the finish line
-rather than stopping at y=1780, so its trajectory table continues past where the
-superseded file ended.
+# probes/coil-course/results/coil.txt
+#
+# Published 2026-08-16, regenerated in full from the tree at that date. Not
+# hand-edited: everything below the blank line is the probe's own stdout.
+#
+# What changed since the previous publication
+# -------------------------------------------
+# A new phase, H6, runs the same bot against the SHIPPED compiler's collider
+# (`straf3_map::CompiledMap::collider()`) rather than against this probe's own
+# independent brush-to-hull derivation. That call now carries the map's timing
+# volumes; before this wave it returned solids only, so a player in the native
+# client could never start a run no matter how well they ran.
+#
+# H1-H5's numbers are unchanged from the previous publication.
+#
+# Why H6's time (5096 ms) differs from H5's (4792 ms)
+# --------------------------------------------------
+# They are runs in two different worlds, and the difference is expected rather
+# than a discrepancy. `compile_hull` adds the bevel planes a swept box needs;
+# this file's `Hull::from_planes` does not. The bot's greedy line diverges
+# accordingly. H6 also aims at the finish volume's centre over the last 384
+# units instead of running purely for distance -- without that it walked past
+# the box's shoulder (x=-143 against a volume spanning x=-96..96) and reported
+# a clock still running. Both numbers are upper bounds produced by a greedy
+# one-step hill climber; neither is a course record.
+#
+# The claim H6 actually settles
+# -----------------------------
+# H6 writes results/coil-run.txt, a command stream in straf3-headless's input
+# format. Replayed through the shipped binary, with no window and no GPU:
+#
+#   ./target/release/straf3 --replay probes/coil-course/results/coil-run.txt \
+#       --map assets/maps/coil.map
+#
+#   checksum      0x9a854d1a3653d8b7
+#
+# which is H6's own final checksum, bit for bit. `SimState::checksum` folds
+# `RunState` (crates/straf3-sim/src/state.rs:321), so that equality says the
+# shipped binary did not merely follow the same path -- it started its clock at
+# 1800 ms and stopped it at 6896 ms, on the same commands, for a 5096 ms run.
+#
+# With collider() reverted to its previous body, the same fixture through the
+# same binary gives an IDENTICAL final origin and velocity and the checksum
+# 0x4cf097f79975d542. Identical trajectory, different clock: timing volumes are
+# not solid, so attaching them changes what a run is worth and nothing about
+# how the player moves.
 
 == coil-course probe ==
 map          ../../assets/maps/coil.map
@@ -318,6 +348,30 @@ swept, from Trace::triggers      : ["t_start", "t_cp1", "t_cp2", "t_finish"]
         6656       4792  t_finish
 
 clock: FINISHED  start 1808 ms  finish 6600 ms  time 4.792 s (4792 ms, u32)
+
+== H6  the shipped collider, and a fixture the shipped binary can replay ==
+straf3-map compiled 26 solids, 4 trigger volumes, collision digest 0x47263b8845d8bb4b
+collider(): 26 solid hulls, 4 timing volumes, coverage 0x0000000f
+has_timing()=true  START=true  FINISH=true
+finish volume x -96..96  y 3424..3488  z 64..768
+aiming at 0 3456 112 once past y=3040
+
+bot committed 864 commands at 125 Hz (6912 ms)
+
+  window end     run ms  volume
+        1856         56  t_start
+        4096       2296  t_cp1
+        6272       4472  t_cp2
+        6912       5096  t_finish
+
+clock: FINISHED  start 1800 ms  finish 6896 ms  time 5.096 s (5096 ms, u32)
+
+final checksum 0x9a854d1a3653d8b7  (origin 23.529 3409.000 38.738)
+wrote results/coil-run.txt (22247 bytes, 620 cmd lines)
+
+verify with:
+  cargo run --release -p straf3-game --bin straf3 -- \
+    --replay probes/coil-course/results/coil-run.txt --map assets/maps/coil.map
 
 == texture families in the compiled solids ==
   straf3/finish      1

@@ -19,6 +19,11 @@ path = "src/main.rs"
 # come from the code that will run the course, not from a model of it.
 straf3-sim = { path = "../../crates/straf3-sim" }
 straf3-collision = { path = "../../crates/straf3-collision" }
+# H6 only, and deliberately: that phase's whole question is whether the
+# *shipped* compiler's `CompiledMap::collider()` hands the timing volumes over,
+# so it has to be the shipped compiler and not this file's second derivation.
+# H1-H5 do not touch it and keep their independence.
+straf3-map = { path = "../../crates/straf3-map" }
 
 # The parser straf3-map uses. This probe deliberately does NOT use straf3-map:
 # it was written while C7 was still in flight, and its brush->hull path is an
