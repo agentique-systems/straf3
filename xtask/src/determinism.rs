@@ -111,6 +111,27 @@ const TARGETS: &[Target] = &[
 /// is missing from a run, the run cannot see the known fault line and says so.
 const FAULT_LINE: [&str; 2] = ["x86_64-unknown-linux-gnu", "x86_64-unknown-linux-musl"];
 
+// ── re-deriving the digests, rather than believing them ─────────────────────
+
+// The same FNV-1a constants `straf3-det-runner` folds with. Duplicated rather
+// than imported because xtask depends on nothing by design; the parser below
+// recomputes every digest it is handed, so a drift between these constants and
+// the runner's shows up as "internally inconsistent", not as a silent pass.
+const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+
+fn fold(mut digest: u64, value: u64) -> u64 {
+    for b in value.to_le_bytes() {
+        digest ^= u64::from(b);
+        digest = digest.wrapping_mul(FNV_PRIME);
+    }
+    digest
+}
+
+fn fold_all(values: impl IntoIterator<Item = u64>) -> u64 {
+    values.into_iter().fold(FNV_OFFSET, fold)
+}
+
 // ── the parsed report ───────────────────────────────────────────────────────
 
 /// One case's numbers, as reported by one target.
@@ -241,12 +262,56 @@ impl Report {
             }
         }
 
+        // `compare` decides pass/fail on `rolling`, but every diagnostic it
+        // prints — the first diverging command, how many differ, whether the
+        // finals agree — is read off `checksums`. Nothing so far has checked
+        // that the two describe the same run. A report that is truncated
+        // mid-write, merged from a stale artefact, or hand-edited can carry a
+        // `rolling` that agrees with another target while its per-command
+        // checksums do not, and the check would call that "bit for bit". So
+        // recompute every digest from the per-command checksums and refuse the
+        // report if it does not add up. The number compared is then provably
+        // the number the evidence supports.
+        let grand = grand.ok_or_else(|| format!("{source}: no `grand` line"))?;
+        for case in &cases {
+            let recomputed = fold_all(case.checksums.iter().copied());
+            if recomputed != case.rolling {
+                return Err(format!(
+                    "{source}: case {} reports rolling digest {:016x}, but folding its own \
+                     {} per-command checksums gives {recomputed:016x} — the report contradicts \
+                     itself and must not be compared as if it agreed",
+                    case.name,
+                    case.rolling,
+                    case.checksums.len()
+                ));
+            }
+            let last = *case
+                .checksums
+                .last()
+                .expect("the steps check above rejects an empty case");
+            if last != case.final_checksum {
+                return Err(format!(
+                    "{source}: case {} reports final checksum {:016x}, but its last per-command \
+                     checksum is {last:016x} — the report contradicts itself",
+                    case.name, case.final_checksum
+                ));
+            }
+        }
+        let recomputed_grand = fold_all(cases.iter().map(|c| c.rolling));
+        if recomputed_grand != grand {
+            return Err(format!(
+                "{source}: reports grand digest {grand:016x}, but folding its {} case digests \
+                 gives {recomputed_grand:016x} — the report contradicts itself",
+                cases.len()
+            ));
+        }
+
         Ok(Self {
             source: source.to_string(),
             target: target.ok_or_else(|| format!("{source}: no `target` line"))?,
             platform: platform.unwrap_or_else(|| "unknown".to_string()),
             steps,
-            grand: grand.ok_or_else(|| format!("{source}: no `grand` line"))?,
+            grand,
             cases,
         })
     }
@@ -806,22 +871,20 @@ mod tests {
     use super::*;
 
     fn report_text(target: &str, checksums: &[&[u64]]) -> String {
-        let fold = |xs: &[u64]| {
-            xs.iter().fold(0xcbf2_9ce4_8422_2325u64, |mut h, v| {
-                for b in v.to_le_bytes() {
-                    h ^= u64::from(b);
-                    h = h.wrapping_mul(0x0000_0100_0000_01b3);
-                }
-                h
-            })
-        };
+        let fold = |xs: &[u64]| fold_all(xs.iter().copied());
         let mut o = String::new();
         let _ = writeln!(o, "straf3-determinism-report {EXPECTED_REPORT_VERSION}");
         let _ = writeln!(o, "target {target}");
         let _ = writeln!(o, "platform test");
         let _ = writeln!(o, "cases {}", checksums.len());
         let _ = writeln!(o, "steps {}", checksums[0].len());
-        let _ = writeln!(o, "grand 0000000000000001");
+        // A well-formed report: the parser now recomputes these and rejects a
+        // report whose digests do not follow from its own checksums.
+        let _ = writeln!(
+            o,
+            "grand {:016x}",
+            fold_all(checksums.iter().map(|c| fold(c)))
+        );
         for (i, case) in checksums.iter().enumerate() {
             let _ = writeln!(
                 o,
@@ -848,6 +911,69 @@ mod tests {
         .unwrap();
         let c = compare(&[a, b], vec![]);
         assert!(c.is_clean(), "{}", c.render());
+    }
+
+    /// `compare` decides on `rolling`; every diagnostic it prints comes from
+    /// `checksums`. If a report can carry the two disagreeing, then a
+    /// truncated or stale artefact can pass the check while the evidence
+    /// underneath it says otherwise. Measured against a real emitted report
+    /// before this was added: tampering with one of 1,200 per-command
+    /// checksums and leaving `rolling` alone produced "2 targets agree, bit
+    /// for bit" and exit 0.
+    #[test]
+    fn a_report_whose_rolling_digest_contradicts_its_checksums_is_refused() {
+        let honest = report_text("x86_64-unknown-linux-gnu", &[&[1, 2, 3, 4, 5]]);
+        // Change one mid-stream checksum, leave every digest line as it was.
+        let tampered = honest.replacen(
+            &format!("{:016x},{:016x}", 3u64, 4u64),
+            &format!("{:016x},{:016x}", 99u64, 4u64),
+            1,
+        );
+        assert_ne!(tampered, honest, "the tamper did not apply");
+        let err = Report::parse(&tampered, "tampered").unwrap_err();
+        assert!(
+            err.contains("contradicts itself") && err.contains("rolling digest"),
+            "wrong rejection: {err}"
+        );
+    }
+
+    #[test]
+    fn a_report_whose_final_checksum_is_not_its_last_checksum_is_refused() {
+        let honest = report_text("x86_64-unknown-linux-gnu", &[&[1, 2, 3, 4, 5]]);
+        let tampered = honest.replace(
+            &format!("final {:016x}", 5u64),
+            &format!("final {:016x}", 7u64),
+        );
+        assert_ne!(tampered, honest, "the tamper did not apply");
+        let err = Report::parse(&tampered, "tampered").unwrap_err();
+        assert!(err.contains("final checksum"), "wrong rejection: {err}");
+    }
+
+    #[test]
+    fn a_report_whose_grand_digest_does_not_follow_from_its_cases_is_refused() {
+        let honest = report_text("x86_64-unknown-linux-gnu", &[&[1, 2, 3], &[4, 5, 6]]);
+        let grand = honest
+            .lines()
+            .find(|l| l.starts_with("grand "))
+            .unwrap()
+            .to_string();
+        let tampered = honest.replace(&grand, "grand 0000000000000001");
+        let err = Report::parse(&tampered, "tampered").unwrap_err();
+        assert!(err.contains("grand digest"), "wrong rejection: {err}");
+    }
+
+    /// The guard must not be so eager that it rejects honest reports — the
+    /// four this tool actually emits parse, and the constants above therefore
+    /// match the runner's.
+    #[test]
+    fn an_honest_report_still_parses() {
+        let text = report_text("x86_64-unknown-linux-gnu", &[&[1, 2, 3], &[4, 5, 6]]);
+        let report = Report::parse(&text, "honest").unwrap();
+        assert_eq!(report.cases.len(), 2);
+        assert_eq!(
+            report.grand,
+            fold_all(report.cases.iter().map(|c| c.rolling))
+        );
     }
 
     /// The case the whole design exists for: the trajectories differ in the
