@@ -17,7 +17,9 @@
 
 use straf3_sim::num::{Scalar, Vec3, s, vec3};
 use straf3_sim::world::FlatGround;
-use straf3_sim::{Buttons, PhysicsProfile, SimState, TickRate, UserCmd, step_in_place};
+use straf3_sim::{
+    Buttons, PhysicsProfile, SimState, TickRate, UserCmd, angle_to_short, step_in_place,
+};
 
 use std::sync::OnceLock;
 
@@ -78,7 +80,9 @@ fn yaw_for(case: u32, i: u32) -> Scalar {
 /// Build command `i` of a case, given whether the player is on the ground.
 fn cmd_for(case: u32, i: u32, grounded: bool) -> UserCmd {
     let mut cmd = UserCmd::still_at(TickRate::HZ_125);
-    cmd.view.yaw = yaw_for(case, i);
+    // C3 made the view 16-bit at the command boundary, so the degrees
+    // `yaw_for` returns have to be quantised the way a real recording does.
+    cmd.view.yaw = angle_to_short(yaw_for(case, i));
     if case == 4 {
         return cmd; // "still": look straight ahead, press nothing
     }
@@ -124,7 +128,9 @@ fn trajectories() -> &'static Vec<Vec<u64>> {
 /// `angle_vectors` uses [`dettrig`] instead of `libm`. Same six cases, same
 /// 1200 commands, same checksum function.
 fn patched_trajectory(case: u32) -> Vec<u64> {
-    use patched_sim::cmd::{Buttons as PB, TickRate as PT, UserCmd as PU};
+    use patched_sim::cmd::{
+        Buttons as PB, TickRate as PT, UserCmd as PU, angle_to_short as p_angle_to_short,
+    };
     use patched_sim::profile::PhysicsProfile as PP;
     use patched_sim::state::SimState as PS;
     use patched_sim::world::FlatGround as PF;
@@ -136,7 +142,7 @@ fn patched_trajectory(case: u32) -> Vec<u64> {
     for i in 0..STEPS {
         let grounded = state.player.ground.is_grounded();
         let mut cmd = PU::still_at(PT::HZ_125);
-        cmd.view.yaw = yaw_for(case, i);
+        cmd.view.yaw = p_angle_to_short(yaw_for(case, i));
         if case != 4 {
             cmd.forward_move = 127;
             cmd.right_move = if (i / 12) % 2 == 0 { 127 } else { -127 };
