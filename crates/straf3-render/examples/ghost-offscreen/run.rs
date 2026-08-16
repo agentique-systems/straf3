@@ -27,16 +27,23 @@ pub fn main() {
     let (spawn, spawn_yaw) = course::spawn();
     let hull = PhysicsProfile::cpm().hull(false);
 
-    // Behind and slightly above the spawn, looking along the course — the
-    // third-person angle a ghost is easiest to judge from. The player's own
-    // camera is at the spawn, so a ghost standing *at* the spawn would be
-    // inside the near plane.
+    // The player's own eye, on the first frame, and a ghost a little way down
+    // the course in front of them — which is where a ghost you are chasing
+    // actually is. Deliberately not a camera placed *behind* the spawn: that
+    // is outside the start box, inside solid brush, and every pixel would be
+    // the inside of a wall.
     let camera = Camera {
-        eye: vec3(spawn.x, spawn.y - s(180.0), spawn.z + EYE_HEIGHT + s(40.0)),
-        pitch: s(-6.0),
+        eye: vec3(spawn.x, spawn.y, spawn.z + EYE_HEIGHT),
+        pitch: s(0.0),
         yaw: spawn_yaw,
         fov_x: DEFAULT_FOV_X,
     };
+    // Where the ghost stands: along the direction the player is actually
+    // looking, not along an axis. coil.map spawns facing +X, and a ghost placed
+    // "up the course" by guessing an axis lands exactly on the camera plane —
+    // which is how the first run of this example reported zero changed pixels
+    // for a renderer that was working perfectly.
+    let ahead = spawn + camera.forward() * s(220.0);
 
     // Three frames. The first is the control; the second must differ from it;
     // the third must not.
@@ -45,7 +52,7 @@ pub fn main() {
         (
             "ghost-visible",
             Some(GhostPose {
-                origin: spawn,
+                origin: ahead,
                 yaw: spawn_yaw,
                 half_extents: hull.half_extents,
                 center_offset: hull.center_offset,
@@ -58,7 +65,7 @@ pub fn main() {
                 // the depth test must hide it completely — this is the shot
                 // that would fail if the world pass discarded its depth or the
                 // ghost pass ignored it.
-                origin: vec3(spawn.x, spawn.y, spawn.z - s(512.0)),
+                origin: vec3(ahead.x, ahead.y, ahead.z - s(512.0)),
                 yaw: spawn_yaw,
                 half_extents: hull.half_extents,
                 center_offset: hull.center_offset,
@@ -165,7 +172,6 @@ pub fn main() {
             .get_mapped_range()
             .expect("read back the rendered pixels")
             .to_vec();
-        drop(slice);
         readback.unmap();
 
         let path = out_dir.join(format!("{name}.ppm"));
@@ -178,6 +184,15 @@ pub fn main() {
     let occluded = changed_pixels(&frames[0].1, &frames[2].1, padded_row);
     eprintln!("ghost-offscreen: ghost in the open changed {visible} pixels");
     eprintln!("ghost-offscreen: ghost under the floor changed {occluded} pixels");
+    // Printed, not asserted: this is what tells the two possible cull modes
+    // apart, since a convex box has the same silhouette whichever half of it
+    // survives. Culling `Back` keeps the faces towards the camera, which here
+    // face away from the light and so come back darker — (126, 134, 136)
+    // against (131, 143, 145) for the wrong one. See `ghost.rs`.
+    eprintln!(
+        "ghost-offscreen: mean colour over the ghost {:?}",
+        mean_of_changed(&frames[0].1, &frames[1].1, padded_row)
+    );
 
     // Asserted, not merely printed: an example whose numbers nobody reads is a
     // screenshot with extra steps.
@@ -206,6 +221,30 @@ fn changed_pixels(a: &[u8], b: &[u8], padded_row: u32) -> u32 {
         }
     }
     changed
+}
+
+/// Mean RGB of the pixels the ghost changed, for judging which faces survived
+/// culling.
+fn mean_of_changed(a: &[u8], b: &[u8], padded_row: u32) -> [u32; 3] {
+    let (mut sum, mut n) = ([0u64; 3], 0u64);
+    for y in 0..HEIGHT {
+        let row = (y * padded_row) as usize;
+        for x in 0..WIDTH {
+            let p = row + (x * 4) as usize;
+            if (0..3).any(|c| a[p + c].abs_diff(b[p + c]) > CHANGED) {
+                for c in 0..3 {
+                    sum[c] += u64::from(b[p + c]);
+                }
+                n += 1;
+            }
+        }
+    }
+    let n = n.max(1);
+    [
+        (sum[0] / n) as u32,
+        (sum[1] / n) as u32,
+        (sum[2] / n) as u32,
+    ]
 }
 
 /// Plain P6 PPM: no image crate, no dependency, and `ffmpeg -i` reads it.

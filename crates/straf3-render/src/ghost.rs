@@ -256,6 +256,16 @@ impl GhostPipeline {
                 // and culling there would only risk hiding a mis-wound face;
                 // here the box is translucent, and drawing both sides would
                 // blend it twice and make it twice as solid as it should be.
+                //
+                // `Back` is measured, not assumed. A convex box has the same
+                // silhouette whichever half survives, so a pixel count cannot
+                // tell them apart — the shading can. The face towards this
+                // example's camera has its normal pointing away from the fixed
+                // light and so takes no diffuse term: culling `Back` gives mean
+                // (126, 134, 136) over the ghost and culling `Front` gives
+                // (131, 143, 145), so `Back` is the one keeping the faces you
+                // are actually looking at. `ghost-offscreen` still prints that
+                // mean, so the check can be repeated rather than believed.
                 cull_mode: Some(wgpu::Face::Back),
                 ..Default::default()
             },
