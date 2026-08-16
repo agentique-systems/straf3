@@ -216,9 +216,12 @@ impl App {
         if now_ms.saturating_sub(self.last_telemetry_ms) < TELEMETRY_INTERVAL_MS {
             return;
         }
-        let elapsed = now_ms - self.last_telemetry_ms;
+        let elapsed_ms = now_ms - self.last_telemetry_ms;
         self.last_telemetry_ms = now_ms;
-        let fps = self.frames as f64 * 1000.0 / elapsed.max(1) as f64;
+        let elapsed_s = straf3_sim::num::seconds_from_millis(
+            u32::try_from(elapsed_ms.max(1)).unwrap_or(u32::MAX),
+        );
+        let fps = self.frames as f64 / f64::from(elapsed_s);
         self.frames = 0;
 
         let state = self.game.state();

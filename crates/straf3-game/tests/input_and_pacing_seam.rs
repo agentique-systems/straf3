@@ -262,13 +262,18 @@ fn a_command_built_from_input_is_indistinguishable_from_a_handwritten_one() {
 fn fixed_step_survives_every_hostile_frame_schedule() {
     for seq in sequences() {
         let mut step = FixedStep::new(TickRate::HZ_125);
+        let dropped = std::cell::Cell::new(0u32);
         let pacing = drive_reporting_drops(
             &seq.frames,
-            |dt| step.advance(u64::from(dt)),
-            || {
-                u32::try_from(step.dropped_total_ms())
-                    .expect("dropped time should not exceed u32 in a test")
+            |dt| {
+                let n = step.advance(u64::from(dt));
+                dropped.set(
+                    u32::try_from(step.dropped_total_ms())
+                        .expect("dropped time should not exceed u32 in a test"),
+                );
+                n
             },
+            || dropped.get(),
         );
 
         let found = violations(&seq, u32::from(PERIOD_MS), &pacing);
