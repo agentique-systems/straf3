@@ -1,0 +1,392 @@
+// coil.map — Straf3 course 1, "Coil"
+//
+// Valve 220 source. This file is the SINGLE source of the course geometry:
+// straf3-map compiles it to both the collision hulls and the render mesh, so
+// the thing you see and the thing you hit cannot drift apart. Edit it as a
+// .map (TrenchBroom, Radiant) — do not mirror these numbers into code.
+//
+// No BSP and no PVS, so the world does not need to be sealed and there are no
+// ceilings; brushes exist only where the player can reach them.
+//
+// ---------------------------------------------------------------------------
+// The line, and why each piece is the shape it is. Physics: gravity 800,
+// jump 270, step 18, min_walk_normal 0.7. A jump lasts 0.675 s flat and peaks
+// 45.6 units up. "ups" below is horizontal speed in units/second.
+//
+//   S0  y -832..32    Start room, 896 x 864, spawn in the west at angle 0.
+//                     768 units of eastward run and a 90-degree left arc: a
+//                     circle jump, executed inside the room, crossing the
+//                     start line at the mouth already fast.
+//
+//   S1  y 32..1568    Strafe corridor, 448 wide, 1536 long. Pure acceleration.
+//
+//   S2  y 1568..2304  The ramp wave. ramp_a climbs 1:2 to a crest at z=112,
+//                     ramp_b falls 1:2 back to z=0, ramp_c climbs at exactly
+//                     45 degrees (surface normal z = 0.7071, seven thousandths
+//                     above min_walk_normal — walkable, but only just), onto a
+//                     flat launch pad at z=128.
+//                     THE OPTIMISATION: the V between ramp_b and ramp_c is a
+//                     trap for the slow. From the crest at (1792, z=112) it is
+//                     352 units and +16 to the launch pad. Measured: 575 ups
+//                     lands you flat on the pad with your speed intact, while
+//                     below it you land on ramp_c's 45-degree face and the
+//                     clip into that plane takes most of your speed away.
+//
+//   S3  y 2304..2816  The gully. 512 units from the launch lip (z=128) to the
+//                     landing lip (z=64): a 64-unit drop buys 0.861 s of air.
+//                     Measured: 600 ups clears it onto the flat approach pad,
+//                     575 lands high on the climb-out. Falling in is not fatal —
+//                     the near wall is a 3:2 slide (normal z = 0.5547, below
+//                     min_walk_normal, so the sim reports Sliding: no friction,
+//                     air rules, no jumping) down to a floor, and a 1:2 ramp
+//                     climbs back out. It costs seconds, not the run.
+//
+//   S4  y 2816..3136  320 flat units. Long enough to straighten up, short
+//                     enough that a botched gully exit is still felt here.
+//
+//   S5  y 3136..3680  The finish. 288 units of open air, no walls, onto a
+//                     ledge 192 wide and 16 higher than the lip you left.
+//                     Measured landing window 425..900 ups. Below 425 you land
+//                     on ramp_bail_back instead and slide to the bottom of the
+//                     pit, which walks you back up to the approach pad to try
+//                     again — the ledge's front face is 272 units tall and
+//                     cannot be climbed. The ledge is a quarter the width of
+//                     the run-up you jumped from, so lateral drift ends the
+//                     same way distance does.
+//                     Above 900 you cross the finish line in flight and land
+//                     in the pit past the ledge: the run still counts, which is
+//                     why pit_floor reaches y=5376 rather than stopping at the
+//                     ledge.
+//
+// The three surface families are coloured by what the simulation does with
+// them, not by what they look like: straf3/ramp is walkable, straf3/ramp45 is
+// walkable by 0.007, straf3/slide is not walkable at all.
+// ---------------------------------------------------------------------------
+// entity 0 — worldspawn
+{
+"classname" "worldspawn"
+"message" "Coil"
+"author" "Straf3"
+{
+// brush: floor_start
+( -448 -832 -32 ) ( 448 -832 -32 ) ( 448 32 -32 ) straf3/floor [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -448 -832 0 ) ( 448 32 0 ) ( 448 -832 0 ) straf3/floor [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -448 -832 -32 ) ( 448 -832 0 ) ( 448 -832 -32 ) straf3/floor [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -448 32 -32 ) ( 448 32 -32 ) ( 448 32 0 ) straf3/floor [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -448 -832 -32 ) ( -448 32 0 ) ( -448 -832 0 ) straf3/floor [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 448 -832 -32 ) ( 448 32 0 ) ( 448 32 -32 ) straf3/floor [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+}
+{
+// brush: wall_start_w
+( -480 -864 0 ) ( -448 -864 0 ) ( -448 64 0 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -480 -864 384 ) ( -448 64 384 ) ( -448 -864 384 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -480 -864 0 ) ( -448 -864 384 ) ( -448 -864 0 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -480 64 0 ) ( -448 64 0 ) ( -448 64 384 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -480 -864 0 ) ( -480 64 384 ) ( -480 -864 384 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -448 -864 0 ) ( -448 64 384 ) ( -448 64 0 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+}
+{
+// brush: wall_start_e
+( 448 -864 0 ) ( 480 -864 0 ) ( 480 64 0 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( 448 -864 384 ) ( 480 64 384 ) ( 480 -864 384 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( 448 -864 0 ) ( 480 -864 384 ) ( 480 -864 0 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 448 64 0 ) ( 480 64 0 ) ( 480 64 384 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 448 -864 0 ) ( 448 64 384 ) ( 448 -864 384 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 480 -864 0 ) ( 480 64 384 ) ( 480 64 0 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+}
+{
+// brush: wall_start_s
+( -480 -864 0 ) ( 480 -864 0 ) ( 480 -832 0 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -480 -864 384 ) ( 480 -832 384 ) ( 480 -864 384 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -480 -864 0 ) ( 480 -864 384 ) ( 480 -864 0 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -480 -832 0 ) ( 480 -832 0 ) ( 480 -832 384 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -480 -864 0 ) ( -480 -832 384 ) ( -480 -864 384 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 480 -864 0 ) ( 480 -832 384 ) ( 480 -832 0 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+}
+{
+// brush: wall_start_n_w
+( -480 32 0 ) ( -224 32 0 ) ( -224 64 0 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -480 32 384 ) ( -224 64 384 ) ( -224 32 384 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -480 32 0 ) ( -224 32 384 ) ( -224 32 0 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -480 64 0 ) ( -224 64 0 ) ( -224 64 384 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -480 32 0 ) ( -480 64 384 ) ( -480 32 384 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 32 0 ) ( -224 64 384 ) ( -224 64 0 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+}
+{
+// brush: wall_start_n_e
+( 224 32 0 ) ( 480 32 0 ) ( 480 64 0 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( 224 32 384 ) ( 480 64 384 ) ( 480 32 384 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( 224 32 0 ) ( 480 32 384 ) ( 480 32 0 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 224 64 0 ) ( 480 64 0 ) ( 480 64 384 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 224 32 0 ) ( 224 64 384 ) ( 224 32 384 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 480 32 0 ) ( 480 64 384 ) ( 480 64 0 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+}
+{
+// brush: floor_corridor
+( -224 32 -32 ) ( 224 32 -32 ) ( 224 1568 -32 ) straf3/floor [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -224 32 0 ) ( 224 1568 0 ) ( 224 32 0 ) straf3/floor [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -224 32 -32 ) ( 224 32 0 ) ( 224 32 -32 ) straf3/floor [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 1568 -32 ) ( 224 1568 -32 ) ( 224 1568 0 ) straf3/floor [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 32 -32 ) ( -224 1568 0 ) ( -224 32 0 ) straf3/floor [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 224 32 -32 ) ( 224 1568 0 ) ( 224 1568 -32 ) straf3/floor [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+}
+{
+// brush: wall_corridor_w
+( -256 32 0 ) ( -224 32 0 ) ( -224 1568 0 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -256 32 384 ) ( -224 1568 384 ) ( -224 32 384 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -256 32 0 ) ( -224 32 384 ) ( -224 32 0 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -256 1568 0 ) ( -224 1568 0 ) ( -224 1568 384 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -256 32 0 ) ( -256 1568 384 ) ( -256 32 384 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 32 0 ) ( -224 1568 384 ) ( -224 1568 0 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+}
+{
+// brush: wall_corridor_e
+( 224 32 0 ) ( 256 32 0 ) ( 256 1568 0 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( 224 32 384 ) ( 256 1568 384 ) ( 256 32 384 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( 224 32 0 ) ( 256 32 384 ) ( 256 32 0 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 224 1568 0 ) ( 256 1568 0 ) ( 256 1568 384 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 224 32 0 ) ( 224 1568 384 ) ( 224 32 384 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 256 32 0 ) ( 256 1568 384 ) ( 256 1568 0 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+}
+{
+// brush: ramp_a_up
+( -224 1568 -32 ) ( 224 1568 -32 ) ( 224 1792 -32 ) straf3/ramp [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -224 1568 0 ) ( 224 1792 112 ) ( 224 1568 0 ) straf3/ramp [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -224 1568 -32 ) ( 224 1568 0 ) ( 224 1568 -32 ) straf3/ramp [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 1792 -32 ) ( 224 1792 -32 ) ( 224 1792 112 ) straf3/ramp [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 1568 -32 ) ( -224 1792 112 ) ( -224 1568 0 ) straf3/ramp [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 224 1568 -32 ) ( 224 1792 112 ) ( 224 1792 -32 ) straf3/ramp [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+}
+{
+// brush: ramp_b_down
+( -224 1792 -32 ) ( 224 1792 -32 ) ( 224 2016 -32 ) straf3/ramp [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -224 1792 112 ) ( 224 2016 0 ) ( 224 1792 112 ) straf3/ramp [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -224 1792 -32 ) ( 224 1792 112 ) ( 224 1792 -32 ) straf3/ramp [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 2016 -32 ) ( 224 2016 -32 ) ( 224 2016 0 ) straf3/ramp [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 1792 -32 ) ( -224 2016 0 ) ( -224 1792 112 ) straf3/ramp [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 224 1792 -32 ) ( 224 2016 0 ) ( 224 2016 -32 ) straf3/ramp [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+}
+{
+// brush: ramp_c_45
+( -224 2016 -32 ) ( 224 2016 -32 ) ( 224 2144 -32 ) straf3/ramp45 [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -224 2016 0 ) ( 224 2144 128 ) ( 224 2016 0 ) straf3/ramp45 [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -224 2016 -32 ) ( 224 2016 0 ) ( 224 2016 -32 ) straf3/ramp45 [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 2144 -32 ) ( 224 2144 -32 ) ( 224 2144 128 ) straf3/ramp45 [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 2016 -32 ) ( -224 2144 128 ) ( -224 2016 0 ) straf3/ramp45 [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 224 2016 -32 ) ( 224 2144 128 ) ( 224 2144 -32 ) straf3/ramp45 [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+}
+{
+// brush: pad_launch
+( -224 2144 -32 ) ( 224 2144 -32 ) ( 224 2304 -32 ) straf3/pad [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -224 2144 128 ) ( 224 2304 128 ) ( 224 2144 128 ) straf3/pad [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -224 2144 -32 ) ( 224 2144 128 ) ( 224 2144 -32 ) straf3/pad [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 2304 -32 ) ( 224 2304 -32 ) ( 224 2304 128 ) straf3/pad [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 2144 -32 ) ( -224 2304 128 ) ( -224 2144 128 ) straf3/pad [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 224 2144 -32 ) ( 224 2304 128 ) ( 224 2304 -32 ) straf3/pad [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+}
+{
+// brush: wall_ramp_w
+( -256 1568 0 ) ( -224 1568 0 ) ( -224 2304 0 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -256 1568 512 ) ( -224 2304 512 ) ( -224 1568 512 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -256 1568 0 ) ( -224 1568 512 ) ( -224 1568 0 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -256 2304 0 ) ( -224 2304 0 ) ( -224 2304 512 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -256 1568 0 ) ( -256 2304 512 ) ( -256 1568 512 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 1568 0 ) ( -224 2304 512 ) ( -224 2304 0 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+}
+{
+// brush: wall_ramp_e
+( 224 1568 0 ) ( 256 1568 0 ) ( 256 2304 0 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( 224 1568 512 ) ( 256 2304 512 ) ( 256 1568 512 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( 224 1568 0 ) ( 256 1568 512 ) ( 256 1568 0 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 224 2304 0 ) ( 256 2304 0 ) ( 256 2304 512 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 224 1568 0 ) ( 224 2304 512 ) ( 224 1568 512 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 256 1568 0 ) ( 256 2304 512 ) ( 256 2304 0 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+}
+{
+// brush: gully_slide
+( -224 2304 -96 ) ( 224 2304 -96 ) ( 224 2432 -96 ) straf3/slide [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -224 2304 128 ) ( 224 2432 -64 ) ( 224 2304 128 ) straf3/slide [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 2304 -96 ) ( 224 2304 128 ) ( 224 2304 -96 ) straf3/slide [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 2432 -96 ) ( 224 2432 -96 ) ( 224 2432 -64 ) straf3/slide [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 2304 -96 ) ( -224 2432 -64 ) ( -224 2304 128 ) straf3/slide [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 224 2304 -96 ) ( 224 2432 -64 ) ( 224 2432 -96 ) straf3/slide [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+}
+{
+// brush: gully_bottom
+( -224 2432 -96 ) ( 224 2432 -96 ) ( 224 2560 -96 ) straf3/floor [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -224 2432 -64 ) ( 224 2560 -64 ) ( 224 2432 -64 ) straf3/floor [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -224 2432 -96 ) ( 224 2432 -64 ) ( 224 2432 -96 ) straf3/floor [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 2560 -96 ) ( 224 2560 -96 ) ( 224 2560 -64 ) straf3/floor [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 2432 -96 ) ( -224 2560 -64 ) ( -224 2432 -64 ) straf3/floor [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 224 2432 -96 ) ( 224 2560 -64 ) ( 224 2560 -96 ) straf3/floor [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+}
+{
+// brush: gully_climb_out
+( -224 2560 -96 ) ( 224 2560 -96 ) ( 224 2816 -96 ) straf3/ramp [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -224 2560 -64 ) ( 224 2816 64 ) ( 224 2560 -64 ) straf3/ramp [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -224 2560 -96 ) ( 224 2560 -64 ) ( 224 2560 -96 ) straf3/ramp [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 2816 -96 ) ( 224 2816 -96 ) ( 224 2816 64 ) straf3/ramp [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 2560 -96 ) ( -224 2816 64 ) ( -224 2560 -64 ) straf3/ramp [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 224 2560 -96 ) ( 224 2816 64 ) ( 224 2816 -96 ) straf3/ramp [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+}
+{
+// brush: wall_gully_w
+( -256 2304 -96 ) ( -224 2304 -96 ) ( -224 2816 -96 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -256 2304 512 ) ( -224 2816 512 ) ( -224 2304 512 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -256 2304 -96 ) ( -224 2304 512 ) ( -224 2304 -96 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -256 2816 -96 ) ( -224 2816 -96 ) ( -224 2816 512 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -256 2304 -96 ) ( -256 2816 512 ) ( -256 2304 512 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 2304 -96 ) ( -224 2816 512 ) ( -224 2816 -96 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+}
+{
+// brush: wall_gully_e
+( 224 2304 -96 ) ( 256 2304 -96 ) ( 256 2816 -96 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( 224 2304 512 ) ( 256 2816 512 ) ( 256 2304 512 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( 224 2304 -96 ) ( 256 2304 512 ) ( 256 2304 -96 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 224 2816 -96 ) ( 256 2816 -96 ) ( 256 2816 512 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 224 2304 -96 ) ( 224 2816 512 ) ( 224 2304 512 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 256 2304 -96 ) ( 256 2816 512 ) ( 256 2816 -96 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+}
+{
+// brush: pad_approach
+( -224 2816 -96 ) ( 224 2816 -96 ) ( 224 3136 -96 ) straf3/pad [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -224 2816 64 ) ( 224 3136 64 ) ( 224 2816 64 ) straf3/pad [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -224 2816 -96 ) ( 224 2816 64 ) ( 224 2816 -96 ) straf3/pad [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 3136 -96 ) ( 224 3136 -96 ) ( 224 3136 64 ) straf3/pad [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 2816 -96 ) ( -224 3136 64 ) ( -224 2816 64 ) straf3/pad [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 224 2816 -96 ) ( 224 3136 64 ) ( 224 3136 -96 ) straf3/pad [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+}
+{
+// brush: wall_approach_w
+( -256 2816 -96 ) ( -224 2816 -96 ) ( -224 3136 -96 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -256 2816 512 ) ( -224 3136 512 ) ( -224 2816 512 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -256 2816 -96 ) ( -224 2816 512 ) ( -224 2816 -96 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -256 3136 -96 ) ( -224 3136 -96 ) ( -224 3136 512 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -256 2816 -96 ) ( -256 3136 512 ) ( -256 2816 512 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 2816 -96 ) ( -224 3136 512 ) ( -224 3136 -96 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+}
+{
+// brush: wall_approach_e
+( 224 2816 -96 ) ( 256 2816 -96 ) ( 256 3136 -96 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( 224 2816 512 ) ( 256 3136 512 ) ( 256 2816 512 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( 224 2816 -96 ) ( 256 2816 512 ) ( 256 2816 -96 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 224 3136 -96 ) ( 256 3136 -96 ) ( 256 3136 512 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 224 2816 -96 ) ( 224 3136 512 ) ( 224 2816 512 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 256 2816 -96 ) ( 256 3136 512 ) ( 256 3136 -96 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+}
+{
+// brush: ramp_bail_back
+( -224 3136 -224 ) ( 224 3136 -224 ) ( 224 3424 -224 ) straf3/ramp [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -224 3136 64 ) ( 224 3424 -192 ) ( 224 3136 64 ) straf3/ramp [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -224 3136 -224 ) ( 224 3136 64 ) ( 224 3136 -224 ) straf3/ramp [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 3424 -224 ) ( 224 3424 -224 ) ( 224 3424 -192 ) straf3/ramp [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 3136 -224 ) ( -224 3424 -192 ) ( -224 3136 64 ) straf3/ramp [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 224 3136 -224 ) ( 224 3424 -192 ) ( 224 3424 -224 ) straf3/ramp [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+}
+{
+// brush: finish_ledge
+( -96 3424 -192 ) ( 96 3424 -192 ) ( 96 3680 -192 ) straf3/finish [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -96 3424 80 ) ( 96 3680 80 ) ( 96 3424 80 ) straf3/finish [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -96 3424 -192 ) ( 96 3424 80 ) ( 96 3424 -192 ) straf3/finish [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -96 3680 -192 ) ( 96 3680 -192 ) ( 96 3680 80 ) straf3/finish [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -96 3424 -192 ) ( -96 3680 80 ) ( -96 3424 80 ) straf3/finish [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 96 3424 -192 ) ( 96 3680 80 ) ( 96 3680 -192 ) straf3/finish [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+}
+{
+// brush: pit_floor
+( -768 3136 -224 ) ( 768 3136 -224 ) ( 768 5376 -224 ) straf3/floor [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -768 3136 -192 ) ( 768 5376 -192 ) ( 768 3136 -192 ) straf3/floor [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -768 3136 -224 ) ( 768 3136 -192 ) ( 768 3136 -224 ) straf3/floor [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -768 5376 -224 ) ( 768 5376 -224 ) ( 768 5376 -192 ) straf3/floor [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -768 3136 -224 ) ( -768 5376 -192 ) ( -768 3136 -192 ) straf3/floor [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 768 3136 -224 ) ( 768 5376 -192 ) ( 768 5376 -224 ) straf3/floor [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+}
+}
+// entity 1 — spawn, facing +X for the circle jump
+{
+"classname" "info_player_start"
+"origin" "-320 -736 24"
+"angle" "0"
+}
+// entity 2 — trigger_start
+{
+"classname" "trigger_multiple"
+"target" "t_start"
+{
+// brush: trigger_start
+( -224 32 -32 ) ( 224 32 -32 ) ( 224 64 -32 ) common/trigger [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -224 32 768 ) ( 224 64 768 ) ( 224 32 768 ) common/trigger [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -224 32 -32 ) ( 224 32 768 ) ( 224 32 -32 ) common/trigger [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 64 -32 ) ( 224 64 -32 ) ( 224 64 768 ) common/trigger [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 32 -32 ) ( -224 64 768 ) ( -224 32 768 ) common/trigger [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 224 32 -32 ) ( 224 64 768 ) ( 224 64 -32 ) common/trigger [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+}
+}
+// entity 3 — trigger_checkpoint_1
+{
+"classname" "trigger_multiple"
+"target" "t_cp1"
+{
+// brush: trigger_checkpoint_1
+( -224 1536 -32 ) ( 224 1536 -32 ) ( 224 1568 -32 ) common/trigger [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -224 1536 768 ) ( 224 1568 768 ) ( 224 1536 768 ) common/trigger [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -224 1536 -32 ) ( 224 1536 768 ) ( 224 1536 -32 ) common/trigger [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 1568 -32 ) ( 224 1568 -32 ) ( 224 1568 768 ) common/trigger [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 1536 -32 ) ( -224 1568 768 ) ( -224 1536 768 ) common/trigger [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 224 1536 -32 ) ( 224 1568 768 ) ( 224 1568 -32 ) common/trigger [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+}
+}
+// entity 4 — trigger_checkpoint_2
+{
+"classname" "trigger_multiple"
+"target" "t_cp2"
+{
+// brush: trigger_checkpoint_2
+( -224 3104 -96 ) ( 224 3104 -96 ) ( 224 3136 -96 ) common/trigger [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -224 3104 768 ) ( 224 3136 768 ) ( 224 3104 768 ) common/trigger [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -224 3104 -96 ) ( 224 3104 768 ) ( 224 3104 -96 ) common/trigger [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 3136 -96 ) ( 224 3136 -96 ) ( 224 3136 768 ) common/trigger [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 3104 -96 ) ( -224 3136 768 ) ( -224 3104 768 ) common/trigger [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 224 3104 -96 ) ( 224 3136 768 ) ( 224 3136 -96 ) common/trigger [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+}
+}
+// entity 5 — trigger_finish
+{
+"classname" "trigger_multiple"
+"target" "t_finish"
+{
+// brush: trigger_finish
+( -96 3424 64 ) ( 96 3424 64 ) ( 96 3488 64 ) common/trigger [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -96 3424 768 ) ( 96 3488 768 ) ( 96 3424 768 ) common/trigger [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -96 3424 64 ) ( 96 3424 768 ) ( 96 3424 64 ) common/trigger [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -96 3488 64 ) ( 96 3488 64 ) ( 96 3488 768 ) common/trigger [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -96 3424 64 ) ( -96 3488 768 ) ( -96 3424 768 ) common/trigger [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 96 3424 64 ) ( 96 3488 768 ) ( 96 3488 64 ) common/trigger [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+}
+}
+// entity 6 — target_startTimer t_start
+{
+"classname" "target_startTimer"
+"targetname" "t_start"
+"origin" "0 48 128"
+}
+// entity 7 — target_checkpoint t_cp1
+{
+"classname" "target_checkpoint"
+"targetname" "t_cp1"
+"origin" "0 1552 128"
+"count" "1"
+}
+// entity 8 — target_checkpoint t_cp2
+{
+"classname" "target_checkpoint"
+"targetname" "t_cp2"
+"origin" "0 3120 160"
+"count" "2"
+}
+// entity 9 — target_stopTimer t_finish
+{
+"classname" "target_stopTimer"
+"targetname" "t_finish"
+"origin" "0 3456 160"
+}

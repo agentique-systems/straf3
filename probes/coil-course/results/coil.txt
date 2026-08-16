@@ -1,0 +1,294 @@
+== coil-course probe ==
+map          ../../assets/maps/coil.map
+solids       26 hulls
+triggers     4
+   t_start      Vec3(-224.0, 32.0, -32.0) .. Vec3(224.0, 64.0, 768.0)
+   t_cp1        Vec3(-224.0, 1536.0, -32.0) .. Vec3(224.0, 1568.0, 768.0)
+   t_cp2        Vec3(-224.0, 3104.0, -96.0) .. Vec3(224.0, 3136.0, 768.0)
+   t_finish     Vec3(-96.0, 3424.0, 64.0) .. Vec3(96.0, 3488.0, 768.0)
+bounds       Vec3(-768.0, -864.0, -224.0) .. Vec3(768.0, 5376.0, 512.0)
+profile      cpm, 125 Hz
+
+== H1  spawn ==
+spawn Vec3(-320.0, -736.0, 24.0) yaw 0  start_solid=true  all_solid=true
+ground under spawn: None  (want surface z=0, normal z=1)
+
+== H2  surface survey along x=0, every 32 units of y ==
+      y   surface  normal.z      state
+   -800       0.0    1.0000   Grounded
+   -768       0.0    1.0000   Grounded
+   -736       0.0    1.0000   Grounded
+   -704       0.0    1.0000   Grounded
+   -672       0.0    1.0000   Grounded
+   -640       0.0    1.0000   Grounded
+   -608       0.0    1.0000   Grounded
+   -576       0.0    1.0000   Grounded
+   -544       0.0    1.0000   Grounded
+   -512       0.0    1.0000   Grounded
+   -480       0.0    1.0000   Grounded
+   -448       0.0    1.0000   Grounded
+   -416       0.0    1.0000   Grounded
+   -384       0.0    1.0000   Grounded
+   -352       0.0    1.0000   Grounded
+   -320       0.0    1.0000   Grounded
+   -288       0.0    1.0000   Grounded
+   -256       0.0    1.0000   Grounded
+   -224       0.0    1.0000   Grounded
+   -192       0.0    1.0000   Grounded
+   -160       0.0    1.0000   Grounded
+   -128       0.0    1.0000   Grounded
+    -96       0.0    1.0000   Grounded
+    -64       0.0    1.0000   Grounded
+    -32       0.0    1.0000   Grounded
+      0       0.0    1.0000   Grounded
+     32       0.0    1.0000   Grounded
+     64       0.0    1.0000   Grounded
+     96       0.0    1.0000   Grounded
+    128       0.0    1.0000   Grounded
+    160       0.0    1.0000   Grounded
+    192       0.0    1.0000   Grounded
+    224       0.0    1.0000   Grounded
+    256       0.0    1.0000   Grounded
+    288       0.0    1.0000   Grounded
+    320       0.0    1.0000   Grounded
+    352       0.0    1.0000   Grounded
+    384       0.0    1.0000   Grounded
+    416       0.0    1.0000   Grounded
+    448       0.0    1.0000   Grounded
+    480       0.0    1.0000   Grounded
+    512       0.0    1.0000   Grounded
+    544       0.0    1.0000   Grounded
+    576       0.0    1.0000   Grounded
+    608       0.0    1.0000   Grounded
+    640       0.0    1.0000   Grounded
+    672       0.0    1.0000   Grounded
+    704       0.0    1.0000   Grounded
+    736       0.0    1.0000   Grounded
+    768       0.0    1.0000   Grounded
+    800       0.0    1.0000   Grounded
+    832       0.0    1.0000   Grounded
+    864       0.0    1.0000   Grounded
+    896       0.0    1.0000   Grounded
+    928       0.0    1.0000   Grounded
+    960       0.0    1.0000   Grounded
+    992       0.0    1.0000   Grounded
+   1024       0.0    1.0000   Grounded
+   1056       0.0    1.0000   Grounded
+   1088       0.0    1.0000   Grounded
+   1120       0.0    1.0000   Grounded
+   1152       0.0    1.0000   Grounded
+   1184       0.0    1.0000   Grounded
+   1216       0.0    1.0000   Grounded
+   1248       0.0    1.0000   Grounded
+   1280       0.0    1.0000   Grounded
+   1312       0.0    1.0000   Grounded
+   1344       0.0    1.0000   Grounded
+   1376       0.0    1.0000   Grounded
+   1408       0.0    1.0000   Grounded
+   1440       0.0    1.0000   Grounded
+   1472       0.0    1.0000   Grounded
+   1504       0.0    1.0000   Grounded
+   1536       0.0    1.0000   Grounded
+   1568       7.5    0.8944   Grounded
+   1600      23.5    0.8944   Grounded
+   1632      39.5    0.8944   Grounded
+   1664      55.5    0.8944   Grounded
+   1696      71.5    0.8944   Grounded
+   1728      87.5    0.8944   Grounded
+   1760     103.5    0.8944   Grounded
+   1792     112.0    1.0000   Grounded
+   1824     103.5    0.8944   Grounded
+   1856      87.5    0.8944   Grounded
+   1888      71.5    0.8944   Grounded
+   1920      55.5    0.8944   Grounded
+   1952      39.5    0.8944   Grounded
+   1984      23.5    0.8944   Grounded
+   2016      15.0    0.7071   Grounded
+   2048      47.0    0.7071   Grounded
+   2080      79.0    0.7071   Grounded
+   2112     111.0    0.7071   Grounded
+   2144     128.0    1.0000   Grounded
+   2176     128.0    1.0000   Grounded
+   2208     128.0    1.0000   Grounded
+   2240     128.0    1.0000   Grounded
+   2272     128.0    1.0000   Grounded
+   2304     128.0    1.0000   Grounded
+   2336     102.5    0.5547   Sliding 
+   2368      54.5    0.5547   Sliding 
+   2400       6.5    0.5547   Sliding 
+   2432     -41.5    0.5547   Sliding 
+   2464     -64.0    1.0000   Grounded
+   2496     -64.0    1.0000   Grounded
+   2528     -64.0    1.0000   Grounded
+   2560     -56.5    0.8944   Grounded
+   2592     -40.5    0.8944   Grounded
+   2624     -24.5    0.8944   Grounded
+   2656      -8.5    0.8944   Grounded
+   2688       7.5    0.8944   Grounded
+   2720      23.5    0.8944   Grounded
+   2752      39.5    0.8944   Grounded
+   2784      55.5    0.8944   Grounded
+   2816      64.0    1.0000   Grounded
+   2848      64.0    1.0000   Grounded
+   2880      64.0    1.0000   Grounded
+   2912      64.0    1.0000   Grounded
+   2944      64.0    1.0000   Grounded
+   2976      64.0    1.0000   Grounded
+   3008      64.0    1.0000   Grounded
+   3040      64.0    1.0000   Grounded
+   3072      64.0    1.0000   Grounded
+   3104      64.0    1.0000   Grounded
+   3136      64.0    1.0000   Grounded
+   3168      48.9    0.7474   Grounded
+   3200      20.4    0.7474   Grounded
+   3232      -8.0    0.7474   Grounded
+   3264     -36.4    0.7474   Grounded
+   3296     -64.9    0.7474   Grounded
+   3328     -93.3    0.7474   Grounded
+   3360    -121.8    0.7474   Grounded
+   3392    -150.2    0.7474   Grounded
+   3424      80.0    1.0000   Grounded
+   3456      80.0    1.0000   Grounded
+   3488      80.0    1.0000   Grounded
+   3520      80.0    1.0000   Grounded
+   3552      80.0    1.0000   Grounded
+   3584      80.0    1.0000   Grounded
+   3616      80.0    1.0000   Grounded
+   3648      80.0    1.0000   Grounded
+   3680      80.0    1.0000   Grounded
+   3712    -192.0    1.0000   Grounded
+   3744    -192.0    1.0000   Grounded
+   3776    -192.0    1.0000   Grounded
+   3808    -192.0    1.0000   Grounded
+   3840    -192.0    1.0000   Grounded
+   3872    -192.0    1.0000   Grounded
+   3904    -192.0    1.0000   Grounded
+   3936    -192.0    1.0000   Grounded
+   3968    -192.0    1.0000   Grounded
+
+void samples on the centre line: 0
+  Grounded: 146 samples, normal.z 0.7071..1.0000
+  Sliding : 4 samples, normal.z 0.5547..0.5547
+
+== H4  jump gates, launched along +Y at a sweep of speeds ==
+
+-- ramp-wave shortcut from Vec3(0.0, 1780.0, 136.0)
+     ups   landed y  landed z   exit ups
+     350       2068        92         17
+     375       2080       103          5
+     400       2087       110        400
+     425       2096       119         53
+     450       2104       127         75
+     475       2111       134         97
+     500       2116       139        500
+     525       2124       148        138
+     550       2128       151        160
+     575       2139       152        575
+     600       2154       152        600
+     625       2170       152        625
+     650       2186       152        650
+     675       2201       152        675
+     700       2217       152        700
+     725       2232       152        725
+     750       2248       152        750
+     775       2264       152        775
+     800       2279       152        800
+     825       2295       152        825
+     850       2310       152        850
+     875       2655        15        490
+     900       2666        20        515
+     925       2683        29        538
+     950       2692        34        563
+     975       2708        42        586
+    1000       2716        46        611
+
+-- the gully            from Vec3(0.0, 2292.0, 152.0)
+     ups   landed y  landed z   exit ups
+     450       2724        50        163
+     475       2740        58        188
+     500       2756        66        213
+     525       2771        73        238
+     550       2785        80        264
+     575       2798        87        289
+     600       2815        88        600
+     625       2837        88        625
+     650       2859        88        650
+     675       2881        88        675
+     700       2902        88        700
+     725       2924        88        725
+     750       2946        88        750
+     775       2968        88        775
+     800       2990        88        800
+     825       3011        88        825
+     850       3033        88        850
+     875       3055        88        875
+     900       3077        88        900
+     925       3099        88        925
+     950       3120        88        950
+     975       3142        88        975
+    1000       3409      -141        368
+
+-- the finish           from Vec3(0.0, 3124.0, 88.0)
+     ups   landed y  landed z   exit ups
+     350       3409      -141        330
+     375       3409        65        375
+     400       3409      -141        330
+     425       3410       104        425
+     450       3412       104        450
+     475       3420       104        475
+     500       3436       104        500
+     525       3452       104        525
+     550       3467       104        550
+     575       3483       104        575
+     600       3498       104        600
+     625       3514       104        625
+     650       3530       104        650
+     675       3545       104        675
+     700       3561       104        700
+     725       3576       104        725
+     750       3592       104        750
+     775       3608       104        775
+     800       3623       104        800
+     825       3639       104        825
+     850       3654       104        850
+     875       3670       104        875
+     900       3686       104        900
+     925       4249      -168        925
+     950       4279      -168        950
+     975       4310      -168        975
+    1000       4340      -168       1000
+
+== H3  strafe-jumping from the spawn ==
+   tick         x         y         z       ups
+      8      -316      -729        24       227
+     40      -268      -662        24       326
+     72      -282      -573        61       394
+    104      -293      -465        65       446
+    136      -299      -347        33       486
+    168      -288      -217        96       529
+    200      -253       -83       108       544
+    232      -196        44        66       550
+    264      -144       180        63       586
+    296      -106       331       107       622
+    328       -86       493        98       656
+    360       -84       665        37       688
+    392      -101       844        85       719
+    424      -138      1029       110       742
+    456      -170      1216        81       744
+    488      -189      1408        44       767
+    520      -177      1606       101       782
+    552      -112      1792       143       763
+
+reached y=1792 z=143 in 4416 ms; peak horizontal speed 783 ups
+
+== triggers the bot's path overlapped ==
+["t_start", "t_cp1"]   (sampled once per decision window, so this under-reports)
+
+== texture families in the compiled solids ==
+  straf3/finish      1
+  straf3/floor       4
+  straf3/pad         2
+  straf3/ramp        4
+  straf3/ramp45      1
+  straf3/slide       1
+  straf3/wall        13

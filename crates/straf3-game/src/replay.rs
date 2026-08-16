@@ -122,10 +122,29 @@ pub fn parse(text: &str) -> Result<Fixture, String> {
                         }
                         WorldChoice::Flat
                     }
-                    Some(&"arena") => WorldChoice::Arena,
+                    // `map` names whichever map this process has installed, and
+                    // that is all a fixture can say about it: the fixture format
+                    // carries no map identity, so replaying a `world map`
+                    // recording against a *different* map — or a recompiled one
+                    // — is not detectable here. Binding a recording to the
+                    // map's collision digest is C6's job and is not done.
+                    Some(&"map") => WorldChoice::Map,
+                    // `arena` is deliberately refused rather than silently
+                    // mapped onto something: the hardcoded arena is retired, so
+                    // a recording made in it has no world to replay against, and
+                    // answering with different geometry would hand back a
+                    // different trace with a straight face.
+                    Some(&"arena") => {
+                        return Err(at(
+                            "`world arena`: the hardcoded arena was retired, so this \
+                             recording cannot be replayed — the geometry it was made \
+                             in no longer exists"
+                                .to_string(),
+                        ));
+                    }
                     other => {
                         return Err(at(format!(
-                            "unknown world `{}` (empty|flat <z>|arena)",
+                            "unknown world `{}` (empty|flat <z>|map)",
                             other.unwrap_or(&"")
                         )));
                     }
@@ -494,15 +513,30 @@ cmd 50 127 64 0 - 0 92.5
     }
 
     #[test]
-    fn an_arena_recording_round_trips_to_the_arena() {
+    fn a_map_recording_round_trips_to_the_map() {
         // The `world` directive is written for `Unrepresentable` worlds too
-        // now (record.rs), and this parser already understands `arena` — so
-        // an arena recording, unlike a straf3-headless run, replays in the
+        // now (record.rs), and this parser understands `map` — so a recording
+        // made on a compiled map, unlike a straf3-headless run, replays in the
         // world it was actually recorded in.
         let recorder = Recorder::new(TickRate::HZ_125, vec3(s(0.0), s(0.0), s(24.0)), s(90.0));
-        let text = recorder.to_fixture(WorldSpec::Unrepresentable("arena"), "cpm");
+        let text = recorder.to_fixture(WorldSpec::Unrepresentable("map"), "cpm");
         let fixture = parse(&text).unwrap();
-        assert_eq!(fixture.world, WorldChoice::Arena);
+        assert_eq!(fixture.world, WorldChoice::Map);
+    }
+
+    #[test]
+    fn an_arena_recording_is_refused_rather_than_replayed_elsewhere() {
+        // The retirement's one externally visible consequence. A recording made
+        // in the hardcoded arena must fail loudly: there is no geometry left to
+        // reproduce it, and the failure mode this guards against is replaying it
+        // against the map and calling the resulting trace a match.
+        let recorder = Recorder::new(TickRate::HZ_125, vec3(s(0.0), s(0.0), s(24.0)), s(90.0));
+        let text = recorder.to_fixture(WorldSpec::Unrepresentable("arena"), "cpm");
+        let err = parse(&text).unwrap_err().to_string();
+        assert!(
+            err.contains("retired"),
+            "expected the arena to be refused by name, got: {err}"
+        );
     }
 
     #[test]

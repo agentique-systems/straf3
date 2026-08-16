@@ -2607,6 +2607,7 @@ dependencies = [
  "console_log",
  "env_logger",
  "log",
+ "straf3-map",
  "straf3-platform",
  "straf3-render",
  "straf3-sim",

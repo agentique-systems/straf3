@@ -1,6 +1,6 @@
 //! `cargo run -p straf3-render --example offscreen`
 //!
-//! Renders the arena into an offscreen texture and writes the pixels out as
+//! Renders the course into an offscreen texture and writes the pixels out as
 //! PPM files. No window, no surface, no display server.
 //!
 //! # Why this exists
@@ -9,7 +9,7 @@
 //! at a window. This machine is a software-rendered WSL2 box and CI has no
 //! display at all, so that claim would be unverifiable exactly where it most
 //! needs checking. Reading the pixels back turns it into an observation: the
-//! image is either mostly sky, or it has an arena in it, and the difference is
+//! image is either mostly sky, or it has a course in it, and the difference is
 //! measurable.
 //!
 //! It is an example rather than a test on purpose. It needs a GPU adapter, and

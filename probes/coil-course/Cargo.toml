@@ -1,0 +1,27 @@
+# Standalone on purpose, same reasoning as probes/dettrig-accuracy/Cargo.toml:
+# the empty [workspace] table excludes this crate from the root workspace, so a
+# probe can never perturb what the shipped build resolves.
+[workspace]
+
+[package]
+name = "coil-course"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "coil"
+path = "src/main.rs"
+
+[dependencies]
+# The real simulation and the real tracer, as path dependencies rather than
+# transcriptions. The whole value of this probe is that the numbers it reports
+# come from the code that will run the course, not from a model of it.
+straf3-sim = { path = "../../crates/straf3-sim" }
+straf3-collision = { path = "../../crates/straf3-collision" }
+
+# The parser straf3-map uses. This probe deliberately does NOT use straf3-map:
+# it was written while C7 was still in flight, and its brush->hull path is an
+# independent second derivation of the same compile step, which is what makes
+# it able to disagree with mapc's.
+quake-map = "0.6.1"

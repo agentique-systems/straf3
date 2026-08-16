@@ -49,40 +49,43 @@ use straf3_sim::num::{Scalar, Vec3, s, vec3};
 use straf3_sim::world::{EmptyWorld, FlatGround};
 use straf3_sim::{Buttons, PhysicsProfile, SimState, TickRate, UserCmd, ViewAngles, step_in_place};
 
-/// Which of the two worlds `straf3-headless` can build a run uses.
+/// Which world a run uses.
 ///
-/// Deliberately only the worlds the fixture format can name. The arena with
-/// ramps that `straf3-render` owns is not among them — see the note on
-/// [`Run`] about what that costs criterion 4.
+/// Deliberately only the worlds the fixture format can name. The compiled
+/// course is among them by name only — see the note on [`Run`] about what that
+/// costs criterion 4.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum WorldChoice {
     /// No geometry at all: every sweep completes.
     Empty,
     /// An infinite horizontal plane at this height.
     Flat(Scalar),
-    /// The hardcoded arena with ramps, which lives in `straf3-render`.
+    /// The compiled course, `assets/maps/coil.map`.
     ///
     /// **Not comparable against `straf3-headless`.** Headless's fixture format
-    /// has no spelling for this world, and `crates/straf3-sim` is off-limits
-    /// this wave, so a run in the arena can only ever be compared against
-    /// *itself* — see [`arena_runs`].
-    Arena,
+    /// can name `empty` and `flat <z>` and nothing else — it has no way to be
+    /// told which `.map` to load — so a run on the course can only ever be
+    /// compared against *itself*; see [`map_runs`].
+    ///
+    /// This replaced `Arena` when the hardcoded arena was retired. The geometry
+    /// changed; the argument for why this half of criterion 4 exists did not.
+    Map,
 }
 
 impl WorldChoice {
     /// Whether `straf3-headless` can build this world.
     ///
-    /// The whole reason criterion 4 splits into a flat-ground half and an arena
-    /// half.
+    /// The whole reason criterion 4 splits into a flat-ground half and a
+    /// course half.
     pub fn is_comparable_to_headless(self) -> bool {
-        !matches!(self, Self::Arena)
+        !matches!(self, Self::Map)
     }
 
     fn render(self) -> String {
         match self {
             Self::Empty => "world empty".to_string(),
             Self::Flat(h) => format!("world flat {}", render_scalar(h)),
-            Self::Arena => "world arena".to_string(),
+            Self::Map => "world map".to_string(),
         }
     }
 }
@@ -117,11 +120,11 @@ impl Profile {
 /// # The world is flat, and that is a real limit on criterion 4
 ///
 /// `straf3-headless`'s fixture format can name `empty` or `flat <z>` and
-/// nothing else. The playable build runs on the hardcoded arena with ramps
+/// nothing else. The playable build runs on the compiled course with ramps
 /// (spec rev 6 §T, option (a)), and ramps are precisely where CPM and VQ3
 /// diverge most. So a replay-equivalence proof built on these fixtures shows
 /// the platform layer changes nothing below the seam *on flat ground*; it does
-/// not exercise the arena's ramp geometry. Closing that gap needs the arena
+/// not exercise the course's ramp geometry. Closing that gap needs the course
 /// `World` reachable from both sides of the comparison. Reported as an
 /// uncertainty rather than papered over.
 #[derive(Debug, Clone)]
@@ -240,17 +243,17 @@ impl Run {
 
         assert!(
             self.world.is_comparable_to_headless(),
-            "{}: runs in the arena, which lives in straf3-render and cannot be \
-             built here. An arena run has no in-process reference and no \
+            "{}: runs on the compiled course, which this crate cannot build. A \
+             course run has no in-process reference and no \
              headless reference — it is only ever compared against itself \
-             under different frame schedules. Use arena_runs(), not runs().",
+             under different frame schedules. Use map_runs(), not runs().",
             self.name,
         );
 
         // The two arms differ only in the world's concrete type, which `World`
         // being a trait with a generic `step_in_place` forces to be two calls.
         match self.world {
-            WorldChoice::Arena => unreachable!("refused above"),
+            WorldChoice::Map => unreachable!("refused above"),
             WorldChoice::Empty => {
                 let world = EmptyWorld;
                 for cmd in &self.cmds {
@@ -274,9 +277,9 @@ impl Run {
     pub fn headless_digests(&self) -> Vec<u64> {
         assert!(
             self.world.is_comparable_to_headless(),
-            "{}: straf3-headless cannot build the arena world — its fixture \
+            "{}: straf3-headless cannot build the course world — its fixture \
              format has no spelling for it, and crates/straf3-sim is off-limits \
-             this wave. Comparing an arena run against headless is not a test \
+             this wave. Comparing a course run against headless is not a test \
              that can be made to pass; it is a category error.",
             self.name,
         );
@@ -406,14 +409,14 @@ pub fn runs() -> Vec<Run> {
     ]
 }
 
-/// Runs that happen in the **arena**, and therefore only the windowed build can
-/// execute.
+/// Runs that happen on the **compiled course**, and therefore only the windowed
+/// build can execute.
 ///
 /// # Why these are separate from [`runs`]
 ///
 /// Criterion 4 names `straf3-headless` as its reference, and headless's fixture
 /// format can spell `empty` and `flat <z>` and nothing else. The playable build
-/// runs the hardcoded arena with ramps — and ramps are, in the spec's own
+/// runs the compiled course with ramps — and ramps are, in the spec's own
 /// words, *"where CPM and VQ3 diverge most, and the discrete branches the
 /// 1-ULP finding warns about."* So the geometry that matters most is the
 /// geometry the named reference structurally cannot run.
@@ -423,7 +426,7 @@ pub fn runs() -> Vec<Run> {
 ///
 /// 1. **Flat ground, three corners.** [`runs`] — the windowed build against
 ///    `straf3-headless` against the in-process simulation, per tick.
-/// 2. **Arena, self-consistency.** These runs — the same recorded input through
+/// 2. **Course, self-consistency.** These runs — the same recorded input through
 ///    the windowed build under wildly different *frame schedules*, required to
 ///    produce byte-identical per-tick digests. `straf3-headless` has no frame
 ///    loop at all, so the flat-ground half already pins the absolute answer;
@@ -432,7 +435,7 @@ pub fn runs() -> Vec<Run> {
 ///    geometry it is hardest to be sure about.
 ///
 /// Neither half alone is criterion 4. Together they are.
-pub fn arena_runs() -> Vec<Run> {
+pub fn map_runs() -> Vec<Run> {
     let rate = TickRate::HZ_125;
     let ms = rate.command_millis();
     let mut cmds = Vec::new();
@@ -441,7 +444,7 @@ pub fn arena_runs() -> Vec<Run> {
     for _ in 0..30 {
         cmds.push(UserCmd::still_at(rate));
     }
-    // Run forward into the arena, so the run meets geometry rather than air.
+    // Run forward along the course, so the run meets geometry rather than air.
     for _ in 0..80 {
         cmds.push(UserCmd {
             duration_ms: ms,
@@ -475,13 +478,17 @@ pub fn arena_runs() -> Vec<Run> {
     }
 
     vec![Run {
-        name: "arena_ramp_run",
-        intent: "run, jump and strafe across the arena's ramps — geometry straf3-headless cannot build",
+        name: "course_ramp_run",
+        intent: "run, jump and strafe across the course's ramp wave — geometry straf3-headless cannot build",
         rate,
         profile: Profile::Cpm,
-        world: WorldChoice::Arena,
-        spawn: vec3(s(0.0), s(0.0), s(64.0)),
-        yaw: s(0.0),
+        world: WorldChoice::Map,
+        // Just short of the ramp wave (`coil` puts it at y=1568), facing up the
+        // course, so the 80 ticks of forward run arrive on the ramps rather
+        // than spending the whole fixture on the start room's flat floor.
+        // Ramps are the entire reason this half of criterion 4 exists.
+        spawn: vec3(s(0.0), s(1400.0), s(64.0)),
+        yaw: s(90.0),
         cmds,
     }]
 }
@@ -501,7 +508,7 @@ pub fn run_named(name: &str) -> Run {
 /// Every run that has a checked-in fixture, comparable to headless or not.
 pub fn all_runs() -> Vec<Run> {
     let mut all = runs();
-    all.extend(arena_runs());
+    all.extend(map_runs());
     all
 }
 

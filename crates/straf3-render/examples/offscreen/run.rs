@@ -1,9 +1,14 @@
 //! Body of the `offscreen` example. Split out of `main.rs` only so the
 //! whole thing can be `cfg`'d off for `wasm32`, where none of it exists.
 
-use straf3_render::arena::{EYE_HEIGHT, SPAWN};
+use straf3_render::camera::EYE_HEIGHT;
 use straf3_render::{Camera, Scene, camera::DEFAULT_FOV_X};
 use straf3_sim::num::{s, vec3};
+
+// The course, shared with the `window` and `web-demo` drivers: one compiled
+// map, its mesh drawn here and its hulls collided with there.
+#[path = "../shared/course.rs"]
+mod course;
 
 const WIDTH: u32 = 960;
 const HEIGHT: u32 = 540;
@@ -13,44 +18,72 @@ const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 const ROW_ALIGN: u32 = 256;
 
 pub fn main() {
+    // Landmarks along the course, in the order a run meets them. The y values
+    // are the ones the probe measured the route at (probes/coil-course), so a
+    // shot that comes back empty means the geometry moved, not that the camera
+    // was guessed badly.
+    let (spawn, spawn_yaw) = course::spawn();
+    let bounds = course::get().map.bounds;
     let shots: Vec<(&str, Camera)> = vec![
         (
             "spawn",
             Camera {
                 // Exactly what the player sees on the first frame.
-                eye: SPAWN + vec3(s(0.0), s(0.0), EYE_HEIGHT),
+                eye: vec3(spawn.x, spawn.y, spawn.z + EYE_HEIGHT),
                 pitch: s(0.0),
+                yaw: spawn_yaw,
+                fov_x: DEFAULT_FOV_X,
+            },
+        ),
+        (
+            "ramp-wave",
+            Camera {
+                // Inside the corridor, at the mouth of the ramp wave, looking
+                // up it the way a player arrives. The corridor is 448 wide
+                // (x -224..224), so a camera off to the side would be outside
+                // the wall looking at its back.
+                eye: vec3(s(0.0), s(1500.0), s(180.0)),
+                pitch: s(6.0),
                 yaw: s(90.0),
                 fov_x: DEFAULT_FOV_X,
             },
         ),
         (
-            "ramps",
+            "gully",
             Camera {
-                // Above and south-east, looking back across all three ramps.
-                eye: vec3(s(1100.0), s(-1100.0), s(700.0)),
-                pitch: s(28.0),
-                yaw: s(140.0),
+                // On the launch pad, looking across the gully at the landing
+                // lip — the view the jump is actually judged from.
+                eye: vec3(s(0.0), s(2260.0), s(230.0)),
+                pitch: s(8.0),
+                yaw: s(90.0),
                 fov_x: DEFAULT_FOV_X,
             },
         ),
         (
-            "gentle-ramp",
+            "finish",
             Camera {
-                // Standing at the foot of the gentle ramp, looking up it.
-                eye: vec3(s(-900.0), s(0.0), s(24.125) + EYE_HEIGHT),
-                pitch: s(-6.0),
-                yaw: s(0.0),
+                // On the approach, looking at the last jump and the narrow
+                // ledge it has to land on.
+                eye: vec3(s(0.0), s(3080.0), s(180.0)),
+                pitch: s(6.0),
+                yaw: s(90.0),
                 fov_x: DEFAULT_FOV_X,
             },
         ),
         (
             "overview",
             Camera {
-                // High and outside, so the whole arena is in frame at once.
-                eye: vec3(s(-2200.0), s(-2200.0), s(1900.0)),
-                pitch: s(30.0),
-                yaw: s(45.0),
+                // High and behind the start, looking up the length of the
+                // course. Derived from the compiled bounds rather than
+                // hardcoded, so editing the `.map` cannot leave this pointing
+                // at empty space.
+                eye: vec3(
+                    (bounds.mins.x + bounds.maxs.x) * s(0.5),
+                    bounds.mins.y - s(512.0),
+                    bounds.maxs.z + s(1024.0),
+                ),
+                pitch: s(28.0),
+                yaw: s(90.0),
                 fov_x: s(100.0),
             },
         ),
@@ -84,8 +117,9 @@ pub fn main() {
     }))
     .expect("request_device");
 
-    let mut scene = Scene::new(device, queue, FORMAT, WIDTH, HEIGHT);
-    eprintln!("offscreen: arena is {} triangles", scene.triangle_count());
+    let mesh = straf3_render::mesh::GpuMesh::from_map(&course::get().map.mesh);
+    let mut scene = Scene::new(device, queue, FORMAT, WIDTH, HEIGHT, &mesh);
+    eprintln!("offscreen: course is {} triangles", scene.triangle_count());
 
     let target = scene.device().create_texture(&wgpu::TextureDescriptor {
         label: Some("straf3-offscreen-target"),

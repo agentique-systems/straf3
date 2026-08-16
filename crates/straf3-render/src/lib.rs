@@ -6,15 +6,16 @@
 //!
 //! # What this crate is responsible for
 //!
-//! - [`arena`] — the hardcoded arena, as data. **The collision geometry lives
-//!   here too**, because the thing you see and the thing you hit have to be
-//!   the same thing. `straf3-game` imports [`arena::ARENA`] and hands it
-//!   straight to [`straf3_sim::step_in_place`]; it does not write a second
-//!   collision implementation. That module has no `wgpu` in it, so importing
-//!   it costs nothing.
 //! - [`camera`] — the eye, as a pure function of two [`PlayerState`]s and an
 //!   interpolation factor.
-//! - [`mesh`] — the arena, as triangles.
+//! - [`mesh`] — a compiled map's triangles, in the GPU's vertex layout.
+//!
+//! **The geometry is not declared here any more.** Wave 3 kept the arena in
+//! this crate so that the thing you see and the thing you hit were one piece of
+//! data. `straf3-map` now does that job properly and below the seam: the hulls
+//! and the triangles come out of one pass over one set of brush planes. This
+//! crate draws whatever mesh it is handed and has no opinion about which world
+//! that is — `straf3-game`'s `scene.rs` is the single place that decides.
 //! - [`Renderer`] — device, surface, draw loop. One implementation for native
 //!   and for `wasm32-unknown-unknown`.
 //!
@@ -48,7 +49,6 @@
 #![warn(missing_docs)]
 #![warn(clippy::all)]
 
-pub mod arena;
 pub mod camera;
 mod gfx;
 pub mod mesh;
@@ -95,9 +95,14 @@ impl Renderer {
     /// Native: blocks until the device is ready, so [`is_ready`](Self::is_ready)
     /// is true when this returns. Web: returns immediately, not ready, and
     /// becomes ready some frames later.
+    ///
+    /// `mesh` is the world to draw, already compiled. It is taken by value and
+    /// moved into the acquisition task because on the web that task finishes
+    /// several frames later — borrowing it would tie the renderer's construction
+    /// to a lifetime the event loop does not have.
     #[must_use]
-    pub fn new(window: Arc<Window>) -> Self {
-        Self::with_backends(window, default_backends())
+    pub fn new(window: Arc<Window>, mesh: mesh::GpuMesh) -> Self {
+        Self::with_backends(window, default_backends(), mesh)
     }
 
     /// As [`new`](Self::new), but with the backend set chosen by the caller.
@@ -122,7 +127,11 @@ impl Renderer {
     /// `crates/straf3-render/web/index.html` refuses to enter wasm at all when
     /// the adapter comes back null.
     #[must_use]
-    pub fn with_backends(window: Arc<Window>, backends: wgpu::Backends) -> Self {
+    pub fn with_backends(
+        window: Arc<Window>,
+        backends: wgpu::Backends,
+        mesh: mesh::GpuMesh,
+    ) -> Self {
         let gfx: Rc<RefCell<Option<gfx::Gfx>>> = Rc::new(RefCell::new(None));
 
         #[cfg(target_arch = "wasm32")]
@@ -130,7 +139,7 @@ impl Renderer {
             let slot = gfx.clone();
             let w = window.clone();
             wasm_bindgen_futures::spawn_local(async move {
-                let ready = gfx::Gfx::new(w.clone(), backends).await;
+                let ready = gfx::Gfx::new(w.clone(), backends, mesh).await;
                 *slot.borrow_mut() = Some(ready);
                 // The frames drawn while this was in flight drew nothing, and
                 // nothing else will ask for a redraw if the loop is idle.
@@ -140,7 +149,7 @@ impl Renderer {
 
         #[cfg(not(target_arch = "wasm32"))]
         {
-            *gfx.borrow_mut() = Some(pollster::block_on(gfx::Gfx::new(window, backends)));
+            *gfx.borrow_mut() = Some(pollster::block_on(gfx::Gfx::new(window, backends, mesh)));
         }
 
         Self {
@@ -220,21 +229,30 @@ mod tests {
     }
 
     #[test]
-    fn the_arena_is_reachable_without_touching_the_gpu() {
-        // The property `straf3-game` and the test harness depend on: the world
-        // they hand to `step_in_place` comes from this crate, and asking it
-        // where the floor is must not require a device.
+    fn a_maps_geometry_is_reachable_without_touching_the_gpu() {
+        // The property `straf3-game` and the test harness depend on, restated
+        // for the map pipeline: the world handed to `step_in_place` and the
+        // mesh handed to the renderer come out of the same compile, and asking
+        // either of them a question must not require a device. This test links
+        // wgpu and never creates an adapter.
         use straf3_sim::World as _;
         use straf3_sim::num::{s, vec3};
         use straf3_sim::world::Sweep;
 
+        const COIL: &str = include_str!("../../../assets/maps/coil.map");
+        let map = straf3_map::compile(COIL).expect("coil.map compiles");
+        let world = map.collider();
+
         let hull = straf3_sim::PhysicsProfile::vq3().hull(false);
-        let t = arena::ARENA.trace(&Sweep {
-            start: arena::SPAWN,
-            end: arena::SPAWN - vec3(s(0.0), s(0.0), s(64.0)),
+        let t = world.trace(&Sweep {
+            start: map.spawn,
+            end: map.spawn - vec3(s(0.0), s(0.0), s(64.0)),
             half_extents: hull.half_extents,
             center_offset: hull.center_offset,
         });
         assert!(t.hit(), "the floor is not under the spawn point");
+
+        // And the same compile produced something to draw.
+        assert!(!mesh::GpuMesh::from_map(&map.mesh).is_empty());
     }
 }

@@ -43,7 +43,7 @@ fn fixtures_match_their_definitions() {
     let bless = std::env::var_os("STRAF3_BLESS_FIXTURES").is_some();
     let mut stale = Vec::new();
 
-    // `all_runs`, not `runs`: the arena fixture is read by the windowed build's
+    // `all_runs`, not `runs`: the course fixture is read by the windowed build's
     // tests and would otherwise drift with nothing watching it.
     for run in support::all_runs() {
         let expected = run.render();

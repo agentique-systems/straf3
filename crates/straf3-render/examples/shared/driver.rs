@@ -1,4 +1,4 @@
-//! An autopilot that drives the real simulation through the real arena.
+//! An autopilot that drives the real simulation through the real course.
 //!
 //! Shared by the `window` and `web-demo` examples via `#[path]`, so both
 //! targets show the same thing and neither carries its own idea of how the
@@ -10,7 +10,7 @@
 //! the mouse and the keyboard, and two crates capturing input would be two
 //! things to keep in agreement for no benefit. What the renderer needs to
 //! demonstrate on its own is narrower: that the camera follows the simulation,
-//! that the drawn arena is the arena the player collides with, and that frames
+//! that the drawn course is the course the player collides with, and that frames
 //! are decoupled from ticks. A scripted player proves all three and needs
 //! nobody to hold the mouse.
 //!
@@ -19,7 +19,9 @@
 //! reaches under the seam.
 
 use straf3_render::InterpolationAlpha;
-use straf3_render::arena::{ARENA, SPAWN, SPAWN_YAW};
+
+#[path = "course.rs"]
+pub mod course;
 use straf3_sim::num::{Scalar, s};
 use straf3_sim::{
     Buttons, PhysicsProfile, PlayerState, SimState, TickRate, UserCmd, ViewAngles, step_in_place,
@@ -30,7 +32,7 @@ use straf3_sim::{
 /// Strafejumping is the relationship between view angle and velocity, so a
 /// stationary view would accelerate to the ground speed cap and sit there. A
 /// steady sweep with the strafe key held is the crudest possible strafejump,
-/// and it is enough to see the arena go past at speed.
+/// and it is enough to see the course go past at speed.
 const TURN_RATE: Scalar = s(75.0);
 
 /// The simulation, driven by a scripted player.
@@ -41,17 +43,22 @@ pub struct Autopilot {
     pub prev: PlayerState,
     rate: TickRate,
     profile: PhysicsProfile,
+    /// The yaw the course spawns the player at — the base the view sweeps from,
+    /// so the autopilot sets off down the course rather than into a wall.
+    spawn_yaw: Scalar,
 }
 
 impl Autopilot {
-    /// Spawn at the arena's spawn point, facing up the arena.
+    /// Spawn at the course's own `info_player_start`, facing the way it says.
     pub fn new() -> Self {
-        let state = SimState::spawned_at(SPAWN, SPAWN_YAW);
+        let (spawn, spawn_yaw) = course::spawn();
+        let state = SimState::spawned_at(spawn, spawn_yaw);
         Self {
             prev: state.player,
             state,
             rate: TickRate::DEFAULT,
             profile: PhysicsProfile::cpm(),
+            spawn_yaw,
         }
     }
 
@@ -73,7 +80,7 @@ impl Autopilot {
         while u64::from(self.state.time_ms) + step_ms <= target {
             self.prev = self.state.player;
             let cmd = self.command();
-            step_in_place(&mut self.state, &cmd, &ARENA, &self.profile);
+            step_in_place(&mut self.state, &cmd, &course::get().world, &self.profile);
         }
 
         let leftover = target.saturating_sub(u64::from(self.state.time_ms));
@@ -101,7 +108,7 @@ impl Autopilot {
             } else {
                 Buttons::NONE
             },
-            view: ViewAngles::from_degrees(s(0.0), SPAWN_YAW + TURN_RATE * seconds, s(0.0)),
+            view: ViewAngles::from_degrees(s(0.0), self.spawn_yaw + TURN_RATE * seconds, s(0.0)),
         }
     }
 
