@@ -2735,6 +2735,7 @@ version = "0.1.0"
 dependencies = [
  "glam",
  "parry3d",
+ "straf3-sim",
 ]
 
 [[package]]

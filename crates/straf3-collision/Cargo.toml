@@ -9,9 +9,18 @@ publish.workspace = true
 
 # BELOW THE LINE. Enforced by `cargo xtask check-seam`.
 #
+# straf3-sim is here to name the collision seam's own types — `World`, `Sweep`,
+# `Trace`, `SurfaceFlags` — and its numeric types, so a hull's arithmetic is the
+# simulation's arithmetic. It is not a cycle: straf3-sim depends on glam and
+# nothing else, deliberately (see its manifest), and both crates are below the
+# line.
+#
 # parry3d is provisional: spec section 4 makes it conditional on a determinism
 # audit. It is confined to this crate so that audit has one place to look, and
-# so replacing it would not touch the simulation.
+# so replacing it would not touch the simulation. Nothing here uses it — the
+# tracer is hand-written, for the reasons in src/lib.rs — and ARCHITECTURE C8
+# makes putting it on the trace path an architectural decision, not a detail.
 [dependencies]
+straf3-sim.workspace = true
 glam.workspace = true
 parry3d.workspace = true
