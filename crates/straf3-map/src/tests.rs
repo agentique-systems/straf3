@@ -707,3 +707,197 @@ fn the_fixture_courses_digest_is_the_pinned_one() {
          updating it, because every recording made against the old value is scrap"
     );
 }
+
+// ---------------------------------------------------------------------------
+// The collider carries the timing volumes — the link that makes a run a time.
+//
+// `collider()` is the single choke point every consumer goes through
+// (`straf3-game`'s scene, `straf3-render`), so a trigger volume that does not
+// arrive here arrives nowhere: the clock is built, correct, and never fed. The
+// tests below are about that hand-over, not about the clock, which is
+// `straf3-sim`'s own `tests/run_clock.rs`.
+
+/// Walk `state` forward along +Y, one command at a time, and stop as soon as
+/// the run is finished.
+///
+/// Deliberately the real `step_in_place` against the real collider rather than
+/// a geometry query: the question is whether a *player* crossing these volumes
+/// starts and stops the clock, and only the mover can answer that.
+fn run_the_fixture_course(world: &HullWorld, from: Vec3) -> straf3_sim::SimState {
+    use straf3_sim::{Buttons, PhysicsProfile, SimState, TickRate, UserCmd, ViewAngles};
+
+    let rate = TickRate::HZ_125;
+    let profile = PhysicsProfile::cpm();
+    // Yaw 90 is +Y, which is the direction the fixture course runs in.
+    let mut state = SimState::spawned_at(from, straf3_sim::num::s(90.0));
+    let cmd = UserCmd {
+        duration_ms: rate.command_millis(),
+        forward_move: 127,
+        right_move: 0,
+        up_move: 0,
+        buttons: Buttons::NONE,
+        view: ViewAngles::from_degrees(
+            straf3_sim::num::s(0.0),
+            straf3_sim::num::s(90.0),
+            straf3_sim::num::s(0.0),
+        ),
+    };
+    for _ in 0..2_000 {
+        straf3_sim::step_in_place(&mut state, &cmd, world, &profile);
+        if matches!(state.run, straf3_sim::RunState::Finished { .. }) {
+            break;
+        }
+    }
+    state
+}
+
+#[test]
+fn a_compiled_map_hands_over_a_collider_that_can_time_a_run() {
+    let map = compiled();
+    assert!(map.has_timing());
+
+    let world = map.collider();
+    let coverage = world.trigger_coverage();
+    assert!(
+        coverage.contains(TriggerSet::START),
+        "the collider has no start volume, so no run in it can ever begin"
+    );
+    assert!(
+        coverage.contains(TriggerSet::FINISH),
+        "the collider has no finish volume, so no run in it can ever end"
+    );
+
+    // The volumes must not have become solid geometry: a player runs *through*
+    // a finish line. Five solid brushes, as `a_trigger_volume_is_not_solid`
+    // already pins, and two volumes alongside them.
+    assert_eq!(world.hulls().len(), map.hulls.len());
+    assert_eq!(world.hulls().len(), 5);
+    assert_eq!(world.triggers().len(), 2);
+}
+
+#[test]
+fn a_player_walking_the_fixture_course_gets_a_time_in_whole_milliseconds() {
+    let map = compiled();
+    let world = map.collider();
+    let state = run_the_fixture_course(&world, map.spawn);
+
+    let straf3_sim::RunState::Finished {
+        started_at_ms,
+        finished_at_ms,
+    } = state.run
+    else {
+        panic!("the walk never finished: run was {:?}", state.run);
+    };
+
+    // The interesting assertion is not the number, it is that the number came
+    // from the geometry. The spawn is at y=-256, the start volume ends at
+    // y=-96 and the finish begins at y=352, so the clock must start well after
+    // the first command and stop well before the last.
+    assert!(
+        started_at_ms > 0,
+        "the clock started before the player moved"
+    );
+    assert!(finished_at_ms > started_at_ms);
+
+    let elapsed = state.run.elapsed_ms(state.time_ms).expect("a finished run");
+    assert_eq!(elapsed, finished_at_ms - started_at_ms);
+
+    // Walking speed under CPM is 320 ups and the volumes are ~450 units apart
+    // measured leading-edge to leading-edge, so a second and a half either way
+    // is a generous window around a walk and still excludes a clock that
+    // started at spawn or stopped at the end of the loop.
+    assert!(
+        (500..3_000).contains(&elapsed),
+        "a walk down a 450-unit course took {elapsed} ms, which is not a walk"
+    );
+
+    // `u32` milliseconds, not float seconds, all the way out (spec: no float
+    // seconds anywhere). This is a type-level assertion; it is here so that
+    // changing `RunState` to carry an `f32` fails a test rather than a review.
+    let _: u32 = elapsed;
+}
+
+#[test]
+fn a_volume_that_is_not_timing_gets_no_bit_rather_than_a_spare_one() {
+    // A jump pad and a teleporter are recorded geometry. Giving either one a
+    // bit would put it in the same alphabet as a finish line, and a run would
+    // stop when the player took a shortcut.
+    assert_eq!(TriggerKind::Teleport.trigger_set(), None);
+    assert_eq!(TriggerKind::Push.trigger_set(), None);
+    assert_eq!(TriggerKind::Other.trigger_set(), None);
+    assert_eq!(TriggerKind::Start.trigger_set(), Some(TriggerSet::START));
+    assert_eq!(TriggerKind::Finish.trigger_set(), Some(TriggerSet::FINISH));
+    assert_eq!(
+        TriggerKind::Checkpoint(0).trigger_set(),
+        TriggerSet::checkpoint(0)
+    );
+
+    let mut source = course();
+    source.push_str(&point_entity(
+        "t_dest",
+        &[("targetname", "t_dest"), ("origin", "0 256 32")],
+    ));
+    source.push_str(&brush_entity(
+        "trigger_teleport",
+        &[("target", "t_dest")],
+        &[box_brush([-128, 96, 0], [128, 160, 128], "common/trigger")],
+    ));
+    let map = compile(&source).expect("a teleporter is not a compile error");
+
+    // Kept in the entity data — the geometry is not lost...
+    assert_eq!(map.triggers.len(), 3);
+    // ...and still absent from the collider, which only speaks timing.
+    let world = map.collider();
+    assert_eq!(
+        world.triggers().len(),
+        2,
+        "a teleporter reached the run clock's alphabet"
+    );
+}
+
+#[test]
+fn checkpoints_past_the_bit_budget_are_reported_rather_than_dropped_in_silence() {
+    // A missing 31st split looks exactly like a player who missed it, so the
+    // compiler has to say so. No map in the tree comes near this — coil.map
+    // has two — but the limit is real and silent loss is what this crate's
+    // warnings exist to prevent.
+    let over = TriggerSet::MAX_CHECKPOINTS + 2;
+    let mut source = course();
+    for i in 0..over {
+        source.push_str(&point_entity(
+            "target_checkpoint",
+            &[
+                ("targetname", &format!("cp{i}")),
+                ("origin", &format!("0 {} 32", 16 * i)),
+            ],
+        ));
+        source.push_str(&brush_entity(
+            "trigger_multiple",
+            &[("target", &format!("cp{i}"))],
+            &[box_brush(
+                [-8, 16 * i as i32, 0],
+                [8, 16 * i as i32 + 8, 128],
+                "common/trigger",
+            )],
+        ));
+    }
+    let map = compile(&source).expect("too many checkpoints is a warning, not an error");
+
+    assert_eq!(
+        map.warnings
+            .iter()
+            .filter(|w| **w == Warning::TooManyCheckpoints { dropped: 2 })
+            .count(),
+        1,
+        "warnings were {:?}",
+        map.warnings
+    );
+
+    // Every checkpoint is still in the entity data; only the last two lack a
+    // bit, so the collider carries the rest plus start and finish.
+    assert_eq!(map.triggers.len(), 2 + over as usize);
+    assert_eq!(
+        map.collider().triggers().len(),
+        2 + TriggerSet::MAX_CHECKPOINTS as usize
+    );
+}

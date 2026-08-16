@@ -8,6 +8,7 @@ version = "0.1.0"
 dependencies = [
  "quake-map",
  "straf3-collision",
+ "straf3-map",
  "straf3-sim",
 ]
 
@@ -28,6 +29,16 @@ name = "straf3-collision"
 version = "0.1.0"
 dependencies = [
  "glam",
+ "straf3-sim",
+]
+
+[[package]]
+name = "straf3-map"
+version = "0.1.0"
+dependencies = [
+ "glam",
+ "quake-map",
+ "straf3-collision",
  "straf3-sim",
 ]
 
