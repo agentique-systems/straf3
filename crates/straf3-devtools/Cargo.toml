@@ -1,6 +1,6 @@
 [package]
 name = "straf3-devtools"
-description = "egui overlays and movement telemetry."
+description = "The on-screen overlay and its movement telemetry."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,10 +9,37 @@ publish.workspace = true
 
 # ABOVE THE LINE. May depend downward, never upward.
 [dependencies]
+# The only thing below the line this crate reads. It reads it; it never writes
+# it, and there is no `&mut SimState` anywhere in this crate's API.
 straf3-sim.workspace = true
-straf3-render.workspace = true
-straf3-platform.workspace = true
-# These three move in lockstep; the workspace table keeps them matched.
+# egui and egui-wgpu move in lockstep; the workspace table keeps them matched.
+#
+# `egui-winit` is deliberately NOT here. The overlay is a readout — nothing on
+# it is clickable, focusable or typeable — so the only thing that integration
+# layer would supply is the screen size and the DPI scale, two numbers the
+# caller already has. Dropping it removes `arboard`, `smithay-clipboard` and
+# `webbrowser`: a clipboard stack, linked in to draw a speedometer. It also
+# removes the one dependency in this crate that could not build for `wasm32`
+# (arboard has no wasm backend — see docs/web/ARCHITECTURE.md).
 egui.workspace = true
 egui-wgpu.workspace = true
-egui-winit.workspace = true
+# Named in this crate's public API: `Hud::draw` takes borrowed wgpu handles.
+# Declared directly rather than reached through `egui_wgpu::wgpu` so that this
+# crate and `straf3-render` are visibly agreeing on one version — the same
+# crate, so the types unify.
+wgpu.workspace = true
+
+# ── examples ───────────────────────────────────────────────────────────────
+# `hud-offscreen` paints the overlay into a texture and reads the pixels back,
+# so "the HUD draws" is an observation rather than a claim about what somebody
+# saw in a window. An example rather than a test because it needs a GPU
+# adapter, and a test that fails on a machine without one punishes the correct
+# environment (the same reasoning as straf3-render's `offscreen`).
+[dev-dependencies]
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+pollster.workspace = true
+
+[[example]]
+name = "hud-offscreen"
+path = "examples/hud-offscreen/main.rs"

@@ -1,50 +1,92 @@
 # Playing straf3
 
-This is Wave 3's first playable build: a hardcoded arena, mouse-look,
-keyboard movement, and a strafe-jump-capable CPM movement model. No maps,
-weapons, sound or menus yet.
+This is the run document: how to build it, how to start it, what you see, and
+how to check that what you saw was real. It describes what is in the tree right
+now. Anything not yet landed is marked as such rather than described as if it
+were.
 
-> **Software rendering under WSL2.** This box has no GPU passthrough, so
-> Vulkan resolves to the software rasteriser `llvmpipe`. The window opens and
-> the render loop runs — that is what these instructions verify. Whether it
-> looks and feels right, and whether live input moves the player, is yours
-> to judge; these instructions make no claim about frame rate, smoothness or
-> latency "feel". See the README for the native-Windows recommendation for
-> actually tuning movement.
+What exists: a native client that compiles a Valve 220 `.map` into the geometry
+you collide with *and* the geometry you see, a Q3/CPM movement model at a fixed
+125 Hz command rate, mouse-look and WASD, an on-screen telemetry overlay, and a
+record/replay path whose checksums three separate readers agree on.
+
+The governing document is [`docs/VISION.md`](docs/VISION.md). Where this file
+and the vision disagree about what the game is for, the vision wins.
+
+---
+
+## Before you start: this is a headless Linux box
+
+> **There is no GPU here and, in this shell, no working Wayland socket.**
+> Vulkan resolves to the software rasteriser `llvmpipe`, so the window opens
+> and the loop runs, and that is all these instructions verify. **No frame
+> rate, smoothness or latency number produced on this machine means anything**
+> — the vision's pacing budgets (`docs/VISION.md`, "Frame pacing and latency")
+> are measured on the native Windows build and nowhere else. See the README for
+> the Windows recommendation.
+
+`WAYLAND_DISPLAY` is set here to a socket that does not exist, and winit tries
+Wayland before X11 and then gives up rather than falling back:
+
+```
+[ERROR straf3_game::app] could not create an event loop: os error at .../wayland/event_loop/mod.rs:89: Could not find wayland compositor
+```
+
+Unsetting it for the one command is the whole fix, and the X11 socket
+(`/tmp/.X11-unix/X0`, `DISPLAY=:0`) works:
+
+```
+WAYLAND_DISPLAY= cargo run -p straf3-game --bin straf3
+```
+
+Every windowed command below assumes you have done that if you hit the error.
+Nothing headless — replay, the offscreen renders, the test suite — needs it.
+
+---
 
 ## Run it
 
 ```
-cargo run -p straf3-game --bin straf3 -- --world arena
+cargo run -p straf3-game --bin straf3
 ```
 
-This opens a window on the hardcoded arena, under the `cpm` profile at
-125 Hz (8 ms commands). A real run on this machine prints, on start:
+That compiles `assets/maps/coil.map` and drops you at its `info_player_start`,
+under the `cpm` profile at 125 Hz (8 ms commands). A real start on this machine
+prints:
 
 ```
+[INFO  straf3_game::scene] map: 26 hulls, 4 triggers, 312 triangles, collision digest 0x47263b8845d8bb4b
 straf3-render: backend=Vulkan adapter="llvmpipe (LLVM 20.1.2, 256 bits)" type=Cpu
-straf3-render: arena is 5044 triangles
-[INFO  straf3_game::app] straf3 0.1.0 — world Arena, cpm profile, 125 Hz (8 ms commands). Click to capture the mouse, Esc to release, R to respawn.
+straf3-render: map is 312 triangles
+[INFO  straf3_game::app] straf3 0.1.0 — world Map, cpm profile, 125 Hz (8 ms commands). Click to capture the mouse, Esc to release, R to respawn.
 ```
 
-The first two lines come straight from `straf3-render`, unprefixed; the third
-is a `log::info!` line and carries the logger's `[INFO  straf3_game::app]`
-prefix.
+The first line is the compile: the same pass produces the 26 convex hulls you
+collide with and the 312 triangles you see, so there is no way to be shown a
+different world from the one you are hitting. The `collision digest` is over the
+hulls only — it is the number that must match on every target.
 
-If you also see a line like this, it is WSLg's desktop portal, not straf3 —
-harmless, and unrelated to whether the window works:
+The two `straf3-render:` lines come from the renderer unprefixed; the rest are
+`log::info!` and carry the logger's `[INFO ...]` prefix.
+
+If you also see this, it is WSLg's desktop portal, not straf3 — harmless:
 
 ```
 [ERROR sctk_adwaita::config] XDG Settings Portal did not return response in time: timeout: 100ms, key: color-scheme
 ```
 
-Once a second, a speed readout is logged to the terminal (`RUST_LOG=info` by
-default) — this wave has no on-screen HUD, so this line is how you judge a
-strafe-jump run while playing:
+### A map is data
 
-```
-speed  xxx.x ups   origin (...)   ground|slide |air      tick N   sim N ms   N fps
-```
+`--map <file.map>` plays any Valve 220 source. `coil.map` is the course this
+repository ships and is the default; it is authored here, so the repository
+carries no map of unresolved licence. The compiler is below the seam, so a map
+that compiles here compiles identically on every target.
+
+`--world flat` and `--world empty` need no map at all. They are the two worlds
+`straf3-headless` can also reproduce, which is why a recording made in them can
+be replayed by a program with no renderer in it.
+
+---
 
 ## Controls
 
@@ -56,13 +98,99 @@ speed  xxx.x ups   origin (...)   ground|slide |air      tick N   sim N ms   N f
 - **click** the window to capture the mouse; **Esc** releases it
 - **R** — respawn
 
+---
+
+## What the overlay shows
+
+Four readouts, which are what a movement run is judged by:
+
+```
+                        0:12.480        run time, m:ss.mmm
+                         -0.312         split against the ghost
+
+                          487 ups       horizontal speed
+                          AIR           ground / slide / air
+
+ 241 fps   vz -120   tick 1560   sim 12480 ms
+```
+
+- **Run time**, top centre. `--:--.---` before you cross the start line, white
+  while the clock runs, gold once it stops. It is `u32` milliseconds summed
+  from command durations, never read from a clock, so the same inputs give the
+  same time on a 60 fps laptop and a 240 fps desktop.
+- **Split**, under the clock. Signed like a motorsport split: **negative is
+  good**. Green when you are ahead of the ghost, red when you are behind.
+  Absent entirely when no ghost is loaded — it is never `+0.000`, because that
+  would claim you are level with a personal best that is not there.
+- **Speed**, centre. Horizontal only, whole units per second: vertical speed is
+  gravity's, and a total-speed readout swells on every fall. It is tinted green
+  while you are gaining speed and red while you are bleeding it, which is a
+  display heuristic and not something the simulation knows about.
+- **Ground / slide / air**, under the speed. Three states, not two: `SLIDE`
+  (amber) means you are touching a plane too steep to walk on — velocity is
+  clipped to it, but friction does not apply and you cannot jump. Collapsing
+  that into "on the ground" would hide the technique.
+- **Corner line**, bottom left, dim. Frame rate, vertical speed, tick count and
+  simulation time. `sim` is the sum of command durations, not wall time; the
+  two disagreeing is the interesting case. (The `fps` number is real as a
+  readout and meaningless as a claim — see the warning at the top.)
+
+### Where it draws today
+
+The overlay lives in `crates/straf3-devtools` and is complete: composition,
+colours, and the wgpu draw. Its layout is covered by unit tests that read the
+drawn strings back out of egui, and it has been rendered to a real texture on
+this machine through the software adapter.
+
+**It is not yet called from the windowed client.** `straf3-game` still has to
+hand it the frame; until that lands, the once-a-second console line below is
+what you read while playing, and the overlay is seen through the offscreen
+renderer:
+
+```
+cargo run -p straf3-devtools --example hud-offscreen
+# writes target/hud-offscreen/*.ppm — four states of a run, at 1280x720
+```
+
+```
+hud-offscreen: backend=Vulkan adapter="llvmpipe (LLVM 20.1.2, 256 bits)" type=Cpu
+hud-offscreen: before-the-line       3629 pixels painted over the background  ok
+hud-offscreen: mid-run-ahead         7146 pixels painted over the background  ok
+hud-offscreen: on-a-ramp-behind      7991 pixels painted over the background  ok
+hud-offscreen: finished              6877 pixels painted over the background  ok
+```
+
+PPM is what `ffmpeg -i` and most viewers read directly:
+
+```
+ffmpeg -i target/hud-offscreen/mid-run-ahead.ppm /tmp/hud.png
+```
+
+### The console readout
+
+Once a second (`RUST_LOG=info` is the default), the client logs where the
+simulation is:
+
+```
+[INFO  straf3_game::app] speed    0.0 ups   origin (  -320.0   -736.0     24.1)   ground   tick 125   sim 1000 ms   41 fps
+```
+
+The same four things, in a terminal. It stays useful after the overlay lands:
+it is the only readout that survives into a redirected log file.
+
+---
+
 ## Options
 
 ```
 usage: straf3 [options]                     open a window and play
        straf3 --replay <file> [options]     run a recorded file, no window
 
-  --world <arena|flat|empty>  geometry to play in (default arena)
+  --map <file.map>            Valve 220 map to compile and play (default
+                              assets/maps/coil.map)
+  --world <map|flat|empty>    geometry to play in (default map). `flat` and
+                              `empty` need no map and are the two worlds
+                              straf3-headless can reproduce.
   --profile <cpm|vq3>         movement constants (default cpm)
   --rate <hz>                 command rate, 1..=1000 (default 125)
   --record <file>             write every command produced to <file>, in
@@ -76,72 +204,98 @@ replay options (no window is opened and no GPU adapter is created):
   --trace                     print one line per tick, not just the final state
   --csv                       print in straf3-headless's CSV form
   --frame-ms <a,b,c,...>      drive the replay on this frame schedule, in whole
-                              wall milliseconds, cycled. The output must be
-                              identical to the regular schedule's — that
-                              equality is what criterion 5 means.
+                              wall milliseconds, cycled.
 ```
 
-`--world`, `--profile` and `--rate` only take effect when opening a window.
-A replay always runs under the world, profile and rate recorded in the file
-itself; passing `--profile`/`--rate`/`--world` alongside `--replay` is
-silently ignored, so don't expect them to change what a replay does.
+`--map`, `--world`, `--profile` and `--rate` only take effect when opening a
+window. A replay always runs under the world, profile and rate recorded in the
+file itself; passing them alongside `--replay` is silently ignored.
+
+A map that cannot be read or compiled is a warning, not a failure — the client
+drops to the flat world, so a missing file still gives you a window you can
+move in rather than a process that dies.
 
 An unattended run, for scripting:
 
 ```
-cargo run -p straf3-game --bin straf3 -- --world arena --exit-after 2000
+cargo run -p straf3-game --bin straf3 -- --exit-after 2000
 ```
 
-## Record and replay
+---
 
-Every recording names the world it was made in. `straf3 --replay` understands
-all three, so an arena session replays in the arena. `straf3-headless` (in
-`straf3-sim`, below the seam) only knows `empty` and `flat <z>` — it has no
-way to spell the arena, so it refuses an arena recording by name and exits
-non-zero rather than silently running it somewhere else:
+## Record a run and check it reproduces
 
-```
-$ cargo run -p straf3-game --bin straf3 -- --world arena --exit-after 2000 --record /tmp/arena.rec
-...
-straf3: recording written to /tmp/arena.rec
-$ cargo run -p straf3-game --bin straf3 -- --replay /tmp/arena.rec
-...
-  world         Arena
-...
-  checksum      0x...
-$ cargo run -p straf3-sim --bin straf3-headless -- /tmp/arena.rec
-straf3-headless: /tmp/arena.rec: line 12: unknown world `arena` (empty|flat <z>)
-```
-
-The checksum is elided above because `--exit-after` ends on a wall-clock
-boundary, not a fixed command count — the number of commands it happens to
-record, and so the checksum, varies run to run. That is expected, not a
-sign anything is broken. The round-trip below uses `--world flat` and a
-hand-played session instead, and compares the checksums the two readers
-produce against each other rather than against a number printed here.
-
-Play for a few seconds — strafe, jump — before closing the window; an
-unattended, input-free recording reproduces trivially and proves nothing
-about the record/replay path.
+Every recording names the world it was made in, and every reader prints the
+same 64-bit checksum of the final state. That equality is the point: a last-bit
+divergence is invisible to the eye and obvious to the number.
 
 ```
 cargo run -p straf3-game --bin straf3 -- --world flat --record /tmp/flat.rec
-# play, then close the window (or let --exit-after end it)
+# play — strafe, jump — then close the window
 cargo run -p straf3-game --bin straf3 -- --replay /tmp/flat.rec
 cargo run -p straf3-sim --bin straf3-headless -- /tmp/flat.rec
-```
-
-> **The recording is written only on a clean exit** — closing the window or
-> letting `--exit-after` end the run. The file is written after the event
-> loop returns, so killing the process (Ctrl-C, `kill`, a closed terminal)
-> skips that write entirely: you get no file, not a truncated one, however
-> long you played, and nothing is printed to say so.
-
-Both print the same checksum. Replay also accepts a different frame
-schedule; the resulting checksum is identical to the regular schedule's,
-which is criterion 5's proof that rendering is decoupled from simulation
-stepping:
-
-```
 cargo run -p straf3-game --bin straf3 -- --replay /tmp/flat.rec --frame-ms 1,97,3,250,8
 ```
+
+All four print one checksum. Verified here on a 180-command session:
+
+```
+  checksum      0xe08d7c7726883be5      # straf3 --replay
+  checksum      0xe08d7c7726883be5      # straf3-headless
+  checksum      0xe08d7c7726883be5      # straf3 --replay --frame-ms 1,97,3,250,8
+```
+
+The last one is the one that matters most: the same input on a deliberately
+hostile frame schedule reaches the identical state. Rendering is decoupled from
+simulation stepping, and this is what says so.
+
+Play for a few seconds before closing — an unattended, input-free recording
+reproduces trivially and proves nothing.
+
+> **The recording is written only on a clean exit** — closing the window, or
+> letting `--exit-after` end the run. The file is written after the event loop
+> returns, so killing the process (Ctrl-C, `kill`, a closed terminal) skips
+> that write entirely: you get no file rather than a truncated one, however
+> long you played, and nothing is printed to say so.
+
+`straf3-headless` lives below the seam and only knows `empty` and `flat <z>`.
+It has no way to spell a compiled map, so it refuses a map recording by name
+and exits non-zero rather than silently running it somewhere else:
+
+```
+$ cargo run -p straf3-sim --bin straf3-headless -- /tmp/coil.rec
+straf3-headless: /tmp/coil.rec: line 12: unknown world `map` (empty|flat <z>)
+```
+
+---
+
+## Checking the build
+
+```
+cargo test --workspace                 # everything
+cargo xtask check-seam                 # nothing below the line reaches above it
+cargo xtask determinism                # one command stream, four targets, one digest
+cargo run -p straf3-render --example offscreen        # the world, to PPM
+cargo run -p straf3-devtools --example hud-offscreen  # the overlay, to PPM
+```
+
+The two offscreen examples need a GPU adapter — including a software one — and
+are examples rather than tests for exactly that reason: a test that fails on a
+machine with no adapter punishes the correct environment.
+
+---
+
+## Not in this build
+
+Stated plainly so nothing above is read as a promise:
+
+- **The overlay is not yet drawn by the windowed client** (see above).
+- **No personal best is saved and no ghost is raced.** The run clock's
+  start/finish volumes, the `.s3d` recording format and the ghost are landing
+  in this wave; the overlay already draws the time and the split it will be
+  given.
+- **No browser client.** The wasm build is proven bit-identical to native by
+  `cargo xtask determinism`; a playable URL is deferred (spec rev 2,
+  criterion 9).
+- **No sound, weapons, menus, multiplayer or leaderboards.** None of these are
+  in scope for this wave.

@@ -302,9 +302,19 @@ layer, and we are not shipping it (rev 6 §Q2; C9).
   selection is a decision the *host page* makes in JavaScript before entering wasm. A "just compile
   both and let it sort itself out" bundle does not work and would cost 595 KiB per visitor if it did.
 - **`egui-winit` 0.36.1 cannot compile for `wasm32`** — its `arboard` dependency has no wasm
-  backend — so `crates/straf3-devtools` has no web build today. Dropping `egui` from the web build
-  is both the largest available saving (−1.83 MiB) and the right call on its own terms: the devtools
-  overlay is speedometer, graphs and trace telemetry, which is cheaper as DOM over the canvas.
+  backend. Dropping `egui` from the web build is the largest available saving (−1.83 MiB) and is
+  the right call on its own terms: the overlay is cheaper as DOM over the canvas.
+
+  > **Correction, wave 4.** The measurement above stands; the consequence drawn from it no longer
+  > does. `crates/straf3-devtools` *does* build for `wasm32-unknown-unknown` as of wave 4, because
+  > it no longer depends on `egui-winit`. The overlay is a readout — nothing on it is clickable,
+  > focusable or typeable — so the only thing that integration layer supplied was the screen size
+  > and the DPI scale, two numbers the caller already has. Removing it took `arboard`,
+  > `smithay-clipboard`, `webbrowser`, `url`, the `icu_*` family and about forty other transitive
+  > crates out of `Cargo.lock` with it. Verified by `cargo clippy -p straf3-devtools --all-targets
+  > --target wasm32-unknown-unknown -- -D warnings`, which is a compile check and not a bundle
+  > measurement: the −1.83 MiB figure has not been re-measured, and the size argument for keeping
+  > `egui` out of the web bundle is untouched by this.
 
 **Stage D is no longer open.** It was the last number missing on the render side — the game crates
 plus `gltf`, with `parry3d` expected to arrive transitively through `straf3-map`/`straf3-collision` —
@@ -844,12 +854,18 @@ of gzipped wasm for a working WebGPU skeleton in Chrome 146 (§1.5) — and rev 
   not a fallback baked into the primary artifact. The backend is already a runtime parameter to
   `wgpu`, so this is a build-matrix change, not an architecture change, and it stays cheap to decide
   later (§11 decision E).
-- **No `egui` in the web build.** `egui-winit` 0.36.1 cannot compile for `wasm32` (`arboard` has no
-  wasm backend), so `crates/straf3-devtools` has no web target today. Rather than work around it,
-  the web build drops `egui` entirely: it is the largest single saving available (−1.83 MiB) and the
-  overlay it provides — speedometer, graphs, trace telemetry — is cheaper and more legible as DOM
+- **No `egui` in the web build.** The web build drops `egui` entirely: it is the largest single
+  saving available (−1.83 MiB) and the overlay it provides is cheaper and more legible as DOM
   elements positioned over the canvas. `straf3-render` must therefore not depend on `egui`, and any
   telemetry it exposes must be readable as plain values a host page can render.
+
+  > **Correction, wave 4.** This item used to rest on a second argument — that
+  > `crates/straf3-devtools` *could not* have a web target, because `egui-winit` 0.36.1 does not
+  > compile for `wasm32`. That is still true of `egui-winit`, but `straf3-devtools` no longer
+  > depends on it (the overlay takes no input, so it needs no windowing integration) and does now
+  > build for `wasm32-unknown-unknown`. The decision above is unchanged and now rests on the size
+  > argument alone, which is where it always had its weight. See the correction in §"Two
+  > consequences the probe measured".
 
 **Stage D — once the one number still missing** — is measured: the game crates plus `gltf` are
 131 369 B of gzipped wasm, marginally *under* stage A's skeleton
