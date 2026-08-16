@@ -15,12 +15,11 @@ publish.workspace = true
 # nothing else, deliberately (see its manifest), and both crates are below the
 # line.
 #
-# parry3d is provisional: spec section 4 makes it conditional on a determinism
-# audit. It is confined to this crate so that audit has one place to look, and
-# so replacing it would not touch the simulation. Nothing here uses it — the
-# tracer is hand-written, for the reasons in src/lib.rs — and ARCHITECTURE C8
-# makes putting it on the trace path an architectural decision, not a detail.
+# The dependency list is two entries long and stays that way. A geometry library
+# — parry3d was the candidate — would be an architectural change, not a detail:
+# ARCHITECTURE C8 requires the trace to be bit-identical across targets, so
+# anything on the trace path has to be audited for that first. The tracer is
+# hand-written precisely so that audit stays unnecessary; src/lib.rs says why.
 [dependencies]
 straf3-sim.workspace = true
 glam.workspace = true
-parry3d.workspace = true

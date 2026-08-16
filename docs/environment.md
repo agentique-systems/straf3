@@ -161,8 +161,8 @@ the workspace should pin; they are what actually resolves today, not what any do
 | `wgpu` | **30.0.0** | default features `vulkan, dx12, metal, gles, webgpu, wgsl, std, parking_lot` |
 | `winit` | **0.30.13** | `ApplicationHandler` API |
 | `egui` | **0.36.1** | pairs with `epaint`/`ecolor` 0.36.1 |
-| `parry3d` | **0.30.2** | f32 build |
-| `rapier3d` | **0.35.1** | f32 build |
+| `parry3d` | **0.30.2** | f32 build. **No longer a workspace dependency** — `straf3-collision` traces by hand; see below |
+| `rapier3d` | **0.35.1** | f32 build. Declared in `[workspace.dependencies]`, not yet used by any crate |
 | `glam` | **0.33.3** | see the `fast-math` prohibition below |
 | `egui-wgpu` | **0.36.1** | must stay in lockstep with `egui` |
 | `egui-winit` | **0.36.1** | must stay in lockstep with `egui` |
@@ -207,7 +207,14 @@ Two things worth knowing before the workspace pins these:
   build graph; they are inert entries from optional conversion features.
 - **`parry3d`/`rapier3d` are nalgebra-based internally.** Spec §4 already restricts rapier to
   non-movement rigid bodies. The nalgebra↔glam conversion at the parry boundary is a real cost and a
-  real determinism surface — it belongs in the parry determinism audit the spec calls for.
+  real determinism surface — it belonged in the parry determinism audit the spec called for.
+
+  **That audit was never run, and no longer needs to be.** `straf3-collision` answers the `World`
+  seam with a hand-written Q3 `CM_TraceThroughBrush` rather than a library, so `parry3d` was declared
+  and called by nothing; it has been removed from the workspace. ARCHITECTURE C8 has since raised the
+  bar from "deterministic" to "deterministic *across targets*", so re-adding any nalgebra-based
+  geometry library means auditing that harder question first. `rapier3d` remains declared but unused,
+  and the same applies to it the day something above the line reaches for it.
 
 ### wgpu 30 API notes (found by compiling, not by reading docs)
 
@@ -311,6 +318,7 @@ Not verified, and honestly flagged:
 - `cargo build --release` was not exercised for either target, only `dev`.
 - No swapchain was created and no frame was presented on either target; the proof is adapter
   enumeration plus a successful link, which is what was asked for.
-- Parry/rapier determinism was not audited — that is a separate task the spec calls for.
+- Parry/rapier determinism was not audited — that is a separate task the spec calls for. (It never
+  was: `parry3d` has since left the workspace unused, and `rapier3d` is still only declared. §4.)
 - Windows-side native MSVC steps in §3 are written from the standard rustup/VS Build Tools procedure and
   were **not** executed, since cross-compilation made them unnecessary.

@@ -99,7 +99,8 @@ const FORBIDDEN_THIRD_PARTY: &[(&str, &str)] = &[
     ("mio", "async I/O"),
     // Not an I/O concern — a determinism one. Work-stealing changes the order
     // float reductions happen in, so the same inputs stop producing the same
-    // run. parry3d can enable rayon via its `parallel` feature; don't.
+    // run. Geometry and math crates like to offer this behind a `parallel`
+    // feature; below the line, don't take it.
     ("rayon", "nondeterministic parallelism"),
 ];
 
@@ -336,15 +337,18 @@ const FORBIDDEN_FEATURES: &[(&str, &str)] = &[
 ///
 /// `libm` and `nostd-libm` both resolve to `dep:libm`, but glam only *uses*
 /// libm when its `std` feature is off — with `std` on, std's math wins and the
-/// libm dependency is inert. Right now `nostd-libm` **is** enabled in this
-/// workspace, pulled in transitively via
-/// `straf3-collision → parry3d → glamx → glam` feature unification, and it is
-/// harmless purely because `glam/std` is also on.
+/// libm dependency is inert. No libm-family feature is enabled on glam in
+/// today's tree: the one that was came in through feature unification along
+/// `straf3-collision → parry3d → glamx → glam`, and that whole chain left with
+/// parry3d. It was never a violation while it lasted, only because `glam/std`
+/// was also on.
 ///
-/// So flagging it unconditionally would fail a clean tree. Instead this fires
-/// exactly when the hazard is real: libm-family enabled *and* `glam/std` gone.
-/// If someone makes the workspace `no_std`, this becomes a violation the same
-/// day, which is the point.
+/// The check stays conditional anyway, and not because of today's tree — a
+/// dependency can re-enable the feature at any time without anyone noticing,
+/// and it is inert until `glam/std` goes. So this fires exactly when the
+/// hazard is real: libm-family enabled *and* `glam/std` gone. If someone makes
+/// the workspace `no_std`, this becomes a violation the same day, which is the
+/// point.
 const GLAM_LIBM_FEATURES: &[&str] = &["libm", "nostd-libm"];
 
 /// What glam's libm-family features mean for a given resolved tree.
@@ -1331,7 +1335,8 @@ straf3-collision v0.1.0
     /// tree, or a guard that never fires at all.
     #[test]
     fn libm_is_a_violation_only_when_glam_std_is_absent() {
-        // Today's tree: nostd-libm on, std on -> inert, must not fail.
+        // Enabled but neutralised by std — the shape the tree had while
+        // parry3d pulled nostd-libm in. Must not fail.
         assert_eq!(
             libm_verdict(&edges(&[("glam", "nostd-libm"), ("glam", "std")])),
             LibmVerdict::Inert(vec!["nostd-libm".into()])
@@ -1361,7 +1366,8 @@ straf3-collision v0.1.0
             );
         }
         // libm is deliberately NOT unconditional: it is inert while glam/std
-        // is on, and it IS on today via parry3d → glamx → glam.
+        // is on, and a dependency can switch it on at any time — parry3d
+        // silently did, for as long as it was in the tree.
         for f in GLAM_LIBM_FEATURES {
             assert!(
                 !FORBIDDEN_FEATURES.iter().any(|(n, _)| n == f),

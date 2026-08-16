@@ -28,7 +28,7 @@
 //! | Seam | Where | Keeps changeable |
 //! |---|---|---|
 //! | Time | [`UserCmd::duration_ms`], [`TickRate`] | the command rate, per spec D2 |
-//! | Collision | [`World`] | whether parry is used at all (spec section 4) |
+//! | Collision | [`World`] | what answers the trace — it was parry, now a hand-written tracer (spec section 4) |
 //! | Constants | [`PhysicsProfile`] | VQ3 vs CPM, and tuning (spec D1) |
 //! | Arithmetic | [`num`] | `f32` vs fixed-point later |
 //!
