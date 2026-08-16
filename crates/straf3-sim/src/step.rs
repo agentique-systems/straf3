@@ -271,7 +271,17 @@ impl<'a, W: World + ?Sized> Pmove<'a, W> {
             cmd.up_move
         };
 
-        let (forward, right) = angle_vectors(cmd.view.pitch, cmd.view.yaw, cmd.view.roll);
+        // View angles arrive quantised to 16 bits (C3), so this is where the
+        // physics gets its degrees back. Dequantising here rather than storing
+        // degrees keeps the command stream — the thing recordings and digests
+        // are taken over — the single source of truth for where the player was
+        // looking: every target reads the same integer and computes the same
+        // basis from it.
+        let (forward, right) = angle_vectors(
+            cmd.view.pitch_degrees(),
+            cmd.view.yaw_degrees(),
+            cmd.view.roll_degrees(),
+        );
 
         Self {
             world,
