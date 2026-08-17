@@ -152,9 +152,9 @@ impl ApplicationHandler for Demo {
                 // that is the quantity a display refresh actually bounds, and
                 // the one an uncapped/vsynced comparison is about.
                 if let Some(log) = &mut self.pacing {
-                    if !self.present_recorded
-                        && let Some(selection) = renderer.present_mode()
-                    {
+                    if self.present_recorded {
+                        log.frame();
+                    } else if let Some(selection) = renderer.present_mode() {
                         self.present_recorded = true;
                         log.set_present_mode(straf3_render::present::name(selection.actual));
                         log.note("source", "straf3-render example window");
@@ -162,12 +162,16 @@ impl ApplicationHandler for Demo {
                         if selection.fell_back {
                             log.note("fell_back", "true");
                         }
-                        // The first interval contains device acquisition and
-                        // the first present; start timing here instead, so the
-                        // log is of steady-state frames.
+                        // Open the first interval here and record nothing for
+                        // this frame. Calling `start` and `frame` in the same
+                        // pass would log a zero-nanosecond interval — an
+                        // artefact of the instrumentation rather than a frame
+                        // that happened, and one that drags the minimum and
+                        // the mean down. Timing therefore begins at the first
+                        // present after the device exists, which is also where
+                        // steady state begins.
                         log.start();
                     }
-                    log.frame();
                 }
 
                 self.frames += 1;

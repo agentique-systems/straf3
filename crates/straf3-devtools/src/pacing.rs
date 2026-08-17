@@ -25,11 +25,12 @@
 //! # The format
 //!
 //! ```text
-//! # straf3 pacing log v1
+//! # straf3 pacing log v2
 //! # present_mode=fifo  build=release
+//! # warmup_ns=50225900  frames=1164
 //! frame,delta_ns
-//! 0,6060606
-//! 1,6048112
+//! 1,6060606
+//! 2,6048112
 //! ```
 //!
 //! Every line before `frame,delta_ns` starts with `#` and carries
@@ -50,19 +51,44 @@
 //! as "measured under Immediate" for a run that vsynced. The two names make
 //! that misreading impossible rather than merely discouraged.
 //!
-//! Frame 0's delta is the interval from [`PacingLog::start`] to the first
-//! [`PacingLog::frame`]. It is normally an outlier — it contains window
-//! creation and device acquisition — and analysis is expected to drop it, but
-//! it is recorded rather than hidden, because a tool that silently discards
-//! its own worst sample is not measuring.
+//! ## Why the warm-up is a header and not a row (this is what v2 changed)
+//!
+//! The first interval a session records spans swapchain warm-up, not a frame
+//! anyone drew at a steady rate. Measured on this hardware it has come back at
+//! 49 ms, 421 ms and 50 ms against a steady ~6 ms. Left in the data, a reader
+//! that took every row at face value would publish a 421 ms worst-case frame
+//! time on a 165 Hz display — which reads as a finding rather than as a
+//! swapchain waking up.
+//!
+//! Putting it in `warmup_ns=` makes the wrong answer unreachable instead of
+//! warned against: **every data row is a measurement**, and statistics can be
+//! taken over all of them with no special case to forget. The number is not
+//! hidden — it is still there, named for what it is.
+//!
+//! Data rows are numbered from 1, the true frame index, so they line up with
+//! the session's own logs rather than with a renumbering.
+//!
+//! A session that draws fewer than three frames has no steady-state interval
+//! at all — one interval, and that one is the warm-up — so it writes no file
+//! and says why. An absent log means "nothing measurable happened", which is a
+//! better answer than a file whose p99 is taken over an empty set.
+//!
+//! The tag went v1 → v2 rather than staying put with a note, because a v1
+//! reader handed a v2 file would silently get one fewer sample than it
+//! expected and never find out. Bumping makes it refuse.
 
 use std::io::Write as _;
 use std::path::Path;
 use std::time::Instant;
 
 /// The first line of every pacing log. A reader should refuse a file that does
-/// not start with this rather than guess at the columns.
-pub const MAGIC: &str = "# straf3 pacing log v1";
+/// not start with this rather than guess at the columns — including a v1 file,
+/// whose first data row is a warm-up interval that v2 readers do not expect.
+pub const MAGIC: &str = "# straf3 pacing log v2";
+
+/// Fewer rendered frames than this and there is no steady-state interval to
+/// report: the only interval recorded would be the warm-up.
+pub const MIN_FRAMES: usize = 3;
 
 /// Per-frame wall-clock deltas, collected in memory and written once.
 #[derive(Debug)]
@@ -70,6 +96,9 @@ pub struct PacingLog {
     deltas_ns: Vec<u64>,
     previous: Option<Instant>,
     present_mode: String,
+    /// The first interval recorded, which is swapchain warm-up rather than a
+    /// frame time. Held out of `deltas_ns` and written as a header.
+    warmup_ns: Option<u64>,
     /// The header key the mode is written under. `present_mode` means the
     /// surface was asked what it was configured with; `present_mode_requested`
     /// means the caller only knows what it wanted. The distinction lives in
@@ -91,6 +120,7 @@ impl PacingLog {
             deltas_ns: Vec::with_capacity(frames),
             previous: None,
             present_mode: "unknown".to_owned(),
+            warmup_ns: None,
             mode_key: "present_mode_requested",
             notes: Vec::new(),
         }
@@ -99,7 +129,9 @@ impl PacingLog {
     /// A log sized for `seconds` at `fps`, with headroom.
     #[must_use]
     pub fn for_session(seconds: u64, fps: u64) -> Self {
-        Self::with_capacity(usize::try_from(seconds.saturating_mul(fps).saturating_add(1024)).unwrap_or(1 << 20))
+        Self::with_capacity(
+            usize::try_from(seconds.saturating_mul(fps).saturating_add(1024)).unwrap_or(1 << 20),
+        )
     }
 
     /// Record the present mode the surface was **actually** configured with,
@@ -142,13 +174,37 @@ impl PacingLog {
 
     /// Record one frame boundary. Call at exactly one point in the frame loop,
     /// the same point every frame.
+    ///
+    /// The first interval is captured as the warm-up and does not become a
+    /// data row. See the module docs: it spans swapchain warm-up and is not a
+    /// frame time, and leaving it in the rows is how a 421 ms sample gets
+    /// published as a worst-case frame.
     pub fn frame(&mut self) {
         let now = Instant::now();
         if let Some(previous) = self.previous {
-            self.deltas_ns
-                .push(u64::try_from(now.duration_since(previous).as_nanos()).unwrap_or(u64::MAX));
+            let ns = u64::try_from(now.duration_since(previous).as_nanos()).unwrap_or(u64::MAX);
+            match self.warmup_ns {
+                None => self.warmup_ns = Some(ns),
+                Some(_) => self.deltas_ns.push(ns),
+            }
         }
         self.previous = Some(now);
+    }
+
+    /// The warm-up interval, once one has been recorded.
+    #[must_use]
+    pub fn warmup_ns(&self) -> Option<u64> {
+        self.warmup_ns
+    }
+
+    /// Whether there is enough here to be worth writing.
+    ///
+    /// False when the session drew too few frames to have a steady-state
+    /// interval. A caller should log that rather than write a file whose
+    /// statistics would be taken over nothing.
+    #[must_use]
+    pub fn is_measurable(&self) -> bool {
+        !self.deltas_ns.is_empty()
     }
 
     /// How many intervals have been recorded.
@@ -185,12 +241,25 @@ impl PacingLog {
             "# {}={}  build={build}\n",
             self.mode_key, self.present_mode
         ));
+        // `frames` is the writer's own row count, so a truncated file is
+        // detectable by a reader rather than merely shorter than it should be.
+        out.push_str(&format!(
+            "# warmup_ns={}  frames={}\n",
+            self.warmup_ns.unwrap_or(0),
+            self.deltas_ns.len()
+        ));
+        out.push_str(
+            "# warmup_ns is the first rendered interval: swapchain warm-up, not a frame \
+             time, and NOT a data row below\n",
+        );
         for (key, value) in &self.notes {
             out.push_str(&format!("# {key}={value}\n"));
         }
         out.push_str("frame,delta_ns\n");
+        // Numbered from 1: the true frame index, so rows line up with the
+        // session's own logs instead of with a renumbering.
         for (i, ns) in self.deltas_ns.iter().enumerate() {
-            out.push_str(&format!("{i},{ns}\n"));
+            out.push_str(&format!("{},{ns}\n", i + 1));
         }
         out
     }
@@ -223,19 +292,49 @@ mod tests {
         // The first `frame` after `start` opens the first interval; a `frame`
         // with no `start` has nothing to measure from and must not invent one.
         assert_eq!(log.len(), 0);
-        log.frame();
-        assert_eq!(log.len(), 1);
+        assert_eq!(log.warmup_ns(), None);
     }
 
     #[test]
-    fn n_frames_after_start_give_n_intervals() {
+    fn the_first_interval_becomes_the_warm_up_and_not_a_data_row() {
+        // v2's whole point. Five frames after `start` give one warm-up
+        // interval and four data rows, not five rows one of which is a lie.
         let mut log = PacingLog::with_capacity(8);
         log.start();
         for _ in 0..5 {
             log.frame();
         }
-        assert_eq!(log.len(), 5);
-        assert!(!log.is_empty());
+        assert!(log.warmup_ns().is_some());
+        assert_eq!(log.len(), 4);
+        assert!(log.is_measurable());
+
+        let csv = log.to_csv();
+        assert!(csv.contains("frames=4"), "{csv}");
+        assert!(csv.contains("warmup_ns="), "{csv}");
+        // Rows are the true frame index, starting at 1.
+        let rows: Vec<&str> = csv
+            .lines()
+            .skip_while(|l| *l != "frame,delta_ns")
+            .skip(1)
+            .collect();
+        assert_eq!(rows.len(), 4);
+        assert!(rows[0].starts_with("1,"), "{:?}", rows[0]);
+        assert!(rows[3].starts_with("4,"), "{:?}", rows[3]);
+    }
+
+    #[test]
+    fn a_session_too_short_to_measure_says_so() {
+        // One interval is the warm-up, so there is nothing left. A caller must
+        // be able to tell that apart from "the measurement was zero".
+        let mut log = PacingLog::with_capacity(4);
+        log.start();
+        log.frame();
+        assert!(log.warmup_ns().is_some());
+        assert!(!log.is_measurable());
+        assert_eq!(log.len(), 0);
+
+        log.frame();
+        assert!(log.is_measurable());
     }
 
     #[test]
@@ -244,6 +343,7 @@ mod tests {
         log.set_present_mode("immediate");
         log.note("map", "coil");
         log.start();
+        log.frame();
         log.frame();
         log.frame();
 
@@ -262,13 +362,20 @@ mod tests {
             }),
             "{header}"
         );
+        assert!(lines.next().unwrap().starts_with("# warmup_ns="));
+        assert!(
+            lines
+                .next()
+                .unwrap()
+                .starts_with("# warmup_ns is the first")
+        );
         assert_eq!(lines.next(), Some("# map=coil"));
         assert_eq!(lines.next(), Some("frame,delta_ns"));
 
         let rows: Vec<&str> = lines.collect();
         assert_eq!(rows.len(), 2);
-        assert!(rows[0].starts_with("0,"));
-        assert!(rows[1].starts_with("1,"));
+        assert!(rows[0].starts_with("1,"));
+        assert!(rows[1].starts_with("2,"));
     }
 
     #[test]
@@ -297,6 +404,7 @@ mod tests {
     fn the_deltas_are_real_elapsed_nanoseconds() {
         let mut log = PacingLog::with_capacity(4);
         log.start();
+        log.frame(); // consumed as the warm-up
         std::thread::sleep(std::time::Duration::from_millis(2));
         log.frame();
         // Two milliseconds is 2 000 000 ns; a millisecond-truncating recorder

@@ -117,10 +117,7 @@ pub fn parse<I: IntoIterator<Item = String>>(argv: I) -> Result<Request, String>
 
     let mut args = argv.into_iter();
     while let Some(arg) = args.next() {
-        let mut value = || {
-            args.next()
-                .ok_or_else(|| format!("`{arg}` needs a value"))
-        };
+        let mut value = || args.next().ok_or_else(|| format!("`{arg}` needs a value"));
         match arg.as_str() {
             "-h" | "--help" => return Ok(Request::Help),
             "--list" => list = true,
@@ -146,11 +143,11 @@ pub fn parse<I: IntoIterator<Item = String>>(argv: I) -> Result<Request, String>
                 let n = number(&value()?, "--max-dominant")?;
                 if n > 1000 {
                     return Err(
-                        "`--max-dominant` is in tenths of a percent, so at most 1000".into()
+                        "`--max-dominant` is in tenths of a percent, so at most 1000".into(),
                     );
                 }
-                policy.max_dominant_permille = u32::try_from(n)
-                    .map_err(|_| "`--max-dominant` is out of range".to_owned())?;
+                policy.max_dominant_permille =
+                    u32::try_from(n).map_err(|_| "`--max-dominant` is out of range".to_owned())?;
             }
             other => return Err(format!("unknown argument: {other}")),
         }
@@ -162,7 +159,10 @@ pub fn parse<I: IntoIterator<Item = String>>(argv: I) -> Result<Request, String>
     let Some(out) = out else {
         return Err("`--out <file.png>` is required".into());
     };
-    if out.extension().is_none_or(|e| !e.eq_ignore_ascii_case("png")) {
+    if out
+        .extension()
+        .is_none_or(|e| !e.eq_ignore_ascii_case("png"))
+    {
         // Not fatal in principle, but a .jpg that is secretly a PNG is the
         // kind of small lie that costs someone an afternoon.
         return Err(format!(

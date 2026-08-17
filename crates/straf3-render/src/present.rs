@@ -141,8 +141,15 @@ impl Selection {
 /// resolves to FIFO rather than panicking, because a renderer that aborts on
 /// a surprising capability list is worse than one that vsyncs.
 #[must_use]
-pub fn choose(available: &[wgpu::PresentMode], requested: Request, frame_latency: u32) -> Selection {
-    let first = available.first().copied().unwrap_or(wgpu::PresentMode::Fifo);
+pub fn choose(
+    available: &[wgpu::PresentMode],
+    requested: Request,
+    frame_latency: u32,
+) -> Selection {
+    let first = available
+        .first()
+        .copied()
+        .unwrap_or(wgpu::PresentMode::Fifo);
     let (actual, fell_back) = match requested {
         Request::Adapter => (first, false),
         Request::Exact(want) if available.contains(&want) => (want, false),

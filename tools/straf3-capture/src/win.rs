@@ -11,13 +11,15 @@ use windows_sys::Win32::Foundation::{HWND, LPARAM, POINT, RECT};
 use windows_sys::Win32::Graphics::Dwm::{DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute};
 use windows_sys::Win32::Graphics::Gdi::{
     BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BitBlt, CreateCompatibleBitmap, CreateCompatibleDC,
-    DIB_RGB_COLORS, DeleteDC, DeleteObject, GetDC, GetDIBits, HDC, ReleaseDC, SRCCOPY, SelectObject,
+    DIB_RGB_COLORS, DeleteDC, DeleteObject, GetDC, GetDIBits, HDC, ReleaseDC, SRCCOPY,
+    SelectObject,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     BringWindowToTop, EnumWindows, GA_ROOT, GetAncestor, GetSystemMetrics, GetWindowRect,
-    GetWindowTextW, IsIconic, IsWindowVisible, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN,
-    SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SW_RESTORE, SetForegroundWindow, SetProcessDPIAware,
-    ShowWindow, WindowFromPoint,
+    GetWindowTextW, HWND_NOTOPMOST, HWND_TOPMOST, IsIconic, IsWindowVisible, SM_CXVIRTUALSCREEN,
+    SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SW_RESTORE, SWP_NOACTIVATE,
+    SWP_NOMOVE, SWP_NOSIZE, SetForegroundWindow, SetProcessDPIAware, SetWindowPos, ShowWindow,
+    WindowFromPoint,
 };
 
 /// A rectangle in virtual-screen coordinates.
@@ -231,24 +233,72 @@ pub fn find_windows(needle: &str) -> Vec<Found> {
     hits
 }
 
-/// Try to put a window in front, so the desktop read sees it rather than
-/// whatever is on top of it.
+/// Put a window in front, so the desktop read sees it rather than whatever is
+/// on top of it.
 ///
-/// Best-effort by design. Windows refuses focus changes from a process that
-/// does not own the foreground, and this tool is launched from a shell, so
-/// `SetForegroundWindow` frequently fails. That is why it is paired with
-/// [`occlusion`] rather than trusted: raising is the attempt, the hit test is
-/// the check.
-pub fn raise(hwnd_bits: isize) {
+/// # Why this is not just `SetForegroundWindow`
+///
+/// Windows refuses focus changes from a process that does not own the
+/// foreground, and this tool is launched from a shell. Measured on this host:
+/// with the operator actively using a browser, `SetForegroundWindow` and
+/// `BringWindowToTop` were both refused and the capture failed twice in a row
+/// against a game window that was running perfectly well behind Chrome.
+///
+/// The topmost toggle is not refused. `SetWindowPos(HWND_TOPMOST, …,
+/// SWP_NOACTIVATE)` changes z-order without asking for activation, which is
+/// exactly the distinction the focus-stealing rules care about — and it is
+/// also the politer thing to do to somebody who is typing, since it raises the
+/// window without taking their keyboard.
+///
+/// It must be undone. Leaving the game pinned above everything else on the
+/// operator's desktop, after a tool they ran for one screenshot, would be a
+/// worse bug than the one this fixes — so [`Raised::drop`] restores the
+/// previous z-order on every exit path, including the error ones.
+#[must_use]
+pub fn raise(hwnd_bits: isize) -> Raised {
     let hwnd = hwnd_bits as HWND;
-    // Safety: `hwnd` came from EnumWindows in this process and each call is a
+    // Safety: `hwnd` came from EnumWindows in this process, and each call is a
     // plain user32 call that tolerates a stale handle by returning false.
     unsafe {
         if IsIconic(hwnd) != 0 {
             ShowWindow(hwnd, SW_RESTORE);
         }
+        SetWindowPos(
+            hwnd,
+            HWND_TOPMOST,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+        );
         BringWindowToTop(hwnd);
+        // Still attempted, because a window that also has focus is what a
+        // person would have produced by clicking on it. Refusal is fine.
         SetForegroundWindow(hwnd);
+    }
+    Raised { hwnd }
+}
+
+/// A window this tool pushed to the top, which it will put back.
+pub struct Raised {
+    hwnd: HWND,
+}
+
+impl Drop for Raised {
+    fn drop(&mut self) {
+        // Safety: the same handle raise() was given; a stale one returns false.
+        unsafe {
+            SetWindowPos(
+                self.hwnd,
+                HWND_NOTOPMOST,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            );
+        }
     }
 }
 
@@ -386,7 +436,15 @@ pub fn capture_rect(rect: Rect) -> Result<(Image, Rect), String> {
         let previous = SelectObject(mem, bitmap);
 
         let blitted = BitBlt(
-            mem, 0, 0, width, height, screen, clipped.left, clipped.top, SRCCOPY,
+            mem,
+            0,
+            0,
+            width,
+            height,
+            screen,
+            clipped.left,
+            clipped.top,
+            SRCCOPY,
         );
 
         // GetDIBits requires the bitmap NOT to be selected into the DC it is

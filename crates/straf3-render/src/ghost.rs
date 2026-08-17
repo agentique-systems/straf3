@@ -393,7 +393,11 @@ mod tests {
     #[test]
     fn the_hull_is_six_flat_faces_and_nothing_is_shared_between_them() {
         let (vertices, indices) = cube();
-        assert_eq!(vertices.len(), 24, "shared corners would smooth the normals");
+        assert_eq!(
+            vertices.len(),
+            24,
+            "shared corners would smooth the normals"
+        );
         assert_eq!(indices.len(), 36);
         for &i in &indices {
             assert!((i as usize) < vertices.len());

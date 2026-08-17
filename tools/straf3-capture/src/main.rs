@@ -113,9 +113,10 @@ fn run(request: Request) -> ExitCode {
                         );
                     }
 
-                    if *raise {
-                        win::raise(best.hwnd);
-                    }
+                    // Held for the rest of the capture; dropping it restores
+                    // the window's z-order so the operator is not left with
+                    // straf3 pinned over everything they were doing.
+                    let _raised = raise.then(|| win::raise(best.hwnd));
                     // Settle before the hit test, not after: raising the
                     // window and testing in the same instant tests the old
                     // z-order, and the answer would be wrong in the direction
@@ -212,7 +213,10 @@ fn run(request: Request) -> ExitCode {
     }
 
     println!("capture: source is {description}");
-    println!("capture: rect {rect} on virtual screen {}", win::virtual_screen());
+    println!(
+        "capture: rect {rect} on virtual screen {}",
+        win::virtual_screen()
+    );
 
     let (image, actual) = match win::capture_rect(rect) {
         Ok(pair) => pair,

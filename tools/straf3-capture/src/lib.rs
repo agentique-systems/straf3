@@ -453,9 +453,8 @@ mod tests {
         let bytes = source.write_png(&path).unwrap();
         assert!(bytes > 0);
 
-        let decoder = png::Decoder::new(std::io::BufReader::new(
-            std::fs::File::open(&path).unwrap(),
-        ));
+        let decoder =
+            png::Decoder::new(std::io::BufReader::new(std::fs::File::open(&path).unwrap()));
         let mut reader = decoder.read_info().unwrap();
         let mut buf = vec![0; reader.output_buffer_size().unwrap()];
         let info = reader.next_frame(&mut buf).unwrap();

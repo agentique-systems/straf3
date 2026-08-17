@@ -50,8 +50,8 @@
 #![warn(clippy::all)]
 
 pub mod camera;
-pub mod ghost;
 mod gfx;
+pub mod ghost;
 pub mod mesh;
 pub mod present;
 
