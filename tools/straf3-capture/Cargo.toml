@@ -1,0 +1,38 @@
+# A repeatable screenshot of the running straf3 client (acceptance criterion 8).
+#
+# A workspace member rather than a standalone crate like probes/, so that
+# `cargo build --target x86_64-pc-windows-gnu` builds it alongside the game and
+# `cargo test --workspace` covers its verification logic on Linux. It lives
+# under tools/ rather than crates/ because it is an instrument, not a shipped
+# subsystem, and because it is not part of the seam at all.
+[package]
+name = "straf3-capture"
+description = "Screenshot the running straf3 window on Windows, and refuse to hand back a blank frame."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "straf3-capture"
+path = "src/main.rs"
+
+[lib]
+name = "straf3_capture"
+path = "src/lib.rs"
+
+# `png` and `windows-sys` are both already resolved in this workspace's
+# Cargo.lock as transitive dependencies, at exactly these versions. Depending
+# on them directly adds no crate to the build graph and needs no registry
+# fetch — checked in Cargo.lock, not assumed.
+[dependencies]
+png = "0.18.1"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_Graphics_Dwm",
+    "Win32_UI_WindowsAndMessaging",
+] }

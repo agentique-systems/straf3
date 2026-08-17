@@ -40,6 +40,13 @@ wasm-bindgen-futures = "0.4.77"
 # demonstrable and measurable on its own.
 [dev-dependencies]
 
+# The `window` example can record a frame-time log (`--pacing-log`), which is
+# how the renderer's own pacing is measured on the real GPU. A dev-dependency,
+# not a dependency: nothing in `straf3-render` proper knows this crate exists,
+# so the renderer does not gain a path to a clock or a file.
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+straf3-devtools.workspace = true
+
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 console_error_panic_hook = "0.1"
 web-sys = { version = "0.3.104", features = [
