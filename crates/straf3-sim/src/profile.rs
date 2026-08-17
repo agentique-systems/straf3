@@ -79,8 +79,27 @@ pub struct PhysicsProfile {
     /// onto it (`OVERCLIP`). Verified: 1.001.
     ///
     /// This is not a fudge factor to be cleaned up: the excess is what pushes
-    /// the player off surfaces they are pressed into, and it is the direct
-    /// cause of overbounce and ramp boost behaviour.
+    /// the player off surfaces they are pressed into.
+    ///
+    /// It is **not**, however, the cause of overbounce and ramp boost, which an
+    /// earlier version of this comment claimed. Session A measured both
+    /// directions and the mechanism is the three closing lines of `PM_WalkMove`
+    /// (`crate::step`, "clip to the ground plane, then restore the speed"):
+    /// take the velocity's length, clip it to the ground plane, rescale back to
+    /// the original length. Written for a player walking *along* a surface,
+    /// they run on whatever velocity the player has, including a large downward
+    /// one.
+    ///
+    /// Perpendicular onto flat ground the clip leaves nothing *but* the
+    /// overclip excess, so the rescale blows that back to full length and the
+    /// player is launched — which is why the excess looks causal there, and
+    /// only there. Add any horizontal velocity, or tilt the floor, and the clip
+    /// already leaves a large tangential component: setting `overclip` to 1.0
+    /// then moves the answer by a fraction of a percent (340.00 → 340.00 on
+    /// flat, −396.92 → −396.53 on a 26° ramp). Both directions are asserted in
+    /// `crates/straf3-collision/tests/vocabulary.rs`, so the correction is
+    /// enforced rather than merely written down. Anyone tuning ramp boost
+    /// should be reaching for the rescale, not for this number.
     pub overclip: Scalar,
     /// How many planes the slide solver will consider before giving up
     /// (`MAX_CLIP_PLANES`). Verified: 5.
@@ -173,6 +192,119 @@ pub struct PhysicsProfile {
     ///
     /// TODO(wave2): community-reconstructed. Expected around 100 for CPM.
     pub double_jump_boost: Scalar,
+
+    // ── candidate mechanics (spec rev 3, criterion 4) ───────────────────
+    //
+    // Crouch slide, dash and wall interaction: three mechanics being *judged*,
+    // not three mechanics being shipped. Every one of them is zero in
+    // [`Self::vq3`] and [`Self::cpm`] and non-zero only in
+    // [`Self::experimental`], and `crates/straf3-collision/tests/canon_frozen.rs`
+    // asserts that by exhaustive destructure so it cannot quietly stop being
+    // true.
+    //
+    // They obey the same rule as the CPM block above: each is a *number* the
+    // mover reads, and a zero switches the behaviour off rather than a `bool`
+    // selecting it. There is no `if experimental { … }` in `crate::step` and
+    // there must not be one — see this type's own doc comment on why.
+    //
+    // One of the eight is not an on/off number, and it is called out rather
+    // than left to be noticed: see [`Self::wall_normal_max`].
+    /// Minimum horizontal speed at which pressing crouch begins a slide.
+    ///
+    /// Deliberately set above [`Self::max_speed`] in
+    /// [`Self::experimental`], which is what makes the slide a *technique*
+    /// rather than a posture: ground acceleration alone cannot reach it, so a
+    /// slide has to be entered out of a strafejump. It is also what stops the
+    /// slide being a friction toggle — see [`Self::slide_duration_ms`].
+    ///
+    /// Read only when [`Self::slide_duration_ms`] is non-zero. Zero is not a
+    /// disabling value here, because zero is a meaningful threshold ("slide
+    /// from any speed").
+    pub slide_entry_speed: Scalar,
+    /// Friction applied while a slide is running, replacing [`Self::friction`].
+    ///
+    /// Not an addition to the friction model and not a second code path: it is
+    /// the same `PM_Friction`, reading a different number for the duration of
+    /// the slide.
+    pub slide_friction: Scalar,
+    /// How long one slide lasts, in milliseconds. **Zero disables the
+    /// mechanic**, which is canon.
+    ///
+    /// A countdown rather than "hold crouch to keep sliding" because a slide
+    /// the player can extend at will is a friction toggle, and a toggle has
+    /// nothing to master. The duration bounds it; [`Self::slide_entry_speed`]
+    /// bounds re-entry. Both are numbers, so how hard the slide is to chain is
+    /// something the lab can measure and the operator can tune, rather than a
+    /// rule buried in a branch.
+    pub slide_duration_ms: u16,
+    /// The wish speed a dash asks for along the current wish direction.
+    /// **Zero disables the mechanic**, which is canon.
+    ///
+    /// Deliberately a *wish speed* fed through `PM_Accelerate`'s clamp rather
+    /// than an impulse added to velocity. The difference is the whole
+    /// character of the mechanic: an added impulse is worth the same at 1000
+    /// ups as at rest and is therefore strictly correct to spend the instant it
+    /// is available, which is one mandatory execution rather than a route
+    /// choice. Clamped, a dash is worth nothing along a direction the player is
+    /// already travelling at this speed and a great deal across it, so *where*
+    /// it is aimed is the decision — the same clamp strafejumping is built on.
+    pub dash_speed: Scalar,
+    /// How long a dash stays available once armed, in milliseconds. **Zero
+    /// disables the mechanic**, which is canon.
+    ///
+    /// Armed exactly as [`Self::double_jump_window_ms`] is: on a landing that
+    /// ended a jump, provenance-gated through
+    /// [`crate::PlayerState::left_ground_by_jumping`], counted down, and spent
+    /// by the dash that uses it. **Not a cooldown** — "cooldown rotations that
+    /// replace momentum mastery" is a confirmed anti-goal of the vision, and a
+    /// dash on a timer that refills regardless of what the player did is
+    /// exactly that.
+    ///
+    /// See [`crate::step`] for what spends it: a jump press *in the air*, so
+    /// the dash costs the player the input their bunnyhop rhythm is already
+    /// using and needs no button of its own.
+    pub dash_window_ms: u16,
+    /// Velocity a wall jump adds along the wall's normal, on top of the
+    /// ordinary [`Self::jump_velocity`] it sets vertically. **Zero disables the
+    /// mechanic**, which is canon.
+    ///
+    /// Along the normal rather than upward because the gap this addresses is
+    /// horizontal: Session A measured that traversing a ramp never *gains*
+    /// speed and costs `entry · cos(angle)` at the seam, so the vocabulary has
+    /// no way to convert a wall into speed. The slide solver has already
+    /// removed the into-wall component by the time this is read, so what this
+    /// adds is genuinely new outward speed rather than restored speed.
+    pub wall_jump_velocity: Scalar,
+    /// How long after touching a wall the wall jump remains available, in
+    /// milliseconds. **Zero disables the mechanic**, which is canon.
+    ///
+    /// It is also what gates the *recording* of wall contact: with this at zero
+    /// nothing is written to [`crate::PlayerState::wall_normal`] at all, so a
+    /// canon run's state is bit-identical to its pre-wave self and not merely
+    /// behaviourally identical.
+    pub wall_contact_window_ms: u16,
+    /// A plane counts as a wall when its normal's Z component is at or below
+    /// this.
+    ///
+    /// **This is the one candidate constant that is not switched off by a
+    /// zero**, and the exception is worth stating because this type's doc
+    /// comment forbids a field that is really a switch. It is not a switch —
+    /// it is a threshold, and zero is a meaningful threshold (only exactly
+    /// vertical or overhanging planes). A threshold therefore cannot carry the
+    /// "zero disables" convention, so the mechanic is gated on its two *effect*
+    /// constants above and this is read only when they are non-zero.
+    ///
+    /// There is precedent in this very struct rather than a new rule:
+    /// [`Self::strafe_wish_speed_cap`] is read only when
+    /// [`Self::strafe_accelerate`] is non-zero, for exactly the same reason.
+    /// Canon sets this to 0.0 so that a reader who checks finds a disabling
+    /// value anyway.
+    ///
+    /// Compare [`Self::min_walk_normal`] at 0.7: a plane between these two
+    /// values is a steep ramp — too steep to walk, not steep enough to push
+    /// off. That band is deliberate, so that "wall" means something a player
+    /// can identify by looking at it.
+    pub wall_normal_max: Scalar,
 }
 
 impl PhysicsProfile {
@@ -210,6 +342,18 @@ impl PhysicsProfile {
             strafe_wish_speed_cap: s(0.0),
             double_jump_window_ms: 0,
             double_jump_boost: s(0.0),
+
+            // Candidate mechanics, all off. `cpm()` inherits these unchanged,
+            // so both canon profiles carry them at their disabling values and
+            // `canon_frozen.rs` asserts it.
+            slide_entry_speed: s(0.0),
+            slide_friction: s(0.0),
+            slide_duration_ms: 0,
+            dash_speed: s(0.0),
+            dash_window_ms: 0,
+            wall_jump_velocity: s(0.0),
+            wall_contact_window_ms: 0,
+            wall_normal_max: s(0.0),
         }
     }
 
@@ -238,6 +382,75 @@ impl PhysicsProfile {
             double_jump_window_ms: 400,
             double_jump_boost: s(100.0),
             ..Self::vq3()
+        }
+    }
+
+    /// CPM plus the three candidate mechanics, for measurement only (spec
+    /// rev 3, criteria 4 and 5).
+    ///
+    /// # This profile is not comparable to canon and is not meant to be
+    ///
+    /// Spec D2: `experimental` is playable and recordable but never comparable
+    /// to `vq3` or `cpm`, and its personal bests save under a separate key
+    /// (`runs/<map>.experimental.s3d`). Nothing here has earned a place in the
+    /// canonical ruleset; the wave's honest outcome may be that none of it
+    /// does. See `docs/candidate-mechanics.md` for the assessment.
+    ///
+    /// # Why it is `..Self::cpm()` and not a fresh set of numbers
+    ///
+    /// So that any difference the lab measures between `cpm` and
+    /// `experimental` is attributable to the three mechanics and to nothing
+    /// else. A profile that also retuned, say, `air_accelerate` would make
+    /// every measurement a two-variable question, which is exactly the kind of
+    /// evidence that cannot settle a design argument.
+    ///
+    /// # Where these eight numbers came from
+    ///
+    /// They are opening positions chosen to put each mechanic in a regime
+    /// where it does something measurable, **not** tuned values, and not
+    /// reconstructed from any other game. Their job is to give
+    /// `tools/straf3-lab` something to measure; the assessment is written
+    /// against what it measures, and a mechanic whose case depends on finding
+    /// exactly the right constant has already failed "simple to invoke".
+    #[must_use]
+    pub const fn experimental() -> Self {
+        Self {
+            // ── crouch slide ──────────────────────────────────────────────
+            // Entry above `max_speed` (320) on purpose: ground acceleration
+            // cannot reach 400, so a slide must be entered out of a
+            // strafejump. That single number is also the anti-chaining rule —
+            // re-entering costs a command spent standing, at full friction.
+            slide_entry_speed: s(400.0),
+            // A sixth of canon friction: fast enough that a slide still ends,
+            // slow enough that carrying speed under a low ceiling is worth
+            // doing.
+            slide_friction: s(1.0),
+            slide_duration_ms: 600,
+
+            // ── dash ──────────────────────────────────────────────────────
+            // A wish speed, not an impulse. 400 is above `max_speed` so a dash
+            // is worth taking on the ground, and the clamp makes it worth
+            // little along a direction already travelled at speed.
+            dash_speed: s(400.0),
+            // The double-jump window, deliberately: the two are armed by the
+            // same landing and compete for the same input, which is where the
+            // choice between them lives.
+            dash_window_ms: 400,
+
+            // ── wall interaction ──────────────────────────────────────────
+            // Below `jump_velocity` (270): a wall jump should be a redirect,
+            // not a better jump.
+            wall_jump_velocity: s(200.0),
+            // Half the dash window. A wall jump is a reaction to geometry the
+            // player is already touching, so it needs less slack than one
+            // armed by an event a command earlier.
+            wall_contact_window_ms: 200,
+            // Steeper than 72°. Comfortably clear of `min_walk_normal` (0.7,
+            // i.e. 45.6°) so that a ramp the player might try to walk up is
+            // never also a wall they can push off.
+            wall_normal_max: s(0.3),
+
+            ..Self::cpm()
         }
     }
 

@@ -1185,13 +1185,42 @@ fn a_new_profile_field_must_declare_its_canon_value() {
             // in both canon profiles. A candidate mechanic that is non-zero in
             // `vq3` or `cpm` is not a candidate, it is a change to canon, and
             // this wave does not permit one.
+            slide_entry_speed,
+            slide_friction,
+            slide_duration_ms,
+            dash_speed,
+            dash_window_ms,
+            wall_jump_velocity,
+            wall_contact_window_ms,
+            wall_normal_max,
         } = p;
 
         // Every field a candidate mechanic adds, paired with the value that
-        // means "off". Empty today: no candidate has landed yet. It is left
-        // in place rather than deferred because the point is that extending it
-        // is a one-line edit made at the moment the compiler asks for it.
-        let candidate_fields: &[(&str, Scalar)] = &[];
+        // means "off". The integer windows are widened to `Scalar` rather than
+        // given a second list: they are milliseconds, exactly representable,
+        // and one list a reader can scan beats two that must be kept in step.
+        let candidate_fields: &[(&str, Scalar)] = &[
+            // ── crouch slide ──────────────────────────────────────────────
+            ("slide_entry_speed", slide_entry_speed),
+            ("slide_friction", slide_friction),
+            ("slide_duration_ms", s(slide_duration_ms as f32)),
+            // ── dash ──────────────────────────────────────────────────────
+            ("dash_speed", dash_speed),
+            ("dash_window_ms", s(dash_window_ms as f32)),
+            // ── wall interaction ──────────────────────────────────────────
+            ("wall_jump_velocity", wall_jump_velocity),
+            ("wall_contact_window_ms", s(wall_contact_window_ms as f32)),
+            // A threshold, not an on/off number — zero is a meaningful value
+            // for it ("only vertical or overhanging planes count as walls"),
+            // so the mechanic is gated on the two effect constants above and
+            // this is read only when they are non-zero. It is listed anyway
+            // because canon does set it to zero and a future edit that did not
+            // should have to argue for itself here. See the field's own doc
+            // comment for why this is consistent with the data-not-branches
+            // doctrine rather than an exception to it — `strafe_wish_speed_cap`
+            // is the same shape and predates it.
+            ("wall_normal_max", wall_normal_max),
+        ];
         for (name, value) in candidate_fields {
             assert_eq!(
                 *value,
