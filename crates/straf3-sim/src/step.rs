@@ -285,6 +285,16 @@ struct Pmove<'a, W: World + ?Sized> {
     jump_pressed: bool,
     /// Whether this command asks to crouch.
     crouch_pressed: bool,
+    /// Whether this command is the *press* that began a crouch, rather than a
+    /// crouch already being held.
+    ///
+    /// Captured in [`Self::check_duck`] before it sets
+    /// [`PlayerState::crouched`], which is the only moment the previous
+    /// command's value is still readable. The crouch slide is edge-triggered on
+    /// this for the same reason jumping is edge-triggered on
+    /// [`PlayerState::jump_held`]: a technique you can hold down is a posture,
+    /// and a posture has no timing to master.
+    crouch_edge: bool,
 
     /// Q3's `pml.groundPlane`: there is a plane underfoot.
     ground_plane: bool,
@@ -346,6 +356,7 @@ impl<'a, W: World + ?Sized> Pmove<'a, W> {
             move_dir: MoveDir::of(cmd.forward_move, cmd.right_move),
             jump_pressed,
             crouch_pressed,
+            crouch_edge: false,
             ground_plane: false,
             walking: false,
             ground_normal: num::ZERO,
@@ -507,6 +518,14 @@ impl<'a, W: World + ?Sized> Pmove<'a, W> {
             p.timers.since_landed_ms = 0;
             if p.left_ground_by_jumping {
                 p.timers.double_jump_ms = self.profile.double_jump_window_ms;
+                // The dash arms here, on the same landing, under the same
+                // provenance rule, from a constant that is zero in canon. Two
+                // windows opened by one event and competing for one input is
+                // the point rather than an accident: on this landing the
+                // player can spend the boost by jumping now, or keep the press
+                // for a dash in the air, and they cannot have both from one
+                // press. See `check_air_jump`.
+                p.timers.dash_ms = self.profile.dash_window_ms;
             }
             p.left_ground_by_jumping = false;
         }
@@ -518,6 +537,13 @@ impl<'a, W: World + ?Sized> Pmove<'a, W> {
         self.ground_normal = num::ZERO;
         self.ground_surface = SurfaceFlags::NONE;
         p.ground = GroundState::Airborne;
+        // A slide is a ground technique, so leaving the ground ends it rather
+        // than pausing it. Without this a player could tap crouch at speed,
+        // jump immediately, and land with the remainder of a slide still owed
+        // to them — a slide banked across a jump, which is a different and
+        // much worse mechanic than the one being measured. Always zero under
+        // canon, where nothing ever arms it.
+        p.timers.slide_ms = 0;
     }
 
     /// Quake's `PM_CorrectAllSolid`: the player is inside geometry, so look for
@@ -550,6 +576,9 @@ impl<'a, W: World + ?Sized> Pmove<'a, W> {
     /// this command makes, and standing up again is refused while something is
     /// in the way.
     fn check_duck(&mut self, p: &mut PlayerState) {
+        // Before the write below, while `p.crouched` still holds the previous
+        // command's value: see [`Self::crouch_edge`].
+        self.crouch_edge = self.crouch_pressed && !p.crouched;
         if self.crouch_pressed {
             p.crouched = true;
         } else if p.crouched {
@@ -624,7 +653,24 @@ impl<'a, W: World + ?Sized> Pmove<'a, W> {
             } else {
                 speed
             };
-            drop += control * self.profile.friction * self.dt;
+            // The crouch slide, and the whole of its effect: the same
+            // `PM_Friction`, reading a different number while the slide runs.
+            // Not a second friction model and not a branch on the profile —
+            // `slide_ms` can only be non-zero when a slide was armed, and a
+            // slide can only be armed when `slide_duration_ms` is non-zero,
+            // which is never in canon.
+            //
+            // The profile is consulted as well as the timer, following the
+            // `strafe_wish_speed_cap` precedent below: with the mechanic off
+            // the timer's value is meaningless, and a caller who hands the
+            // mover a hand-built state should not be able to give a canon run
+            // `slide_friction`'s zero.
+            let rate = if self.profile.slide_duration_ms != 0 && p.timers.slide_ms > 0 {
+                self.profile.slide_friction
+            } else {
+                self.profile.friction
+            };
+            drop += control * rate * self.dt;
         }
 
         let mut newspeed = speed - drop;
@@ -697,6 +743,9 @@ impl<'a, W: World + ?Sized> Pmove<'a, W> {
             return;
         }
 
+        // Before friction, so a slide armed this command is a slide *this*
+        // command rather than one that starts a tick late.
+        self.check_slide(p);
         self.friction(p);
         let scale = self.cmd_scale();
 
@@ -807,6 +856,13 @@ impl<'a, W: World + ?Sized> Pmove<'a, W> {
             p.velocity = clip_velocity(p.velocity, self.ground_normal, self.profile);
         }
 
+        // Last, and after the ground-plane clip, so that neither candidate's
+        // impulse is immediately clipped away by a steep plane the player is
+        // pushing off. Both are unreachable in canon: `wall_jump_velocity` and
+        // `dash_speed` are zero there, so this call returns without reading
+        // anything else.
+        self.check_air_jump(p, wishdir);
+
         self.step_slide_move(p, true);
     }
 
@@ -840,6 +896,228 @@ impl<'a, W: World + ?Sized> Pmove<'a, W> {
         p.velocity.z = up;
         p.timers.since_jumped_ms = 0;
         true
+    }
+
+    // ── candidate mechanics ────────────────────────────────────────────────
+    //
+    // # These three are candidates. None of them has been assessed.
+    //
+    // Crouch slide, dash and wall interaction exist here to be *measured*, not
+    // because they have earned a place in the movement language. Spec rev 4
+    // **defers criterion 5** — the written assessment of each against the
+    // vision's five criteria, with `tools/straf3-lab`'s numbers as evidence —
+    // to a later wave. Until that assessment exists, every one of them is
+    // subject to being cut, and the fact that they compile, pass tests and sit
+    // in the tree is **not** an argument that they should stay. This wave's
+    // whole thesis is that movement decisions are argued from evidence rather
+    // than inherited from whatever happened to get written first.
+    //
+    // They are reachable only from `PhysicsProfile::experimental`, which spec
+    // D2 makes permanently incomparable to canon: its personal bests save under
+    // `runs/<map>.experimental.s3d` and its recordings are refused by a canon
+    // client through `PhysicsId`. Nothing below can reach the ranked game.
+    //
+    // # The bar they have to clear, and it is high
+    //
+    // Session A measured the existing vocabulary. Running at 300 ups off a
+    // 508-unit drop settles permanently at 951 ups, and 600 ups entry gives
+    // 1084 — the largest speed gain in the game already exists by accident, via
+    // the rescale at the end of `walk_move`. Anything here justified as a
+    // *source of speed* is competing with that and will lose.
+    //
+    // The gap that same measurement found is the opposite one: traversing a
+    // ramp never gains speed, and costs `entry · cos(angle)` at the seam — 600
+    // ups onto a 26° ramp arrives at 539.28. So speed-*preserving* geometry
+    // interaction addresses a real hole in the vocabulary where a
+    // speed-*granting* button does not. That asymmetry is the single most
+    // useful thing to know about which of these three is likely to survive, and
+    // it is why the wall jump pushes along a plane the player had to reach
+    // rather than simply adding velocity on demand.
+
+    /// The crouch slide: arm it if this command is a crouch press taken fast
+    /// enough, on the ground.
+    ///
+    /// **Candidate, unassessed — see the module section above and spec rev 4
+    /// criterion 5.**
+    ///
+    /// # Why there is no `slide_spent` flag
+    ///
+    /// The obvious failure mode of a slide is that it becomes a friction
+    /// toggle: tap crouch, slide, tap again, slide again, and the "technique"
+    /// is a key you hold down at speed. The obvious fix is a bit of state
+    /// saying the slide has been used and does not recharge until you leave the
+    /// ground.
+    ///
+    /// That bit is not here, deliberately, because
+    /// [`PhysicsProfile`]'s own doctrine says a field is a number the
+    /// simulation reads and not a switch — and the anti-chaining property is
+    /// already *in the numbers*. [`PhysicsProfile::slide_entry_speed`] is set
+    /// above [`PhysicsProfile::max_speed`] in `experimental`, so re-entry
+    /// cannot be reached by ground acceleration; crouching caps wish speed at
+    /// `max_speed * duck_scale`, so a sliding player cannot accelerate at all;
+    /// and re-pressing crouch costs at least one command spent standing at full
+    /// [`PhysicsProfile::friction`]. A chain therefore has to be *paid for* out
+    /// of the speed the player is trying to keep, and how expensive that is is
+    /// a number the operator can tune and the lab can measure. A flag would
+    /// have made it a rule nobody can tune and a second source of truth the
+    /// mover could read instead of the constants.
+    ///
+    /// If measurement shows the chain is cheap enough to be degenerate, the
+    /// answer is a higher entry speed or a lower duration, not a bool.
+    fn check_slide(&mut self, p: &mut PlayerState) {
+        if self.profile.slide_duration_ms == 0 || !self.crouch_edge {
+            return;
+        }
+        // Horizontal speed only: sliding is about the speed being carried
+        // along the floor, and on a ramp the vertical component is a
+        // consequence of the surface rather than something the player earned.
+        let v = p.velocity;
+        let speed = (v.x * v.x + v.y * v.y).sqrt();
+        if speed < self.profile.slide_entry_speed {
+            return;
+        }
+        p.timers.slide_ms = self.profile.slide_duration_ms;
+    }
+
+    /// A jump press while airborne: the wall jump, or the dash, or nothing.
+    ///
+    /// **Candidates, unassessed — see the module section above and spec rev 4
+    /// criterion 5.**
+    ///
+    /// # Why both of them are a second jump press and not new buttons
+    ///
+    /// The vision asks for "a compact, universal input language" and says
+    /// advanced behaviour should come from "timing, context, geometry, speed,
+    /// and the interaction of mechanics rather than from a large ability bar or
+    /// many isolated buttons". A dash key and a wall-jump key would be two
+    /// isolated buttons. So neither exists: both are the jump input, pressed
+    /// again in the air.
+    ///
+    /// This is not only cheaper, it is what gives the dash something to master.
+    /// A jump press in the air is an input the player's bunnyhop rhythm is
+    /// *already using* — spending it on a dash means not having it on the next
+    /// landing, and `jump_held` means the press has to be released and retaken
+    /// inside a window that a landing opened. A dash on its own key, available
+    /// whenever the window is open, would be pressed every time it was
+    /// available and would have no timing to master at all. That is the
+    /// distinction spec rev 4's overbounce precedent draws between a mechanic
+    /// that can survive being unreadable and one that cannot survive having
+    /// nothing to master.
+    ///
+    /// (A dedicated bit would have cost nothing mechanically, which is worth
+    /// recording since it is the kind of thing that gets re-investigated:
+    /// `straf3-replay`'s codec writes `buttons` as a raw `u16` and reads it
+    /// back unmasked, so a new bit needs no format version bump and
+    /// invalidates no recording. The reason not to add one is the input
+    /// language, not the format.)
+    ///
+    /// # Why geometry, not a modifier, chooses between them
+    ///
+    /// One press, two techniques, and which one fires depends on whether the
+    /// player is against a wall. That is route choice falling out of the
+    /// design rather than being claimed for it: the same input means "redirect
+    /// off this surface" beside a wall and "redirect through the air"
+    /// elsewhere, so *where the player is standing* is the decision. Wall
+    /// contact wins when both are available, because it is the reading the
+    /// player can see coming — they are touching the wall.
+    ///
+    /// # Why a dash cannot fire on the command that launched the jump
+    ///
+    /// `walk_move` calls `air_move` after a successful `check_jump`, so this
+    /// runs on that command too — but `check_jump` has already set
+    /// [`PlayerState::jump_held`], and the guard below refuses a held press.
+    /// One press buys one thing. The two windows also live on opposite sides
+    /// of the ground check: the double-jump boost is spent in `check_jump`,
+    /// reachable only while walking, and both candidates here are reachable
+    /// only while airborne, so they cannot both consume the same press.
+    fn check_air_jump(&mut self, p: &mut PlayerState, wishdir: Vec3) {
+        if !self.jump_pressed || p.jump_held {
+            return;
+        }
+
+        // ── wall jump ─────────────────────────────────────────────────────
+        if self.profile.wall_jump_velocity != s(0.0)
+            && self.profile.wall_contact_window_ms != 0
+            && p.timers.wall_contact_ms > 0
+        {
+            // The vertical part is the ordinary jump, so a wall jump is not a
+            // better jump — `wall_jump_velocity` buys the horizontal redirect
+            // and nothing else. Assignment for the same reason `check_jump`
+            // assigns: jumping while already rising must not accumulate.
+            p.velocity.z = self.profile.jump_velocity;
+            p.velocity += p.wall_normal * self.profile.wall_jump_velocity;
+            p.timers.wall_contact_ms = 0;
+            p.timers.since_jumped_ms = 0;
+            p.jump_held = true;
+            // A wall jump is a jump: the landing it ends should arm the
+            // double-jump and dash windows exactly as a floor jump's does.
+            p.left_ground_by_jumping = true;
+            return;
+        }
+
+        // ── dash ──────────────────────────────────────────────────────────
+        if self.profile.dash_speed == s(0.0)
+            || self.profile.dash_window_ms == 0
+            || p.timers.dash_ms == 0
+            || wishdir == num::ZERO
+        {
+            return;
+        }
+
+        // `PM_Accelerate`'s clamp, with no acceleration limit: bring the
+        // projection of velocity onto the wish direction up to `dash_speed`,
+        // and grant nothing if it is already there. This is what makes the
+        // dash a redirect rather than a speed button — it is worth almost
+        // nothing along a direction already travelled at 400 ups, and worth
+        // its full value across one. Strafejumping is built on exactly this
+        // clamp; see [`Self::accelerate`].
+        let addspeed = self.profile.dash_speed - p.velocity.dot(wishdir);
+        if addspeed <= s(0.0) {
+            // Deliberately *not* spent. A dash that vanished because the
+            // player was already moving that fast would be a punishment for
+            // holding a direction, and unattributable — nothing on screen
+            // would explain where the window went.
+            return;
+        }
+        p.velocity += wishdir * addspeed;
+        p.timers.dash_ms = 0;
+        // Costs the input until it is released, exactly as a floor jump does.
+        // Without this, holding jump would dash the instant a window opened,
+        // which is "automation that replaces execution or timing" — a
+        // confirmed anti-goal — rather than a technique.
+        p.jump_held = true;
+    }
+
+    /// Record that the player is against a wall, if this plane is one.
+    ///
+    /// **Candidate, unassessed — see the module section above and spec rev 4
+    /// criterion 5.**
+    ///
+    /// Called from the slide solver's bump loop, which is the only place the
+    /// simulation learns it has touched a non-floor plane: `PM_GroundTrace`
+    /// probes straight down and by construction never finds a wall. Nothing
+    /// new is swept, no trace is added, and no canon number is read — this
+    /// only copies a normal the solver already has into state that outlives
+    /// the command, because a wall jump happens some commands after the touch
+    /// and the solver's plane list dies with the command.
+    ///
+    /// # Why the magnitude of the normal's Z, not the signed value
+    ///
+    /// [`PhysicsProfile::wall_normal_max`] describes how far from horizontal a
+    /// plane's normal may lean and still be a wall. A signed comparison would
+    /// make every ceiling in the game a wall, since a ceiling's normal points
+    /// down at −1.0 and −1.0 is comfortably "at or below" any threshold. A
+    /// player bonking their head and being handed a wall jump is not the
+    /// mechanic, so the test is on the magnitude.
+    fn note_wall_contact(&self, p: &mut PlayerState, normal: Vec3) {
+        if self.profile.wall_contact_window_ms == 0
+            || self.profile.wall_jump_velocity == s(0.0)
+            || normal.z.abs() > self.profile.wall_normal_max
+        {
+            return;
+        }
+        p.timers.wall_contact_ms = self.profile.wall_contact_window_ms;
+        p.wall_normal = normal;
     }
 
     // ── the slide solver ───────────────────────────────────────────────────
@@ -905,6 +1183,7 @@ impl<'a, W: World + ?Sized> Pmove<'a, W> {
                 break; // moved the whole way
             }
             bumped = true;
+            self.note_wall_contact(p, trace.normal);
 
             time_left -= time_left * trace.fraction;
 
@@ -1341,5 +1620,338 @@ mod tests {
         cmds.push(jump);
         let released = run(&on_ground(), &cmds, &ground, &profile);
         assert!(!released.player.ground.is_grounded(), "should be airborne");
+    }
+
+    // ── candidate mechanics ────────────────────────────────────────────────
+    //
+    // These pin the *shape* of three unassessed candidates (spec rev 4
+    // criterion 5), not their tuning. Each asserts what the mechanic does and,
+    // more importantly, that canon cannot reach it — the second half is the
+    // one that matters this wave, and it is asserted here as well as in
+    // `canon_frozen.rs` because a test beside the code is the one a future
+    // editor of that code actually runs.
+
+    fn crouch(ms: u16) -> UserCmd {
+        UserCmd {
+            buttons: Buttons::CROUCH,
+            ..cmd(ms)
+        }
+    }
+
+    /// Moving along +X at `speed`, standing on flat ground.
+    fn sprinting(speed: f32) -> SimState {
+        let mut st = on_ground();
+        st.player.velocity = vec3(s(speed), s(0.0), s(0.0));
+        st
+    }
+
+    #[test]
+    fn a_slide_starts_only_above_the_entry_speed_and_only_on_the_press() {
+        let p = PhysicsProfile::experimental();
+        let ground = FlatGround::at(s(0.0));
+        assert_eq!(p.slide_entry_speed, s(400.0));
+
+        // Below the entry speed: crouching is just crouching.
+        let slow = step(&sprinting(399.0), &crouch(8), &ground, &p);
+        assert_eq!(slow.player.timers.slide_ms, 0);
+        assert!(slow.player.crouched, "still ducked, just not sliding");
+
+        // Above it: armed to the full duration on the press itself.
+        //
+        // The full duration and not `duration - 8`: `PM_DropTimers` runs
+        // before `walk_move` in `Pmove::run`, so the arming command's own
+        // 8 ms is not deducted from the window it opens. The arming command
+        // does slide — `check_slide` is called before `friction` — so a slide
+        // is its duration *plus* the command that started it, which is one
+        // tick and is the honest reading of "the press begins the slide".
+        let fast = step(&sprinting(500.0), &crouch(8), &ground, &p);
+        assert_eq!(fast.player.timers.slide_ms, p.slide_duration_ms);
+
+        // Holding crouch does not re-arm. Advance past the far side of the
+        // duration with the button never released, and the slide is over.
+        // 600 ms is 75 commands at 8 ms, so 80 clears it.
+        let held = run(&sprinting(500.0), &vec![crouch(8); 80], &ground, &p);
+        assert!(
+            held.player.crouched,
+            "still holding crouch, so the test is about re-arming and not about standing up"
+        );
+        assert_eq!(
+            held.player.timers.slide_ms, 0,
+            "a held crouch re-armed the slide, which makes it a posture rather than a technique"
+        );
+    }
+
+    #[test]
+    fn a_slide_carries_speed_that_walking_crouched_would_have_lost() {
+        let p = PhysicsProfile::experimental();
+        let ground = FlatGround::at(s(0.0));
+        let speed_after = |profile: &PhysicsProfile| {
+            let end = run(&sprinting(500.0), &vec![crouch(8); 60], &ground, profile);
+            end.player.velocity.x
+        };
+
+        let sliding = speed_after(&p);
+        // The same commands under a profile whose only difference is that the
+        // mechanic is off. Not `cpm()`: that also differs in nothing else
+        // here, but going through the constant makes the claim "this is the
+        // slide" rather than "this is some difference between two profiles".
+        let disabled = speed_after(&PhysicsProfile {
+            slide_duration_ms: 0,
+            ..p
+        });
+
+        assert!(
+            sliding > disabled * s(3.0),
+            "slide kept {sliding} ups where ordinary friction kept {disabled}; \
+             the mechanic is not doing anything worth measuring"
+        );
+        // And it is not frictionless: a slide that never ends is a toggle.
+        assert!(sliding < s(500.0), "slide gained speed, got {sliding}");
+    }
+
+    /// The anti-chaining property, which lives in the constants rather than in
+    /// a `slide_spent` flag. See `check_slide`.
+    #[test]
+    fn a_slide_cannot_be_re_entered_without_paying_for_it() {
+        let p = PhysicsProfile::experimental();
+        let ground = FlatGround::at(s(0.0));
+
+        // Slide the whole 600 ms out (75 commands at 8 ms), release crouch for
+        // one command, press again. Entry is above `max_speed` and a crouched
+        // player cannot accelerate, so by the time the button comes back the
+        // speed that bought the first slide is gone.
+        let mut cmds = vec![crouch(8); 76];
+        cmds.push(cmd(8)); // release
+        cmds.push(crouch(8)); // re-press
+        let end = run(&sprinting(500.0), &cmds, &ground, &p);
+
+        let speed = end.player.velocity.x;
+        assert!(
+            speed < p.slide_entry_speed,
+            "still at {speed} ups after a full slide, so a re-press re-slides \
+             and the mechanic is a friction toggle"
+        );
+        assert_eq!(end.player.timers.slide_ms, 0, "the chain was not paid for");
+    }
+
+    #[test]
+    fn a_dash_is_a_second_jump_press_in_the_air_and_costs_the_press() {
+        let p = PhysicsProfile::experimental();
+        let ground = FlatGround::at(s(0.0));
+        let jump = UserCmd {
+            buttons: Buttons::JUMP,
+            forward_move: 127,
+            ..cmd(8)
+        };
+        let forward = UserCmd {
+            forward_move: 127,
+            ..cmd(8)
+        };
+
+        // Jump, then step until the landing rather than for a fixed count:
+        // the window opens *on* the landing command and starts counting down
+        // immediately, so a run of arbitrary length would be asserting about
+        // how long ago it landed rather than about the arming.
+        let mut landed = step(&sprinting(320.0), &jump, &ground, &p);
+        assert!(!landed.player.ground.is_grounded(), "premise: jumped");
+        let mut commands = 0;
+        while !landed.player.ground.is_grounded() {
+            landed = step(&landed, &forward, &ground, &p);
+            commands += 1;
+            assert!(commands < 200, "never came back down");
+        }
+        assert_eq!(
+            landed.player.timers.dash_ms, p.dash_window_ms,
+            "the landing that ended a jump did not arm a dash"
+        );
+        assert_eq!(
+            landed.player.timers.double_jump_ms, p.double_jump_window_ms,
+            "the same landing arms both windows; that is what they compete over"
+        );
+
+        // Jump again out of that window, then press jump a second time in the
+        // air with the input released in between.
+        let airborne = run(&landed, &[jump, forward], &ground, &p);
+        assert!(!airborne.player.ground.is_grounded());
+        assert!(
+            airborne.player.timers.dash_ms > 0,
+            "the window closed before the dash could be spent"
+        );
+        let before = airborne.player.velocity;
+
+        let dashed = step(&airborne, &jump, &ground, &p);
+        assert_eq!(dashed.player.timers.dash_ms, 0, "the dash was not spent");
+        assert!(
+            dashed.player.velocity.x > before.x,
+            "dash added nothing: {} -> {}",
+            before.x,
+            dashed.player.velocity.x
+        );
+        assert!(dashed.player.jump_held, "the dash did not cost the press");
+    }
+
+    /// The anti-goal check: "automation that replaces execution or timing".
+    #[test]
+    fn holding_jump_cannot_dash() {
+        let p = PhysicsProfile::experimental();
+        let ground = FlatGround::at(s(0.0));
+        let jump = UserCmd {
+            buttons: Buttons::JUMP,
+            forward_move: 127,
+            ..cmd(8)
+        };
+
+        // Jump and never let go, for long enough to land and re-arm several
+        // times. If holding the button could dash, the window would be spent
+        // the instant a landing opened it.
+        let cmds = vec![jump; 300];
+        let held = run(&sprinting(320.0), &cmds, &ground, &p);
+
+        // The decisive comparison: the same commands under a profile whose
+        // only difference is that the dash is off. Bit-identical means no dash
+        // fired anywhere in 300 commands — which is a far stronger statement
+        // than "the window looks unspent at the end", since a dash could have
+        // fired and re-armed between two samples.
+        let dashless = run(
+            &sprinting(320.0),
+            &cmds,
+            &ground,
+            &PhysicsProfile {
+                dash_speed: s(0.0),
+                ..p
+            },
+        );
+        assert_eq!(
+            held.checksum(),
+            dashless.checksum(),
+            "a held jump button dashed; that is automation replacing timing"
+        );
+
+        // And the premise is real: the run did land and did arm windows, so
+        // the comparison above is not passing because nothing ever happened.
+        assert!(
+            held.player.timers.since_landed_ms < 2000,
+            "premise: the run should have landed at some point"
+        );
+        assert!(held.player.jump_held, "premise: the input was held throughout");
+    }
+
+    #[test]
+    fn a_dash_grants_nothing_along_a_direction_already_travelled_at_speed() {
+        // The clamp is the mechanic: `dash_speed` is a wish speed, so a player
+        // already moving faster than it along the wish direction gets nothing,
+        // and — deliberately — is not charged the window for it.
+        let p = PhysicsProfile::experimental();
+        let ground = FlatGround::at(s(0.0));
+        let mut st = SimState::spawned_at(vec3(s(0.0), s(0.0), s(200.0)), s(0.0));
+        st.player.velocity = vec3(s(900.0), s(0.0), s(0.0));
+        st.player.timers.dash_ms = p.dash_window_ms;
+
+        let jump_forward = UserCmd {
+            buttons: Buttons::JUMP,
+            forward_move: 127,
+            ..cmd(8)
+        };
+        let end = step(&st, &jump_forward, &ground, &p);
+        assert_eq!(
+            end.player.timers.dash_ms,
+            p.dash_window_ms - 8,
+            "the window was spent on a dash that did nothing"
+        );
+    }
+
+    #[test]
+    fn a_wall_jump_needs_a_wall_and_pushes_off_it() {
+        let p = PhysicsProfile::experimental();
+        let ground = FlatGround::at(s(0.0));
+        let jump = UserCmd {
+            buttons: Buttons::JUMP,
+            ..cmd(8)
+        };
+
+        // Airborne with wall contact recorded: a normal pointing along +Y,
+        // which is what the solver would have stored for a wall on the left.
+        let mut st = SimState::spawned_at(vec3(s(0.0), s(0.0), s(200.0)), s(0.0));
+        st.player.velocity = vec3(s(600.0), s(0.0), s(-100.0));
+        st.player.timers.wall_contact_ms = p.wall_contact_window_ms;
+        st.player.wall_normal = vec3(s(0.0), s(1.0), s(0.0));
+
+        let end = step(&st, &jump, &ground, &p);
+        assert!(
+            end.player.velocity.y > s(150.0),
+            "no push along the wall normal, y = {}",
+            end.player.velocity.y
+        );
+        assert!(
+            end.player.velocity.z > s(200.0),
+            "a wall jump should also jump, z = {}",
+            end.player.velocity.z
+        );
+        assert_eq!(end.player.timers.wall_contact_ms, 0, "contact not spent");
+        assert!(
+            end.player.left_ground_by_jumping,
+            "a wall jump is a jump, so the landing it ends should arm the windows"
+        );
+
+        // Without the contact, the same press does nothing at all.
+        let mut no_wall = st;
+        no_wall.player.timers.wall_contact_ms = 0;
+        let end = step(&no_wall, &jump, &ground, &p);
+        assert!(end.player.velocity.y.abs() < s(1.0), "pushed off nothing");
+    }
+
+    /// A ceiling is not a wall.
+    ///
+    /// `wall_normal_max` bounds how far from horizontal a wall's normal may
+    /// lean. Compared signed rather than by magnitude, a ceiling's normal of
+    /// −1.0 satisfies "at or below 0.3" trivially, and bonking your head would
+    /// hand you a wall jump. See `note_wall_contact`.
+    #[test]
+    fn the_wall_test_is_on_the_magnitude_of_the_normals_z() {
+        let p = PhysicsProfile::experimental();
+        let up = vec3(s(0.0), s(0.0), s(1.0));
+        let down = vec3(s(0.0), s(0.0), s(-1.0));
+        let side = vec3(s(0.0), s(1.0), s(0.0));
+
+        assert!(down.z < p.wall_normal_max, "premise: a signed test admits it");
+        assert!(down.z.abs() > p.wall_normal_max, "a ceiling is not a wall");
+        assert!(up.z.abs() > p.wall_normal_max, "a floor is not a wall");
+        assert!(side.z.abs() <= p.wall_normal_max, "a wall is a wall");
+        // And the band between `wall_normal_max` and `min_walk_normal` is
+        // deliberate: a steep ramp is neither walkable nor pushable.
+        assert!(p.wall_normal_max < p.min_walk_normal);
+    }
+
+    /// The whole canon claim, asserted next to the code that could break it.
+    ///
+    /// `canon_frozen.rs` proves this over fourteen recorded runs in six
+    /// worlds, which is the real gate. This is the cheap local version that
+    /// fails in the same edit-compile cycle as the change that broke it.
+    #[test]
+    fn no_candidate_mechanic_is_reachable_under_canon() {
+        let ground = FlatGround::at(s(0.0));
+        for profile in [PhysicsProfile::vq3(), PhysicsProfile::cpm()] {
+            // Every input that would invoke a candidate, in one run: crouch at
+            // a speed well above any plausible entry, jump, and jump again in
+            // the air with releases in between.
+            let mut cmds = Vec::new();
+            for i in 0..300 {
+                cmds.push(UserCmd {
+                    buttons: match i % 3 {
+                        0 => Buttons::CROUCH,
+                        1 => Buttons::JUMP,
+                        _ => Buttons::NONE,
+                    },
+                    forward_move: 127,
+                    ..cmd(8)
+                });
+            }
+            let end = run(&sprinting(900.0), &cmds, &ground, &profile);
+
+            assert_eq!(end.player.timers.slide_ms, 0);
+            assert_eq!(end.player.timers.dash_ms, 0);
+            assert_eq!(end.player.timers.wall_contact_ms, 0);
+            assert_eq!(end.player.wall_normal, num::ZERO);
+        }
     }
 }

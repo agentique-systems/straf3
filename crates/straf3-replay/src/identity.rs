@@ -229,6 +229,14 @@ pub fn physics_digest(profile: &PhysicsProfile) -> u64 {
         strafe_wish_speed_cap,
         double_jump_window_ms,
         double_jump_boost,
+        slide_entry_speed,
+        slide_friction,
+        slide_duration_ms,
+        dash_speed,
+        dash_window_ms,
+        wall_jump_velocity,
+        wall_contact_window_ms,
+        wall_normal_max,
     } = *profile;
 
     let mut h = Fnv1a::new();
@@ -265,6 +273,21 @@ pub fn physics_digest(profile: &PhysicsProfile) -> u64 {
     scalar(strafe_wish_speed_cap, &mut h);
     h.bytes(&double_jump_window_ms.to_le_bytes());
     scalar(double_jump_boost, &mut h);
+    // The candidate mechanics (spec rev 3, criterion 4). They are zero in both
+    // canon profiles, and folding a zero still changes this digest, so every
+    // `.s3d` written before they existed now reports a physics mismatch. That
+    // is the truth and not a regression: the profile a run was made under is
+    // no longer the profile this build simulates with, even though canon
+    // *movement* is unmoved — which is precisely why D9 pins canon over a
+    // separate movement digest rather than over this one.
+    scalar(slide_entry_speed, &mut h);
+    scalar(slide_friction, &mut h);
+    h.bytes(&slide_duration_ms.to_le_bytes());
+    scalar(dash_speed, &mut h);
+    h.bytes(&dash_window_ms.to_le_bytes());
+    scalar(wall_jump_velocity, &mut h);
+    h.bytes(&wall_contact_window_ms.to_le_bytes());
+    scalar(wall_normal_max, &mut h);
     h.finish()
 }
 
@@ -315,6 +338,71 @@ mod tests {
         b.air_control = s(-0.0);
         assert_eq!(a.air_control, b.air_control);
         assert_ne!(physics_digest(&a), physics_digest(&b));
+    }
+
+    /// Spec D2: `experimental` is never comparable to canon, and the mechanism
+    /// that enforces it is this digest — a recording made under `experimental`
+    /// is refused by a `cpm` client before a command is handed out, whatever
+    /// the file is named.
+    #[test]
+    fn experimental_is_not_the_same_physics_as_either_canon_profile() {
+        let x = physics_digest(&PhysicsProfile::experimental());
+        assert_ne!(x, physics_digest(&PhysicsProfile::cpm()));
+        assert_ne!(x, physics_digest(&PhysicsProfile::vq3()));
+    }
+
+    /// Each candidate constant, folded on its own.
+    ///
+    /// One assertion per field rather than one over the whole profile: a fold
+    /// that forgot exactly one constant would still pass a test that only
+    /// compared `experimental` with `cpm`, because the other seven would carry
+    /// it. That is the failure this exists to catch, and it is the likely one —
+    /// eight fields were added to this fold in a single edit.
+    #[test]
+    fn every_candidate_constant_is_folded() {
+        let base = PhysicsProfile::cpm();
+        type Edit = (&'static str, fn(PhysicsProfile) -> PhysicsProfile);
+        let edits: &[Edit] = &[
+            ("slide_entry_speed", |p| PhysicsProfile {
+                slide_entry_speed: s(400.0),
+                ..p
+            }),
+            ("slide_friction", |p| PhysicsProfile {
+                slide_friction: s(1.0),
+                ..p
+            }),
+            ("slide_duration_ms", |p| PhysicsProfile {
+                slide_duration_ms: 600,
+                ..p
+            }),
+            ("dash_speed", |p| PhysicsProfile {
+                dash_speed: s(400.0),
+                ..p
+            }),
+            ("dash_window_ms", |p| PhysicsProfile {
+                dash_window_ms: 400,
+                ..p
+            }),
+            ("wall_jump_velocity", |p| PhysicsProfile {
+                wall_jump_velocity: s(200.0),
+                ..p
+            }),
+            ("wall_contact_window_ms", |p| PhysicsProfile {
+                wall_contact_window_ms: 200,
+                ..p
+            }),
+            ("wall_normal_max", |p| PhysicsProfile {
+                wall_normal_max: s(0.3),
+                ..p
+            }),
+        ];
+        for (name, edit) in edits {
+            assert_ne!(
+                physics_digest(&base),
+                physics_digest(&edit(base)),
+                "`{name}` is not folded into the physics digest"
+            );
+        }
     }
 
     #[test]

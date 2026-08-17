@@ -90,6 +90,38 @@ pub struct Timers {
     /// window has to be *spent*: two jumps in one window must not both be
     /// boosted, and a comparison against an elapsed counter would allow that.
     pub double_jump_ms: u16,
+
+    // ── candidate mechanics (spec rev 3, criterion 4) ───────────────────
+    //
+    // Three countdowns for the three mechanics in
+    // [`crate::PhysicsProfile::experimental`]. All zero under `vq3` and `cpm`,
+    // because the constants that arm them are zero there.
+    //
+    // These are also the *whole* legibility budget for the candidates: a
+    // mechanic is only assessable if a player can see it happening, and what
+    // the overlay can see is `SimState`. Each of the three below is readable
+    // above the seam and folded into [`SimState::checksum`], which is what
+    // makes "the overlay can print it" and "a replay cannot diverge silently"
+    // the same statement.
+    /// Time left in the current crouch slide.
+    ///
+    /// Non-zero means the player is sliding: `PM_Friction` reads
+    /// [`crate::PhysicsProfile::slide_friction`] instead of
+    /// [`crate::PhysicsProfile::friction`]. Armed on the crouch press that
+    /// starts a slide, cleared on leaving the ground.
+    pub slide_ms: u16,
+    /// Time left in which an air jump press would spend a dash.
+    ///
+    /// Armed on the same landing that arms [`Self::double_jump_ms`] and under
+    /// the same provenance rule, so the two windows open together and compete
+    /// for the same input. Zeroed by the dash that uses it.
+    pub dash_ms: u16,
+    /// Time left in which a jump press would be a wall jump.
+    ///
+    /// Armed by the slide solver whenever the player is clipped against a
+    /// plane at or below [`crate::PhysicsProfile::wall_normal_max`], alongside
+    /// [`PlayerState::wall_normal`]. Zeroed by the wall jump that uses it.
+    pub wall_contact_ms: u16,
 }
 
 impl Timers {
@@ -101,6 +133,9 @@ impl Timers {
     pub fn advance(&mut self, ms: u16) {
         self.movement_locked_ms = self.movement_locked_ms.saturating_sub(ms);
         self.double_jump_ms = self.double_jump_ms.saturating_sub(ms);
+        self.slide_ms = self.slide_ms.saturating_sub(ms);
+        self.dash_ms = self.dash_ms.saturating_sub(ms);
+        self.wall_contact_ms = self.wall_contact_ms.saturating_sub(ms);
         self.since_landed_ms = self.since_landed_ms.saturating_add(ms);
         self.since_jumped_ms = self.since_jumped_ms.saturating_add(ms);
     }
@@ -142,6 +177,25 @@ pub struct PlayerState {
     /// double jump. This is that one bit of provenance, and it lives in state
     /// because [`crate::step`] may not consult anything else.
     pub left_ground_by_jumping: bool,
+    /// Surface normal of the last wall the player was clipped against, while
+    /// [`Timers::wall_contact_ms`] is still running.
+    ///
+    /// A wall jump pushes along this, so the direction has to survive the
+    /// commands between touching the wall and pressing jump — the slide
+    /// solver's plane list does not, it lives for one command.
+    ///
+    /// Zero whenever [`crate::PhysicsProfile::wall_contact_window_ms`] is
+    /// zero, which is both canon profiles: with the mechanic off the solver
+    /// never writes here at all, so a canon run's state is bit-identical to
+    /// its pre-wave self and not merely behaviourally identical.
+    ///
+    /// Meaningless when `wall_contact_ms` is zero, and deliberately *not*
+    /// cleared when the timer expires: clearing it would be a second write for
+    /// no reader to benefit from, and the timer is the thing every reader
+    /// already has to check. It is folded into [`SimState::checksum`] anyway,
+    /// because a stale value the mover could read on a later command is
+    /// exactly the kind of state a digest exists to cover.
+    pub wall_normal: Vec3,
 }
 
 /// The timer: where the run is, between the start line and the finish.
@@ -315,6 +369,15 @@ impl SimState {
         fold_u32(u32::from(self.player.timers.since_landed_ms), &mut h);
         fold_u32(u32::from(self.player.timers.since_jumped_ms), &mut h);
         fold_u32(u32::from(self.player.timers.double_jump_ms), &mut h);
+        // The candidate mechanics' state. Folded for the same reason
+        // `double_jump_ms` is: the mover branches on all four, so a replay
+        // could diverge with a matching checksum if they were left out — which
+        // is worse than diverging visibly. See
+        // `the_checksum_covers_the_state_a_technique_depends_on`.
+        fold_u32(u32::from(self.player.timers.slide_ms), &mut h);
+        fold_u32(u32::from(self.player.timers.dash_ms), &mut h);
+        fold_u32(u32::from(self.player.timers.wall_contact_ms), &mut h);
+        fold_vec(self.player.wall_normal, &mut h);
         fold_u32(u32::from(self.player.crouched), &mut h);
         fold_u32(u32::from(self.player.jump_held), &mut h);
         fold_u32(u32::from(self.player.left_ground_by_jumping), &mut h);
@@ -369,11 +432,41 @@ mod tests {
             since_landed_ms: u16::MAX - 1,
             since_jumped_ms: 0,
             double_jump_ms: 5,
+            slide_ms: 5,
+            dash_ms: 5,
+            wall_contact_ms: 5,
         };
         t.advance(10);
         assert_eq!(t.movement_locked_ms, 0);
         assert_eq!(t.double_jump_ms, 0);
         assert_eq!(t.since_landed_ms, u16::MAX);
+        // The candidate windows are countdowns like the double-jump one, not
+        // elapsed counters: a window that wrapped past zero would briefly
+        // re-enable a technique thousands of commands later.
+        assert_eq!(t.slide_ms, 0);
+        assert_eq!(t.dash_ms, 0);
+        assert_eq!(t.wall_contact_ms, 0);
+    }
+
+    /// Every candidate timer is actually advanced.
+    ///
+    /// Separate from the saturation test above because that one only proves
+    /// they reach zero, which a timer that is never decremented *from* a small
+    /// value also does. A window the mover reads but `advance` forgets would
+    /// stay open forever — the exact bug that turns a technique into a
+    /// permanent state, and it is one missing line away at all times.
+    #[test]
+    fn every_candidate_window_counts_down() {
+        let mut t = Timers {
+            slide_ms: 600,
+            dash_ms: 400,
+            wall_contact_ms: 200,
+            ..Timers::default()
+        };
+        t.advance(8);
+        assert_eq!(t.slide_ms, 592);
+        assert_eq!(t.dash_ms, 392);
+        assert_eq!(t.wall_contact_ms, 192);
     }
 
     #[test]
@@ -390,6 +483,37 @@ mod tests {
         let mut jumped = base;
         jumped.player.left_ground_by_jumping = true;
         assert_ne!(base.checksum(), jumped.checksum());
+
+        // The three candidate windows and the wall normal. Each is checked on
+        // its own rather than all at once, because a fold that missed exactly
+        // one of them would still pass a combined assertion.
+        for arm in [
+            (|t: &mut Timers| t.slide_ms = 600) as fn(&mut Timers),
+            |t: &mut Timers| t.dash_ms = 400,
+            |t: &mut Timers| t.wall_contact_ms = 200,
+        ] {
+            let mut armed = base;
+            arm(&mut armed.player.timers);
+            assert_ne!(
+                base.checksum(),
+                armed.checksum(),
+                "a candidate window is not folded into the checksum"
+            );
+        }
+        for axis in 0..3 {
+            let mut against_wall = base;
+            let v = &mut against_wall.player.wall_normal;
+            *match axis {
+                0 => &mut v.x,
+                1 => &mut v.y,
+                _ => &mut v.z,
+            } = s(1.0);
+            assert_ne!(
+                base.checksum(),
+                against_wall.checksum(),
+                "wall_normal component {axis} is not folded into the checksum"
+            );
+        }
 
         // Sliding and Grounded on the same plane are different states.
         let n = vec3(s(0.0), s(0.6), s(0.8));
