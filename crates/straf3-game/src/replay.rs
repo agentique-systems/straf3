@@ -96,13 +96,16 @@ pub fn parse(text: &str) -> Result<Fixture, String> {
             }
             "profile" => {
                 profile_name = (*f.get(1).unwrap_or(&"")).to_owned();
-                profile = match profile_name.as_str() {
-                    "cpm" => PhysicsProfile::cpm(),
-                    "vq3" => PhysicsProfile::vq3(),
-                    other => {
-                        return Err(at(format!("unknown profile `{other}` (cpm|vq3)")));
-                    }
-                };
+                // One table, shared with `--profile` (see `crate::profile`):
+                // a name the command line accepts and the fixture format does
+                // not would replay a recording under different physics from
+                // the ones it was made under.
+                profile = crate::profile::by_name(&profile_name).ok_or_else(|| {
+                    at(format!(
+                        "unknown profile `{profile_name}` ({})",
+                        crate::profile::NAMES
+                    ))
+                })?;
             }
             "world" => {
                 world = match f.get(1) {
@@ -275,9 +278,33 @@ pub fn trace_line(state: &SimState, csv: bool) -> String {
 /// # Errors
 ///
 /// A frame schedule that cannot advance — every entry zero — would loop
-/// forever, so it is refused.
+/// forever, so it is refused. A file recorded in a world this process cannot
+/// provide is refused too — see below.
+///
+/// # A world this process does not have is a failure, not a fallback
+///
+/// [`WorldChoice::or_fallback`] drops to the flat plane when no map is
+/// installed, and for an *interactive* session that is right: a window you can
+/// move in beats refusing to start over a missing file. For a replay it is the
+/// opposite. A replay's entire output is a claim about what a recorded command
+/// stream does, and running `world map` against an infinite plane produces a
+/// full trace, a checksum, and an exit status of zero for a run that happened
+/// somewhere else. Every downstream comparison — a determinism check, a
+/// criterion-4 diff, a personal best — would be comparing against a world
+/// nobody played in, and nothing in the output says so loudly enough to stop
+/// a script.
 pub fn replay(fixture: &Fixture, options: &ReplayOptions) -> Result<Vec<SimState>, String> {
-    let world = fixture.world.or_fallback();
+    let world = fixture.world;
+    if !world.is_available() {
+        return Err(format!(
+            "this file was recorded in the `{}` world and this process has no map \
+             installed, so there is nothing to replay it against. Pass `--map \
+             <file.map>` naming the map it was recorded on. (Refusing rather than \
+             falling back to the flat world: that would print a trace, a checksum \
+             and a run time for a run that happened somewhere else.)",
+            world.spec()
+        ));
+    }
     let mut game = Game::new(
         world.world(),
         fixture.profile,

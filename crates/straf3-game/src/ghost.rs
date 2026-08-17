@@ -127,7 +127,7 @@ impl Ghost {
         profile: &PhysicsProfile,
     ) -> Result<Self, GhostError> {
         let mut track: Vec<Sample> = Vec::with_capacity(recording.command_count());
-        let mut finished_at = None;
+        let mut finish: Option<Sample> = None;
 
         recording
             .replay(world, world_id, profile, |_, state| {
@@ -141,8 +141,17 @@ impl Ghost {
                         started_at_ms,
                         finished_at_ms,
                     } => {
-                        if finished_at.is_none() {
-                            finished_at = Some(finished_at_ms - started_at_ms);
+                        // The first `Finished` state is the command that
+                        // crossed the line, and it is the only place the
+                        // *finishing position* exists. Keeping it is not a
+                        // refinement: see the note below the loop.
+                        if finish.is_none() {
+                            finish = Some(Sample {
+                                elapsed_ms: finished_at_ms - started_at_ms,
+                                origin: state.player.origin,
+                                yaw: state.player.view.yaw_degrees(),
+                                crouched: state.player.crouched,
+                            });
                         }
                         // Commands after the finish line still exist in the
                         // file — the recorded player kept moving until they
@@ -162,18 +171,26 @@ impl Ghost {
         if track.is_empty() {
             return Err(GhostError::NeverStarted);
         }
-        let Some(run_time_ms) = finished_at else {
+        let Some(finish) = finish else {
             return Err(GhostError::NeverFinished);
         };
+        let run_time_ms = finish.elapsed_ms;
 
-        // The finish itself: the run ended between the last sample and here,
-        // and without this the ghost stops a command short of the line.
-        let last = *track.last().expect("just checked non-empty");
-        if last.elapsed_ms < run_time_ms {
-            track.push(Sample {
-                elapsed_ms: run_time_ms,
-                ..last
-            });
+        // The finish itself. Without it the ghost's path stops one command
+        // short of the line, and [`Ghost::split_ms`] — which matches the player
+        // to the nearest *point* on that path — then has nowhere to match a
+        // player standing on the line except the command before it. A run that
+        // ties the personal best exactly therefore reported a whole tick of
+        // split (measured: +8 ms at 125 Hz, racing a recording against itself).
+        //
+        // This carried a copy of the previous sample's *position* before, which
+        // fixed the ghost's disappearance but not the bias: two samples at one
+        // place is a zero-length segment the nearest-point search cannot
+        // discriminate, so it kept picking the earlier of the two. The state
+        // that actually crossed the line is the honest point, and it is the one
+        // the player's own finishing state is compared against.
+        if track.last().is_none_or(|last| last.elapsed_ms < run_time_ms) {
+            track.push(finish);
         }
 
         Ok(Self {
@@ -396,6 +413,65 @@ mod tests {
         }
     }
 
+    /// The finish sample must be *where the run finished*, not a copy of the
+    /// command before it.
+    ///
+    /// Two samples at one position is a zero-length segment, and
+    /// [`Ghost::split_ms`]'s nearest-point search cannot discriminate between
+    /// them — it kept the earlier, so a player standing on the line was matched
+    /// one command back and a tie read as a whole tick of deficit.
+    #[test]
+    fn the_finish_sample_is_the_state_that_crossed_the_line() {
+        let ghost = ghost();
+        let track = &ghost.track;
+        let finish = *track.last().unwrap();
+        let before = track[track.len() - 2];
+        assert_eq!(finish.elapsed_ms, ghost.run_time_ms());
+        assert!(
+            finish.elapsed_ms > before.elapsed_ms,
+            "the finish must be its own instant"
+        );
+        assert_ne!(
+            finish.origin, before.origin,
+            "the finish sample is a duplicate of the command before it, so the \
+             track has no point at the line"
+        );
+        // Moving along +Y, so finishing is strictly further along the course.
+        assert!(finish.origin.y > before.origin.y);
+    }
+
+    /// A *live* run of the recorded commands is level with its own ghost.
+    ///
+    /// Not a duplicate of
+    /// `racing_the_ghost_against_itself_is_level_the_whole_way_round`, which
+    /// feeds the ghost points taken out of its own track: that can only detect
+    /// a track that disagrees with itself, and it samples `step_by(7)`, so it
+    /// never asked about the finish sample at all. This drives the player from
+    /// an independent re-simulation and asks at every command, which is the
+    /// arrangement a real race is.
+    #[test]
+    fn a_live_run_of_the_recorded_commands_is_level_with_its_own_ghost() {
+        let recording = recording();
+        let mut ghost = ghost();
+        let mut worst = 0;
+        recording
+            .replay(
+                &world(),
+                &WorldId::flat(s(0.0)),
+                &PhysicsProfile::cpm(),
+                |_, state| {
+                    if let Some(elapsed_ms) = state.run.elapsed_ms(state.time_ms)
+                        && matches!(state.run, RunState::Running { .. })
+                    {
+                        let split = ghost.split_ms(state.player.origin, elapsed_ms);
+                        worst = worst.max(split.abs());
+                    }
+                },
+            )
+            .unwrap();
+        assert_eq!(worst, 0, "a run is not ahead of or behind itself");
+    }
+
     #[test]
     fn a_recording_of_an_unfinished_run_is_refused_rather_than_half_raced() {
         // Ten commands is nowhere near the finish line.
@@ -483,6 +559,22 @@ mod tests {
         // recording produces the run it recorded, so a player standing exactly
         // where the ghost was, at exactly its elapsed time, is neither ahead
         // nor behind.
+        //
+        // # What this covers, and what it used to miss
+        //
+        // It feeds the ghost points taken out of its own track, so it can only
+        // detect a track that disagrees with *itself*. `step_by(7)` then walks
+        // over the finish sample — and the finish sample is exactly where a real
+        // bug lived: it carried a copy of the previous command's position, so a
+        // run that tied its own personal best was reported 8 ms behind itself.
+        // This test passed throughout.
+        //
+        // **Do not tidy the stride away to `step_by(1)` and call that the fix.**
+        // The stride is not the problem; feeding the ghost its own data is. The
+        // two tests that actually cover this are
+        // `the_finish_sample_is_the_state_that_crossed_the_line` and
+        // `a_live_run_of_the_recorded_commands_is_level_with_its_own_ghost`,
+        // which drives the player from an independent re-simulation.
         let mut ghost = ghost();
         let track = ghost.track.clone();
         for sample in track.iter().step_by(7) {

@@ -13,6 +13,54 @@
 //! [`InputState`] changes, calls [`Game::advance`] once per frame, and hands
 //! [`Game::previous`] / [`Game::state`] / [`Game::alpha`] to the renderer.
 //!
+//! # Playback, and why it is *inside* [`Game::advance`]
+//!
+//! [`Game::play`] swaps out one thing: where a tick's command comes from — the
+//! recorded stream instead of [`InputState`]. Everything else about the frame
+//! is the identical code, running in the identical order: the accumulator, the
+//! recorder, the step function, the two-state interpolation.
+//!
+//! **This is the whole design, and it is worth defending against tidying.** The
+//! obvious alternative is to drive playback from the event loop: pull `n`
+//! commands per frame and push them through [`Game::apply`]. It looks cleaner,
+//! it keeps `advance` simpler, and it is wrong — it creates a *second stepping
+//! path*. "The windowed build plays a recording back exactly as the headless
+//! replay does" would then be a coincidence maintained by two pieces of code
+//! agreeing, rather than a fact about one piece of code. Every future change to
+//! the frame loop would have to be made twice, correctly, by someone who
+//! remembered there were two.
+//!
+//! The version of that bug this design already avoided: [`Game::apply`] does
+//! not feed the recorder, and a personal best is built out of the recorder. An
+//! event-loop playback would therefore have crossed the finish line and saved
+//! **nothing**, and the failure would have looked like a bug in the personal-best
+//! path rather than in the playback. Because playback runs through `advance`,
+//! the recorder sees it for free. Nothing had to remember to make that work.
+//!
+//! The frame rate decides *when* commands are consumed. It never decides which
+//! ones, or how many per unit of simulated time, because it never did: the tick
+//! count still comes from [`crate::FixedStep`].
+//!
+//! # What this bought, measured
+//!
+//! One recorded run of `coil` (864 commands, 125 Hz, cpm) produced a single
+//! identical [`SimState::checksum`] down **five** paths: the windowed client on
+//! an RTX 3060 Ti twice, the Windows headless `--replay`, the same replay under
+//! a deliberately hostile frame schedule (`--frame-ms 1,97,3,250,8`), and the
+//! Linux headless `--replay`. The windowed sessions drew at ~165 fps against
+//! 125 Hz commands, so the frame rate and the tick rate genuinely disagreed,
+//! across two operating systems and a real GPU, and the answer did not move.
+//!
+//! That is the strongest determinism evidence this project has: `cargo xtask
+//! determinism` compares four *targets* running the same headless code, which
+//! is a compiler-and-architecture check. This additionally crosses the seam —
+//! the same simulation with a window, a swapchain and an overlay in front of
+//! it — which is the part a player would actually be affected by.
+//!
+//! No checksum literal is written down anywhere. The tests assert the
+//! *equality* of two paths in one build, so they keep meaning this when
+//! `SimState`'s encoding changes.
+//!
 //! # Interpolation, and why two states are kept
 //!
 //! The renderer draws between the last two simulation states. Keeping the
@@ -47,6 +95,31 @@ pub struct Game<W> {
     spawn: Vec3,
     spawn_yaw: Scalar,
     recorder: Option<Recorder>,
+    /// The recorded stream driving this session, if [`Game::play`] was called.
+    playback: Option<Playback>,
+}
+
+/// A recorded command stream, and how far through it the session is.
+#[derive(Debug, Clone)]
+struct Playback {
+    cmds: Vec<UserCmd>,
+    next: usize,
+}
+
+impl Playback {
+    /// The next command, or `None` once the stream has run out.
+    fn take(&mut self) -> Option<UserCmd> {
+        let cmd = self.cmds.get(self.next).copied();
+        if cmd.is_some() {
+            self.next += 1;
+        }
+        cmd
+    }
+
+    /// How many commands have not been applied yet.
+    const fn remaining(&self) -> usize {
+        self.cmds.len() - self.next
+    }
 }
 
 impl<W: World> Game<W> {
@@ -72,7 +145,36 @@ impl<W: World> Game<W> {
             spawn,
             spawn_yaw,
             recorder: None,
+            playback: None,
         }
+    }
+
+    /// Drive this session from `cmds` instead of from [`Game::input`].
+    ///
+    /// Every tick that comes due takes the next command from the stream rather
+    /// than building one from what the player is holding. When the stream runs
+    /// out the session holds its final state: no further tick runs, and
+    /// [`Game::previous`] is collapsed onto [`Game::state`] so the render
+    /// interpolation stops swinging between the last two states forever.
+    ///
+    /// The caller is responsible for having spawned this session where the
+    /// recording began — a stream applied from a different origin re-simulates
+    /// to a different run, which is the one way this can silently lie.
+    pub fn play(&mut self, cmds: Vec<UserCmd>) {
+        self.playback = Some(Playback { cmds, next: 0 });
+    }
+
+    /// Whether this session is being driven by a recording.
+    #[must_use]
+    pub const fn is_playing(&self) -> bool {
+        self.playback.is_some()
+    }
+
+    /// How many recorded commands are still to be applied, or `None` when this
+    /// session is not playing one back.
+    #[must_use]
+    pub fn playback_remaining(&self) -> Option<usize> {
+        self.playback.as_ref().map(Playback::remaining)
     }
 
     /// Record every command this session produces, for later replay.
@@ -102,7 +204,20 @@ impl<W: World> Game<W> {
     /// commands from the *new* state and land somewhere nobody went. So the
     /// recorder is reset here, and every attempt is its own recording, which is
     /// also exactly what a personal best wants to be.
+    ///
+    /// # A played session refuses to respawn
+    ///
+    /// Under [`Game::play`] this does nothing. The remaining commands are
+    /// anchored to the state the recording began from, so restarting mid-stream
+    /// would run them from somewhere nobody recorded them from — and the
+    /// recorder, which is what the saved personal best is built out of, would
+    /// then hold half a run while claiming a whole one. The caller says so out
+    /// loud (see `app`); refusing here is what makes it impossible rather than
+    /// merely discouraged.
     pub fn respawn(&mut self) {
+        if self.playback.is_some() {
+            return;
+        }
         self.state = SimState::spawned_at(self.spawn, self.input.look.yaw());
         self.state.player.view = self.input.look.angles();
         self.previous = self.state;
@@ -121,18 +236,42 @@ impl<W: World> Game<W> {
     /// shorter than a tick) or many (a frame longer than one). **This is the
     /// decoupling** — the caller reports real time and gets told what happened
     /// to the simulation, never the other way round.
+    ///
+    /// Under [`Game::play`] the returned count is how many *recorded* commands
+    /// were applied, which is fewer than the ticks the clock bought once the
+    /// stream has run out. The accumulator is still asked first, so a played
+    /// session consumes its file on exactly the cadence a live one would
+    /// produce it.
     pub fn advance(&mut self, elapsed_ms: u64) -> u32 {
         let ticks = self.step.advance(elapsed_ms);
         let duration_ms = self.step.tick_ms();
+        let mut ran = 0;
         for _ in 0..ticks {
+            let cmd = match &mut self.playback {
+                // A stream that has run out ends the frame rather than
+                // falling back to live input: half a played run followed by
+                // half a keyboard run is not a replay of anything.
+                Some(playback) => match playback.take() {
+                    Some(cmd) => cmd,
+                    None => break,
+                },
+                None => command_from_input(&self.input, duration_ms),
+            };
             self.previous = self.state;
-            let cmd = command_from_input(&self.input, duration_ms);
             if let Some(recorder) = &mut self.recorder {
                 recorder.push(cmd);
             }
             advance_one(&mut self.state, &cmd, &self.world, &self.profile);
+            ran += 1;
         }
-        ticks
+        // A finished stream holds still. Without this the renderer would keep
+        // interpolating between the last two states as alpha cycled, and the
+        // held player would visibly vibrate on the spot for as long as the
+        // window stayed open.
+        if self.playback.as_ref().is_some_and(|p| p.remaining() == 0) {
+            self.previous = self.state;
+        }
+        ran
     }
 
     /// Apply one command directly, bypassing the wall clock entirely.

@@ -16,6 +16,21 @@
 //! | 4 — the renderer changes nothing below the seam | [`tick::advance_one`] | diffed against [`straf3_sim::step_in_place`] called directly |
 //! | 5 — frame pacing is decoupled from simulation stepping | [`tick::plan_ticks`] | synthetic frame deltas, integer arithmetic |
 //!
+//! # Watching a record: `--play`
+//!
+//! [`app::Options::playback`] drives a session from a recorded command stream
+//! with the window open and the frame drawn, instead of from the keyboard. It
+//! is the foundation of "watch a record", and it is what lets a complete run be
+//! driven deterministically on a real GPU rather than by a person who has to
+//! play well on demand.
+//!
+//! It is deliberately **not** a separate mode. Playback is a swap of where a
+//! tick's command comes from, inside [`Game::advance`], so there is exactly one
+//! stepping path in this crate and the windowed build cannot drift from the
+//! headless one. [`game`]'s module docs give the full argument, including the
+//! bug this shape avoided and the five-way checksum equality it produced on the
+//! real GPU — read them before consolidating anything here.
+//!
 //! # The one-way flow
 //!
 //! ```text
@@ -45,12 +60,13 @@ pub mod game;
 pub mod ghost;
 pub mod input_map;
 pub mod pb;
+pub mod profile;
 pub mod record;
 pub mod replay;
 pub mod scene;
 pub mod tick;
 
-pub use app::{App, Options, run};
+pub use app::{App, Options, Playback, run};
 pub use game::Game;
 pub use ghost::{Ghost, GhostError};
 pub use input_map::command_from_input;

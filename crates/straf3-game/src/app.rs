@@ -27,10 +27,12 @@
 //! The frame rate appears in the first line and the third. It does not appear
 //! in the second, and that is criterion 5.
 
+use std::fmt::Write as _;
 use std::sync::Arc;
 
 use straf3_platform::{Clock, PointerGrab, WindowConfig};
-use straf3_sim::{PhysicsProfile, TickRate, World};
+use straf3_sim::num::{Scalar, Vec3};
+use straf3_sim::{PhysicsProfile, TickRate, UserCmd, World};
 use winit::application::ApplicationHandler;
 use winit::event::{DeviceEvent, DeviceId, ElementState, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
@@ -39,6 +41,27 @@ use winit::window::{Window, WindowId};
 
 use crate::game::Game;
 use crate::scene::WorldChoice;
+
+/// A recorded command stream to drive a windowed session from.
+///
+/// # Why the spawn travels with the commands
+///
+/// A command stream is meaningless without the state it was applied from: the
+/// same commands from a different origin re-simulate to a different run. The
+/// recording says where it began, and that is what the session must spawn at —
+/// not the map's spawn marker, which can be moved without changing the map's
+/// collision identity. So the spawn is carried here rather than looked up.
+#[derive(Debug, Clone)]
+pub struct Playback {
+    /// The commands, in order, expanded from their repeat counts.
+    pub cmds: Vec<UserCmd>,
+    /// Where the recorded run began.
+    pub spawn: Vec3,
+    /// Which way the recorded player faced at that spawn, in degrees.
+    pub yaw: Scalar,
+    /// Where the stream came from, for the log line that says what is playing.
+    pub source: String,
+}
 
 /// How a session should be set up.
 #[derive(Debug, Clone)]
@@ -68,8 +91,175 @@ pub struct Options {
     /// `straf3-headless`, compare checksums" can be a script rather than a
     /// person remembering to close a window at the right moment.
     pub exit_after_ms: Option<u64>,
+    /// Drive the session from this recorded stream instead of from the
+    /// keyboard, with a window open and the frame drawn.
+    ///
+    /// This is `--play`. It is the same simulation the headless `--replay`
+    /// runs — the commands go through [`Game::advance`] either way — with a
+    /// window on the front of it, which is what lets a complete run be driven
+    /// deterministically on a real GPU and what "watch a record" is built out
+    /// of.
+    pub playback: Option<Playback>,
+    /// Write a per-frame timing log to this path when the session ends.
+    ///
+    /// Measurement only. It never reaches the simulation, which keeps taking
+    /// whole-millisecond deltas from [`Clock`] through exactly the code path it
+    /// uses without this flag — a measurement that changed what it measures
+    /// would be worthless (coordinator decision D-B7).
+    pub pacing_log: Option<String>,
     /// The window (or canvas) to open.
     pub window: WindowConfig,
+}
+
+/// High-resolution frame deltas, collected for `--pacing-log`.
+///
+/// # Why `Instant` and not [`Clock`]
+///
+/// [`Clock`] hands the simulation whole milliseconds, and that is the contract
+/// the fixed step is built on. 165 fps is 6.06 ms, so whole-millisecond
+/// truncation would destroy a p99 before anyone saw it. This reads the
+/// high-resolution clock alongside, and the simulation never sees the number.
+///
+/// # Why the samples are kept in memory
+///
+/// Formatting a line and touching the filesystem inside the frame loop would
+/// put the cost of the measurement into the measurement. Pushing a `u64` into a
+/// pre-reserved `Vec` does not allocate; the file is written once, at exit.
+struct PacingLog {
+    path: String,
+    /// The start of the previous frame. The first frame has no predecessor and
+    /// contributes no sample.
+    last: Option<std::time::Instant>,
+    deltas_ns: Vec<u64>,
+    /// The capacity reserved up front, so the file can say whether the hot path
+    /// ever had to reallocate — that would be one distorted sample, and a
+    /// distortion nobody was told about is the kind this project does not ship.
+    reserved: usize,
+}
+
+impl PacingLog {
+    /// Frames reserved up front: about 1.7 hours at 165 fps, against GPU runs
+    /// that are `--exit-after`-bounded to seconds. 8 MiB, allocated once.
+    const RESERVE: usize = 1 << 20;
+
+    fn new(path: String) -> Self {
+        let deltas_ns = Vec::with_capacity(Self::RESERVE);
+        Self {
+            path,
+            last: None,
+            reserved: deltas_ns.capacity(),
+            deltas_ns,
+        }
+    }
+
+    /// Record the start of a frame. Call it once, first thing.
+    fn frame(&mut self, now: std::time::Instant) {
+        if let Some(last) = self.last {
+            self.deltas_ns
+                .push(now.duration_since(last).as_nanos().min(u128::from(u64::MAX)) as u64);
+        }
+        self.last = Some(now);
+    }
+
+    /// The measurements, warm-up excluded: `(true frame index, delta_ns)`.
+    ///
+    /// The first *rendered* frame contributes nothing — it has no predecessor.
+    /// The interval after it is swapchain warm-up, and it is not a frame time:
+    /// two runs of the same session on the 3060 Ti measured 49 ms and 421 ms
+    /// against a steady 6. So it is not a data row either. See [`Self::to_csv`].
+    fn measurements(&self) -> impl Iterator<Item = (usize, u64)> + '_ {
+        self.deltas_ns
+            .iter()
+            .enumerate()
+            .skip(1)
+            .map(|(frame, delta_ns)| (frame, *delta_ns))
+    }
+
+    /// The swapchain warm-up interval, which is reported but is not a frame
+    /// time.
+    fn warmup_ns(&self) -> Option<u64> {
+        self.deltas_ns.first().copied()
+    }
+
+    /// The CSV, in the format `cargo xtask pacing` parses (D-B7).
+    ///
+    /// # Why the warm-up is not a row
+    ///
+    /// It used to be row 0, with a `#` comment saying to exclude it. The
+    /// consumers of this file are a parser and a reviewer skimming for a
+    /// number, and neither reads header prose — so a parser taking every data
+    /// row would publish a 421 ms worst-case frame time on a 165 Hz display,
+    /// and it would look like a finding rather than a swapchain coming up. It
+    /// is now `warmup_ns` in the header, still available to anyone who wants
+    /// it, and impossible to include by accident.
+    ///
+    /// `frame` stays the **true** frame index, so the data starts at 1 rather
+    /// than being renumbered from 0. Renumbering would misalign this file
+    /// against the session's own logs to save one line of parsing.
+    fn to_csv(&self) -> String {
+        // One row is at most 27 characters; sizing for that up front keeps the
+        // exit path from growing the string a hundred thousand times.
+        let mut out = String::with_capacity(32 * self.deltas_ns.len() + 512);
+        // v2, not v1: the data section's meaning changed — the warm-up interval
+        // used to be a row and is not one any more. A parser written against v1
+        // must refuse this file rather than quietly read one fewer sample than
+        // it expects, which is the same rule that put the warm-up in the header
+        // in the first place.
+        out.push_str("# straf3 pacing log v2\n");
+        out.push_str(&format!(
+            "# present_mode_requested={}  build={}\n",
+            requested_present_mode(),
+            if cfg!(debug_assertions) {
+                "debug"
+            } else {
+                "release"
+            },
+        ));
+        out.push_str(&format!(
+            "# warmup_ns={}  frames={}\n",
+            self.warmup_ns().unwrap_or(0),
+            self.measurements().count(),
+        ));
+        // The field is named for what it holds, not for what a reader wants it
+        // to hold. This crate asks for nothing and configures nothing:
+        // `straf3-render` picks the mode and logs the one it actually got,
+        // including a fallback when the adapter does not support the request.
+        // A field called `present_mode` would have been read as the mode
+        // measured, which is not a fact this file is in a position to state.
+        out.push_str(
+            "# present_mode_requested is the STRAF3_PRESENT_MODE value; the renderer's \
+             own log line records what was configured\n",
+        );
+        out.push_str(
+            "# warmup_ns is the first-to-second rendered frame: swapchain warm-up, not a \
+             frame time, and NOT a data row below\n",
+        );
+        if self.deltas_ns.len() > self.reserved {
+            out.push_str(&format!(
+                "# WARNING: {} frames exceeded the {} reserved, so at least one sample \
+                 includes a reallocation\n",
+                self.deltas_ns.len(),
+                self.reserved,
+            ));
+        }
+        out.push_str("frame,delta_ns\n");
+        for (frame, delta_ns) in self.measurements() {
+            // `writeln!` rather than `push_str(&format!(..))`: this runs once
+            // per frame of the session, and the latter allocates a `String` per
+            // row only to copy it and drop it. Writing into `out` cannot fail.
+            let _ = writeln!(out, "{frame},{delta_ns}");
+        }
+        out
+    }
+}
+
+/// The present mode this process was *asked* for, as `straf3-render` reads it
+/// (coordinator decision D-B8). `unknown` when nothing asked.
+fn requested_present_mode() -> String {
+    match std::env::var("STRAF3_PRESENT_MODE") {
+        Ok(mode) if !mode.is_empty() => mode,
+        _ => "unknown".to_owned(),
+    }
 }
 
 impl Default for Options {
@@ -82,6 +272,8 @@ impl Default for Options {
             record: false,
             pb_dir: Some(crate::pb::DEFAULT_DIR.to_owned()),
             exit_after_ms: None,
+            playback: None,
+            pacing_log: None,
             window: WindowConfig::straf3(),
         }
     }
@@ -135,6 +327,17 @@ pub struct App {
     /// Milliseconds ahead of (negative) or behind (positive) the ghost, as of
     /// the last frame.
     split_ms: Option<i32>,
+    /// Whether [`App::split_ms`] is the finished run's result and must not be
+    /// recomputed. See [`App::update_split`].
+    split_final: bool,
+    /// Per-frame timing, when `--pacing-log` asked for it.
+    pacing: Option<PacingLog>,
+    /// Whether the end of the played stream has already been reported.
+    ///
+    /// The stream runs out once and the window stays open afterwards, so
+    /// without this the "playback finished" line would be printed on every
+    /// frame from then on.
+    playback_reported: bool,
     /// The last frame rate [`App::report_telemetry`] computed, for the overlay.
     ///
     /// The overlay draws every frame and the rate is only measured once a
@@ -169,7 +372,14 @@ impl App {
     #[must_use]
     pub fn new(options: Options) -> Self {
         let world = options.world.or_fallback();
-        let (spawn, spawn_yaw) = world.spawn();
+        // A played session spawns where the *recording* began, not where the
+        // map's spawn marker is: moving a marker deliberately does not change
+        // the map's collision identity, so only the file can say where its own
+        // commands were applied from.
+        let (spawn, spawn_yaw) = options
+            .playback
+            .as_ref()
+            .map_or_else(|| world.spawn(), |p| (p.spawn, p.yaw));
         let mut game = Game::new(
             world.world(),
             options.profile,
@@ -177,6 +387,7 @@ impl App {
             spawn,
             spawn_yaw,
         );
+        Self::announce_profile(&options.profile_name);
         // A personal best needs the commands of whichever attempt turns out to
         // be the good one, and nobody knows that in advance — so recording is
         // on for the whole session whenever personal bests are.
@@ -186,11 +397,43 @@ impl App {
         if options.record || pb_path.is_some() {
             game.record();
         }
+        // After `record()`, so the recorder is in place before the first
+        // command is applied: the played stream has to land in the recording
+        // too, or a played run that finishes would save nothing.
+        if let Some(playback) = &options.playback {
+            log::info!(
+                "playing {} — {} commands at {} Hz ({} of simulated time), \
+                 spawn ({} {} {}) yaw {}",
+                playback.source,
+                playback.cmds.len(),
+                options.rate.hz(),
+                // Saturating rather than `as u32`: this is a log line, and a
+                // stream long enough to overflow it should print a wrong
+                // duration rather than a wrapped one.
+                clock_ms(
+                    u32::try_from(
+                        playback.cmds.len() as u64 * u64::from(options.rate.command_millis())
+                    )
+                    .unwrap_or(u32::MAX)
+                ),
+                spawn.x,
+                spawn.y,
+                spawn.z,
+                spawn_yaw,
+            );
+            game.play(playback.cmds.clone());
+        }
 
         let (personal_best, ghost) = match &pb_path {
-            Some(path) => Self::load_personal_best(path, world, &options.profile),
+            Some(path) => {
+                Self::load_personal_best(path, world, &options.profile, &options.profile_name)
+            }
             None => (None, None),
         };
+
+        // Reserved here rather than on the first frame: an 8 MiB allocation is
+        // not something to do inside the loop being measured.
+        let pacing = options.pacing_log.clone().map(PacingLog::new);
 
         Self {
             options: Options { world, ..options },
@@ -206,11 +449,40 @@ impl App {
             ghost,
             run_saved: false,
             split_ms: None,
+            split_final: false,
+            pacing,
+            playback_reported: false,
             last_fps: 0,
             #[cfg(feature = "render")]
             renderer: None,
             #[cfg(feature = "render")]
             hud: None,
+        }
+    }
+
+    /// Say what a non-canonical profile means before anyone plays under it.
+    ///
+    /// Two facts, and neither is inferable from the window: an experimental
+    /// time is never ranked against `cpm` or `vq3` (spec D2), and — until
+    /// `straf3-sim` lands the constants — the profile is a placeholder that
+    /// plays exactly like CPM. A session that felt identical to canon and said
+    /// nothing would be indistinguishable from one where the new mechanics
+    /// simply did nothing, which is the single most misleading thing this flag
+    /// could do.
+    fn announce_profile(profile_name: &str) {
+        if crate::profile::is_canon(profile_name) {
+            return;
+        }
+        log::warn!(
+            "profile `{profile_name}` is not canon: its personal bests are kept under \
+             their own name and are never ranked against a cpm or vq3 time"
+        );
+        if profile_name == "experimental" && crate::profile::is_stub() {
+            log::warn!(
+                "`experimental` is currently CPM's constants — straf3-sim has not landed \
+                 PhysicsProfile::experimental() yet, so this session is experimental in \
+                 name and record-keeping only, not in how it plays"
+            );
         }
     }
 
@@ -226,6 +498,7 @@ impl App {
         path: &str,
         world: WorldChoice,
         profile: &PhysicsProfile,
+        profile_name: &str,
     ) -> (
         Option<straf3_replay::Recording>,
         Option<crate::ghost::Ghost>,
@@ -241,6 +514,27 @@ impl App {
                 return (None, None);
             }
         };
+
+        // The second half of spec D2's rule, and the half the file name cannot
+        // enforce: `runs/<map>.<profile>.s3d` means a session never *opens*
+        // another profile's record, but a file copied or renamed into this
+        // namespace would be raced and ranked as if it belonged here. An
+        // experimental time is not a CPM time, so this is refused by the name
+        // the recording carries rather than trusted to the path it was found at.
+        //
+        // The physics digest below would catch it once the profiles' constants
+        // actually differ. It does not while `experimental` is still CPM's
+        // constants (see `crate::profile::is_stub`), which is exactly why this
+        // check does not depend on it.
+        if recording.physics().name != profile_name {
+            log::warn!(
+                "ignoring {path}: it was set under the `{}` profile and this session is \
+                 `{profile_name}`. Times under different profiles are different games and \
+                 are never ranked against each other.",
+                recording.physics().name,
+            );
+            return (None, None);
+        }
 
         let Some(world_id) = world.world_id() else {
             log::warn!("no world identity for {world:?}, so {path} cannot be raced");
@@ -347,14 +641,56 @@ impl App {
     /// `None` before the start line, and whenever there is no ghost — the
     /// overlay then draws no split at all rather than `+0.000`, which would
     /// claim the player was level with a personal best that is not there.
+    ///
+    /// # At the finish there is nothing to approximate
+    ///
+    /// [`crate::ghost::Ghost::split_ms`] matches the player onto the ghost's
+    /// path by *position*, because mid-run there are no checkpoint times to
+    /// difference. At the line both runs have a time, so the split is the
+    /// subtraction and no heuristic is involved.
+    ///
+    /// That is not a refinement, it is the difference between a true number and
+    /// a false one. The split is computed once per *frame*, so the frame that
+    /// crosses the line has usually run several commands past it, and the
+    /// nearest-point match then answers for wherever the player ended that
+    /// frame. Measured: a recording raced against itself reported `+8 ms` — a
+    /// whole tick of deficit for a run that tied — and the figure grew with the
+    /// frame delta, which is exactly the frame-rate dependence the rest of this
+    /// crate exists to keep out of what the player sees.
+    ///
+    /// # A finished run's split stops moving
+    ///
+    /// Once the line is crossed the split is a *result*. The run clock has
+    /// stopped, but the player has not: they carry on past the finish while the
+    /// ghost's path has ended, so recomputing would drag the number away from
+    /// the one that was true at the line — and the figure left on screen, in
+    /// the log and in a screenshot would be a comparison against a stretch of
+    /// course the run did not include. A run that finished with no ghost
+    /// loaded therefore keeps *no* split, rather than acquiring `+0` against
+    /// the record it has just set.
     fn update_split(&mut self) {
-        let state = self.game.state();
-        let (Some(elapsed_ms), Some(ghost)) = (state.run.elapsed_ms(state.time_ms), &mut self.ghost)
-        else {
-            self.split_ms = None;
+        if self.split_final {
             return;
-        };
-        self.split_ms = Some(ghost.split_ms(state.player.origin, elapsed_ms));
+        }
+        let state = self.game.state();
+        let run = state.run;
+        let finished = matches!(run, straf3_sim::RunState::Finished { .. });
+        match (run.elapsed_ms(state.time_ms), &mut self.ghost) {
+            (Some(elapsed_ms), Some(ghost)) if finished => {
+                let difference = i64::from(elapsed_ms) - i64::from(ghost.run_time_ms());
+                self.split_ms = Some(
+                    difference
+                        .clamp(i64::from(i32::MIN), i64::from(i32::MAX))
+                        .try_into()
+                        .expect("clamped into range"),
+                );
+            }
+            (Some(elapsed_ms), Some(ghost)) => {
+                self.split_ms = Some(ghost.split_ms(state.player.origin, elapsed_ms));
+            }
+            _ => self.split_ms = None,
+        }
+        self.split_final = finished;
     }
 
     /// The session, for a caller that wants the recording out of it afterwards.
@@ -390,30 +726,61 @@ impl App {
             .map(|r| r.to_fixture(self.options.world.spec(), &self.options.profile_name))
     }
 
-    /// One frame: read the clock, run whatever ticks that buys, draw.
-    fn frame(&mut self, event_loop: &ActiveEventLoop) {
-        if !self.primed {
-            self.primed = true;
-            self.clock.prime();
-        }
-        let delta = self.clock.frame();
-        self.game.advance(delta.delta_ms);
-        self.frames += 1;
+    /// Everything a frame does to the *session*, with no window and no
+    /// renderer in it: step the simulation by `delta_ms` of wall time, save a
+    /// run that has just finished, and recompute the split.
+    ///
+    /// Returns whether `--exit-after` has come due, `session_elapsed_ms` being
+    /// how long the session has been running.
+    ///
+    /// # Why this is public
+    ///
+    /// A windowed playback has to be checkable *without* a window, or the claim
+    /// "the run on screen is bit-identical to the headless replay of the same
+    /// file" is only ever an eyeball comparison. A test drives this over a
+    /// deliberately hostile frame schedule and compares the resulting checksum
+    /// with [`crate::replay::replay`]'s. The winit redraw handler calls this and
+    /// then draws — there is no second stepping path for a test to be fooled by.
+    pub fn simulate_frame(&mut self, delta_ms: u64, session_elapsed_ms: u64) -> bool {
+        self.game.advance(delta_ms);
+        self.report_playback_end();
 
-        // In this order, and all of it before the frame is drawn: crossing the
-        // finish line may replace the ghost being raced, and the split is what
-        // the overlay is about to be handed.
+        // The split first, and all of it before the frame is drawn. Crossing
+        // the line may replace the ghost with the run that has just been set,
+        // and the number a player wants at the finish is how they did against
+        // the record they were *racing* — measured against themselves it is
+        // zero by construction, whatever they took off the record.
+        self.update_split();
         if !self.run_saved && matches!(self.game.state().run, straf3_sim::RunState::Finished { .. })
         {
             self.run_saved = true;
             self.save_personal_best_if_better();
         }
-        self.update_split();
 
-        if let Some(limit) = self.options.exit_after_ms
-            && delta.timing.elapsed_ms >= limit
-        {
-            log::info!("--exit-after {limit} ms reached");
+        match self.options.exit_after_ms {
+            Some(limit) if session_elapsed_ms >= limit => {
+                log::info!("--exit-after {limit} ms reached");
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// One frame: read the clock, run whatever ticks that buys, draw.
+    fn frame(&mut self, event_loop: &ActiveEventLoop) {
+        // First thing in the frame, and beside the simulation's clock rather
+        // than in front of it: the number below never reaches `Game::advance`.
+        if let Some(pacing) = &mut self.pacing {
+            pacing.frame(std::time::Instant::now());
+        }
+        if !self.primed {
+            self.primed = true;
+            self.clock.prime();
+        }
+        let delta = self.clock.frame();
+        self.frames += 1;
+
+        if self.simulate_frame(delta.delta_ms, delta.timing.elapsed_ms) {
             self.finish();
             event_loop.exit();
             return;
@@ -487,6 +854,35 @@ impl App {
         self.report_telemetry(delta.timing.elapsed_ms);
     }
 
+    /// Say, once, that the recorded stream has run out.
+    ///
+    /// The checksum is on this line for the same reason it is on
+    /// [`App::finish`]'s: it is the number `straf3 --replay` prints for the
+    /// same file, so "the windowed playback and the headless replay agree" is
+    /// checked by reading two numbers rather than by watching two windows.
+    ///
+    /// The session is *not* ended here. Holding the last state with the window
+    /// open is what lets the finish-line overlay be read and photographed;
+    /// `--exit-after` remains the only thing that closes an unattended run.
+    fn report_playback_end(&mut self) {
+        if self.playback_reported || self.game.playback_remaining() != Some(0) {
+            return;
+        }
+        self.playback_reported = true;
+        let state = self.game.state();
+        log::info!(
+            "playback finished: {} commands applied, tick {}, sim {} ms, \
+             checksum {:#018x} — holding the final state",
+            self.options
+                .playback
+                .as_ref()
+                .map_or(0, |p| p.cmds.len()),
+            state.tick,
+            state.time_ms,
+            state.checksum(),
+        );
+    }
+
     /// Report where the run ended up.
     ///
     /// The checksum is the point: it is the same 64-bit digest
@@ -511,8 +907,12 @@ impl App {
         // like a session that never started one.
         match state.run {
             straf3_sim::RunState::NotStarted => log::info!("no run: the start line was not crossed"),
+            // The finish line was NOT reached — that is what `Running` means
+            // here. This line used to say "on the clock at the finish line",
+            // which read as a completed time and was untrue of every session
+            // it was ever printed for.
             straf3_sim::RunState::Running { .. } => log::info!(
-                "run unfinished: {} on the clock at the finish line",
+                "run unfinished: {} on the clock, still short of the finish line",
                 clock_ms(state.run.elapsed_ms(state.time_ms).unwrap_or(0))
             ),
             straf3_sim::RunState::Finished { .. } => log::info!(
@@ -529,6 +929,51 @@ impl App {
                 "{} ms of wall time was dropped to the per-frame tick cap over this session",
                 self.game.step().dropped_total_ms()
             );
+        }
+        self.write_pacing_log();
+    }
+
+    /// Write the per-frame timings out, if `--pacing-log` asked for them.
+    ///
+    /// Once, at the end, for the reason [`PacingLog`] gives. A session killed
+    /// rather than closed leaves no file — which is correct: a truncated pacing
+    /// log looks exactly like a complete one, and `cargo xtask pacing` would
+    /// compute a p99 over however much of the run happened to be flushed.
+    fn write_pacing_log(&self) {
+        let Some(pacing) = &self.pacing else {
+            return;
+        };
+        // Fewer than three frames leaves nothing but the warm-up interval,
+        // which is not a frame time. Writing a file whose data section is empty
+        // would hand the analysis a zero-row set to compute a p99 over; saying
+        // so and writing nothing is the same choice `--pacing-log` with
+        // `--replay` makes, for the same reason.
+        let measured = pacing.measurements().count();
+        if measured == 0 {
+            log::warn!(
+                "no frame timings to write to {}: the session drew {} frame(s), and the \
+                 only interval a session that short produces is swapchain warm-up",
+                pacing.path,
+                pacing.deltas_ns.len() + 1,
+            );
+            return;
+        }
+        match std::fs::write(&pacing.path, pacing.to_csv()) {
+            Ok(()) => log::info!(
+                "pacing log written to {} — {} frame deltas (plus {} ns of swapchain \
+                 warm-up, reported in the header and excluded from the rows), present \
+                 mode requested `{}` (the renderer logs what was configured), {} build",
+                pacing.path,
+                measured,
+                pacing.warmup_ns().unwrap_or(0),
+                requested_present_mode(),
+                if cfg!(debug_assertions) {
+                    "debug"
+                } else {
+                    "release"
+                },
+            ),
+            Err(e) => log::error!("could not write the pacing log to {}: {e}", pacing.path),
         }
     }
 
@@ -648,17 +1093,28 @@ impl ApplicationHandler for App {
 
         // Native can take the pointer immediately. The browser refuses outside
         // a user gesture, so on web the first click does it (see `MouseInput`).
+        //
+        // A played session does not take it at all: the mouse controls nothing
+        // while the file is driving, and capturing the operator's cursor for a
+        // window they are only watching is a cost with no benefit.
         #[cfg(not(target_arch = "wasm32"))]
-        self.grab_pointer();
+        if self.options.playback.is_none() {
+            self.grab_pointer();
+        }
 
         log::info!(
-            "straf3 {} — world {:?}, {} profile, {} Hz ({} ms commands). \
-             Click to capture the mouse, Esc to release, R to respawn.",
+            "straf3 {} — world {:?}, {} profile, {} Hz ({} ms commands). {}",
             env!("CARGO_PKG_VERSION"),
             self.options.world,
             self.options.profile_name,
             self.options.rate.hz(),
             self.options.rate.command_millis(),
+            if self.options.playback.is_some() {
+                "Playing a recording: the keyboard and mouse are ignored, Esc \
+                 and closing the window still work."
+            } else {
+                "Click to capture the mouse, Esc to release, R to respawn."
+            },
         );
 
         // Startup is not gameplay, and the first frame has no previous frame
@@ -716,6 +1172,17 @@ impl ApplicationHandler for App {
                         return;
                     }
                     PhysicalKey::Code(KeyCode::KeyR) => {
+                        // A respawn part-way through a played stream would run
+                        // the rest of the file from the spawn instead of from
+                        // where the recorded player actually was, and the run
+                        // on screen would stop being the run in the file.
+                        if self.options.playback.is_some() {
+                            log::info!(
+                                "R ignored: this session is playing a recording, and a \
+                                 respawn would desync it from the run it is replaying"
+                            );
+                            return;
+                        }
                         self.game.respawn();
                         // A new attempt: the run clock is back at NotStarted,
                         // the recorder has started again from the spawn, and
@@ -723,6 +1190,7 @@ impl ApplicationHandler for App {
                         // rather than from wherever the last attempt died.
                         self.run_saved = false;
                         self.split_ms = None;
+                        self.split_final = false;
                         if let Some(ghost) = &mut self.ghost {
                             ghost.rewind();
                         }
@@ -735,14 +1203,21 @@ impl ApplicationHandler for App {
             _ => {}
         }
 
-        self.game.input.apply_window_event(&event);
+        // A played session takes its movement from the file. Dropping the
+        // event here rather than letting it update an `InputState` nothing
+        // reads is the difference between "live input is ignored" being a
+        // structural fact and being a consequence somebody could undo.
+        if self.options.playback.is_none() {
+            self.game.input.apply_window_event(&event);
+        }
     }
 
     fn device_event(&mut self, _loop: &ActiveEventLoop, _id: DeviceId, event: DeviceEvent) {
         // Mouse motion only turns the view while the pointer is captured —
         // otherwise moving the mouse across a windowed build would spin the
-        // camera while the player is clicking on something else.
-        if self.grab == PointerGrab::Grabbed {
+        // camera while the player is clicking on something else. And never
+        // during playback, for the reason above.
+        if self.grab == PointerGrab::Grabbed && self.options.playback.is_none() {
             self.game.input.apply_device_event(&event);
         }
     }
@@ -797,6 +1272,192 @@ pub fn run(options: Options) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::replay::{ReplayOptions, parse, replay};
+
+    /// A run long enough to leave the ground and land again, on the flat world
+    /// — which is the only world a test in this process can rely on, since the
+    /// map is a process-wide singleton (`scene::install`).
+    const FIXTURE: &str = "\
+rate 125
+profile cpm
+world flat 0
+spawn 0 0 24
+yaw 90
+
+cmd 60 127 0 0 - 0 90
+cmd 1 127 0 127 jump 0 90
+cmd 40 127 127 0 - 0 95.5
+cmd 1 127 127 127 jump 0 101.0
+cmd 80 127 127 0 - 0 108.25
+";
+
+    /// Frame schedules a real machine can produce, including the ones that
+    /// break a loop which assumes one frame is one tick: a frame shorter than a
+    /// command, a frame of nothing at all, and a 250 ms hitch that owes the
+    /// simulation 31 commands at once.
+    const HOSTILE_SCHEDULES: &[&[u64]] = &[
+        &[8],
+        &[1, 97, 3, 250, 8],
+        &[0, 0, 0, 33],
+        &[250],
+        &[1],
+        &[16, 17],
+    ];
+
+    fn playback_options(fixture: &crate::replay::Fixture, source: &str) -> Options {
+        Options {
+            world: fixture.world,
+            profile: fixture.profile,
+            profile_name: fixture.profile_name.clone(),
+            rate: fixture.rate,
+            // No personal best: this test is about the simulation, and a test
+            // that wrote into `runs/` would be a test with a side effect.
+            pb_dir: None,
+            playback: Some(Playback {
+                cmds: fixture.cmds.clone(),
+                spawn: fixture.spawn,
+                yaw: fixture.yaw,
+                source: source.to_owned(),
+            }),
+            ..Options::default()
+        }
+    }
+
+    /// **The acceptance test for `--play`** (coordinator decision D-B1).
+    ///
+    /// A windowed playback session, driven through `App`'s own per-frame path
+    /// over frame schedules no real machine would be kind enough to produce,
+    /// must land on exactly the checksum the headless `--replay` of the same
+    /// file produces — and must do so at *every* tick, not merely at the last.
+    /// A divergence can reconverge: a run has been measured agreeing on its
+    /// final state while 29 of 1200 intermediate states differed, and an
+    /// end-state comparison would have called that identical.
+    ///
+    /// If these numbers could differ, everything downstream of this — the
+    /// personal best a played run saves, the ghost it becomes, the split — would
+    /// be measuring a run nobody recorded.
+    #[test]
+    fn a_played_session_matches_the_headless_replay_at_every_tick() {
+        let fixture = parse(FIXTURE).unwrap();
+        let reference = replay(&fixture, &ReplayOptions::default()).unwrap();
+        assert_eq!(reference.len(), fixture.cmds.len() + 1);
+
+        for schedule in HOSTILE_SCHEDULES {
+            let mut app = App::new(playback_options(&fixture, "test fixture"));
+            assert_eq!(
+                app.game().state().checksum(),
+                reference[0].checksum(),
+                "schedule {schedule:?}: the session did not even start where the file did"
+            );
+
+            let mut applied = 0usize;
+            let mut elapsed_ms = 0u64;
+            for frame in 0..100_000 {
+                let delta = schedule[frame % schedule.len()];
+                elapsed_ms += delta;
+                app.simulate_frame(delta, elapsed_ms);
+                applied += app.game().state().tick as usize - applied;
+                assert_eq!(
+                    app.game().state().checksum(),
+                    reference[applied].checksum(),
+                    "schedule {schedule:?}: diverged after {applied} commands"
+                );
+                if app.game().playback_remaining() == Some(0) {
+                    break;
+                }
+            }
+
+            assert_eq!(
+                applied,
+                fixture.cmds.len(),
+                "schedule {schedule:?}: the stream did not run to the end"
+            );
+            assert_eq!(
+                app.game().state().checksum(),
+                reference.last().unwrap().checksum(),
+                "schedule {schedule:?}"
+            );
+            assert_eq!(app.game().state().time_ms, reference.last().unwrap().time_ms);
+        }
+    }
+
+    #[test]
+    fn a_finished_stream_holds_its_state_however_long_the_window_stays_open() {
+        let fixture = parse(FIXTURE).unwrap();
+        let mut app = App::new(playback_options(&fixture, "test fixture"));
+        let mut elapsed_ms = 0;
+        while app.game().playback_remaining() != Some(0) {
+            elapsed_ms += 8;
+            app.simulate_frame(8, elapsed_ms);
+        }
+        let held = app.game().state().checksum();
+
+        for _ in 0..500 {
+            elapsed_ms += 16;
+            app.simulate_frame(16, elapsed_ms);
+        }
+        assert_eq!(app.game().state().checksum(), held);
+        assert_eq!(app.game().state().tick as usize, fixture.cmds.len());
+        // And the interpolation has a fixed point rather than swinging between
+        // the last two states for as long as the window is open.
+        assert_eq!(
+            app.game().previous().checksum(),
+            app.game().state().checksum()
+        );
+    }
+
+    #[test]
+    fn a_played_session_spawns_where_the_recording_began_not_where_the_world_says() {
+        // The failure this catches is silent: the same commands from a
+        // different origin re-simulate to a different run, and nothing about it
+        // looks wrong on screen.
+        let mut fixture = parse(FIXTURE).unwrap();
+        fixture.spawn = straf3_sim::num::vec3(
+            straf3_sim::num::s(128.0),
+            straf3_sim::num::s(-64.0),
+            straf3_sim::num::s(24.0),
+        );
+        let app = App::new(playback_options(&fixture, "test fixture"));
+        assert_eq!(app.game().state().player.origin, fixture.spawn);
+        assert!(app.game().is_playing());
+    }
+
+    #[test]
+    fn a_played_session_ignores_respawn_because_it_would_desync_the_stream() {
+        let fixture = parse(FIXTURE).unwrap();
+        let mut app = App::new(playback_options(&fixture, "test fixture"));
+        for _ in 0..20 {
+            app.simulate_frame(8, 0);
+        }
+        let mid_run = app.game().state().checksum();
+        let consumed = app.game().state().tick;
+
+        // `App` refuses the key, and `Game` refuses the operation, so a future
+        // caller cannot reintroduce the desync by going round the event loop.
+        app.game.respawn();
+        assert_eq!(app.game().state().checksum(), mid_run);
+        assert_eq!(app.game().state().tick, consumed);
+    }
+
+    /// A played session must record what it played, or a played run that
+    /// finishes saves nothing — `save_personal_best_if_better` builds the
+    /// `.s3d` out of the recorder, and `Game::apply` never fed it.
+    #[test]
+    fn a_played_session_records_the_commands_it_was_driven_by() {
+        let fixture = parse(FIXTURE).unwrap();
+        let mut options = playback_options(&fixture, "test fixture");
+        options.record = true;
+        let mut app = App::new(options);
+        while app.game().playback_remaining() != Some(0) {
+            app.simulate_frame(8, 0);
+        }
+
+        let recorded = app.game().recorder().expect("recording was asked for");
+        assert_eq!(recorded.commands(), fixture.cmds.as_slice());
+        assert_eq!(recorded.start().spawn, fixture.spawn);
+        assert_eq!(recorded.start().yaw, fixture.yaw);
+        assert_eq!(recorded.start().rate, fixture.rate);
+    }
 
     #[test]
     fn the_default_options_are_the_ones_the_spec_chose() {
