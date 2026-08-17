@@ -1014,9 +1014,18 @@ impl App {
             ),
             None => String::new(),
         };
+        // Foot clearance, to three decimals because the band it exists to make
+        // visible is a quarter of a unit wide (`Game::foot_clearance`). One
+        // sample a second cannot show a landing — nothing sampled at 1 Hz can
+        // say anything about a sub-tick event — so this is here to make the
+        // number checkable in an unattended run's log, not to be watched.
+        let clearance = match self.game.foot_clearance() {
+            Some(units) => format!("   clear {units:.3}"),
+            None => String::new(),
+        };
         log::info!(
             "speed {:>6.1} ups   origin ({:>8.1} {:>8.1} {:>8.1})   {}   \
-             tick {}   sim {} ms   {} fps{run}",
+             tick {}   sim {} ms   {} fps{run}{clearance}",
             self.game.horizontal_speed(),
             state.player.origin.x,
             state.player.origin.y,

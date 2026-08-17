@@ -71,6 +71,7 @@
 
 use straf3_platform::InputState;
 use straf3_sim::num::{Scalar, Vec3};
+use straf3_sim::world::Sweep;
 use straf3_sim::{PhysicsProfile, SimState, TickRate, UserCmd, World};
 
 use crate::input_map::command_from_input;
@@ -328,7 +329,90 @@ impl<W: World> Game<W> {
         let v = self.state.player.velocity;
         (v.x * v.x + v.y * v.y).sqrt()
     }
+
+    /// How far the player's feet are above the surface below them, in units.
+    /// `None` when there is nothing underneath within [`CLEARANCE_FAR_PROBE`].
+    ///
+    /// # Why this exists
+    ///
+    /// Ramp boost and overbounce are one mechanism, and it fires on whether a
+    /// command happened to end with the feet inside a
+    /// [`PhysicsProfile::ground_trace_probe`]-wide band above the surface —
+    /// a quarter of a unit. Nothing on screen distinguishes a drop that will do
+    /// it from one half a unit taller that will not, so to a player the largest
+    /// speed gain in the game reads as luck. The operator's ruling was to make
+    /// it visible. This is the number that makes the band observable.
+    ///
+    /// # What this number cannot tell you
+    ///
+    /// **It does not predict whether a landing will overbounce**, and an
+    /// overlay built on it must not imply that it does. What decides the
+    /// outcome is where a *command boundary* happens to fall relative to the
+    /// surface as the player descends — a sub-tick question about when the
+    /// simulation next samples, and the signal that would answer it does not
+    /// exist above the seam. Two descents through identical clearances at
+    /// different velocities resolve differently.
+    ///
+    /// What it does do is make the *band* legible: a player can watch the
+    /// number pass through a quarter of a unit and learn that the effect lives
+    /// in a fraction of a unit, rather than experiencing it as randomness. That
+    /// is a smaller claim than prediction and it is the true one.
+    ///
+    /// # Why it is measured the way the simulation measures it
+    ///
+    /// The same downward hull sweep `PM_GroundTrace` issues, from the same
+    /// origin with the same hull — only longer, and reported rather than acted
+    /// on. A readout computed a second way could disagree with the rule it
+    /// claims to illustrate, which would be worse than no readout.
+    ///
+    /// It is a *probe*: nothing here is carried along the sweep, no trigger is
+    /// gathered, and no state is written. The simulation cannot observe that
+    /// this was called.
+    ///
+    /// # Resolution
+    ///
+    /// A tracer's `fraction` carries relative error, so recovering a distance
+    /// from a long sweep loses precision exactly where it is needed — over
+    /// 4096 units, an `f32` ulp is a substantial slice of a quarter-unit band.
+    /// So the near probe is tried first and is short enough that its answer is
+    /// precise around the band; the far probe only runs when the near one found
+    /// nothing, where the question is "how high am I" and a unit either way
+    /// does not matter.
+    #[must_use]
+    pub fn foot_clearance(&self) -> Option<Scalar> {
+        let hull = self.profile.hull(self.state.player.crouched);
+        let origin = self.state.player.origin;
+        let probe = |distance: Scalar| {
+            let trace = self.world.trace(&Sweep {
+                start: origin,
+                end: origin - straf3_sim::num::UP * distance,
+                half_extents: hull.half_extents,
+                center_offset: hull.center_offset,
+            });
+            if trace.start_solid || trace.all_solid {
+                // Feet already inside geometry. Zero rather than `None`: there
+                // is a surface, and the distance to it is nothing.
+                return Some(straf3_sim::num::s(0.0));
+            }
+            (trace.fraction < straf3_sim::num::s(1.0)).then_some(trace.fraction * distance)
+        };
+        probe(CLEARANCE_NEAR_PROBE).or_else(|| probe(CLEARANCE_FAR_PROBE))
+    }
 }
+
+/// The short downward probe [`Game::foot_clearance`] tries first.
+///
+/// Comfortably larger than a step (18 units is the profile's step height, and
+/// this is deliberately smaller — a clearance reading that large is not about
+/// the band any more) while short enough that the recovered distance stays
+/// precise across the quarter-unit band the readout exists for.
+pub const CLEARANCE_NEAR_PROBE: Scalar = straf3_sim::num::s(16.0);
+
+/// The long downward probe, used only when the short one found nothing.
+///
+/// The same distance `scene`'s "is there a floor under the spawn" check uses,
+/// so "no ground under the player" means the same thing in both places.
+pub const CLEARANCE_FAR_PROBE: Scalar = straf3_sim::num::s(4096.0);
 
 #[cfg(test)]
 mod tests {
@@ -430,6 +514,84 @@ mod tests {
             game.state().player.view.yaw,
             straf3_sim::angle_to_short(looking)
         );
+    }
+
+    /// The readout measures what the simulation measures: standing on the
+    /// plane is zero clearance, and lifting the player lifts the number by the
+    /// same amount.
+    #[test]
+    fn foot_clearance_is_the_distance_from_the_feet_to_the_surface() {
+        let mut game = session();
+        // The flat spawn is stood on the floor: origin z=24, feet at z=0.
+        assert_eq!(game.foot_clearance(), Some(s(0.0)));
+
+        for height in [s(0.25), s(1.0), s(12.5), s(100.0), s(1000.0)] {
+            game.state.player.origin = vec3(s(0.0), s(0.0), s(24.0) + height);
+            let clearance = game.foot_clearance().expect("the plane is underneath");
+            // Not exact equality: the far probe recovers a distance from a
+            // fraction over 4096 units, and that is the precision this readout
+            // documents. A tenth of a unit at 1000 is far finer than anything
+            // the band needs.
+            assert!(
+                (clearance - height).abs() < s(0.1),
+                "clearance {clearance} for a player {height} above the floor"
+            );
+        }
+    }
+
+    /// The quarter-unit band the whole readout exists to make legible is
+    /// resolved, not rounded away.
+    #[test]
+    fn the_quarter_unit_band_is_resolved_rather_than_rounded_to_nothing() {
+        let mut game = session();
+        let band = PhysicsProfile::cpm().ground_trace_probe;
+        assert_eq!(band, s(0.25), "the band this readout is about");
+
+        // Either side of the band, and the readout must tell them apart — that
+        // is the entire point. A number that could not would leave the largest
+        // speed gain in the game looking like luck, which is what the operator
+        // ruled against.
+        let mut clearance_at = |height: Scalar| {
+            game.state.player.origin = vec3(s(0.0), s(0.0), s(24.0) + height);
+            game.foot_clearance().expect("the plane is underneath")
+        };
+        let inside = clearance_at(band * s(0.5));
+        let outside = clearance_at(band * s(2.0));
+        assert!(inside < band, "{inside} should read as inside the band");
+        assert!(outside > band, "{outside} should read as outside it");
+        // And the resolution is far finer than the band, not merely finer.
+        let a = clearance_at(s(0.01));
+        let b = clearance_at(s(0.02));
+        assert!(a < b, "0.01 and 0.02 units must be distinguishable: {a} vs {b}");
+    }
+
+    #[test]
+    fn a_world_with_no_floor_reports_no_clearance_rather_than_a_number() {
+        // `None`, so the overlay can say nothing rather than draw a distance to
+        // a surface that is not there.
+        let game = Game::new(
+            straf3_sim::world::EmptyWorld,
+            PhysicsProfile::cpm(),
+            TickRate::HZ_125,
+            vec3(s(0.0), s(0.0), s(24.0)),
+            s(90.0),
+        );
+        assert_eq!(game.foot_clearance(), None);
+    }
+
+    #[test]
+    fn measuring_clearance_does_not_move_the_simulation() {
+        // It is a probe. If reading the overlay could change the run, the
+        // overlay would be a mechanic.
+        let mut game = session();
+        game.input.set(Action::MoveForward, true);
+        game.advance(400);
+        let before = game.state().checksum();
+        for _ in 0..100 {
+            let _ = game.foot_clearance();
+        }
+        assert_eq!(game.state().checksum(), before);
+        assert_eq!(game.previous().checksum(), game.previous().checksum());
     }
 
     #[test]
