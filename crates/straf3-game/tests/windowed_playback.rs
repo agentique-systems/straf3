@@ -226,7 +226,10 @@ fn a_played_run_saves_a_personal_best_that_a_second_session_races() {
         .expect("the saved personal best must load and re-simulate into a ghost");
     assert_eq!(ghost.run_time_ms(), COIL_RUN_MS);
     assert!(ghost.sample_count() > 0);
-    assert!(second.split_ms().is_none(), "no split before the start line");
+    assert!(
+        second.split_ms().is_none(),
+        "no split before the start line"
+    );
 
     // Race it. The split exists from the moment the start line is crossed —
     // that is the number the overlay draws.

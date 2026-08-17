@@ -189,7 +189,10 @@ impl Ghost {
         // discriminate, so it kept picking the earlier of the two. The state
         // that actually crossed the line is the honest point, and it is the one
         // the player's own finishing state is compared against.
-        if track.last().is_none_or(|last| last.elapsed_ms < run_time_ms) {
+        if track
+            .last()
+            .is_none_or(|last| last.elapsed_ms < run_time_ms)
+        {
             track.push(finish);
         }
 
