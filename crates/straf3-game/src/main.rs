@@ -193,6 +193,17 @@ recording that spanned one could not be replayed.
                 eprintln!("straf3: recording written to {path}");
             }
             (Some(path), None) => {
+                // The startup check opened this path to prove it writable, so
+                // if it did not exist before there is now an empty file where
+                // the message says nothing was written. An empty file is never
+                // a valid recording — it has no `rate` — so it would fail
+                // loudly if replayed, but it would still sit in a directory
+                // looking like a run somebody made. Clear it up, and *only*
+                // when it is empty: a session that recorded nothing must not
+                // destroy the recording that was already there.
+                if std::fs::metadata(&path).is_ok_and(|m| m.len() == 0) {
+                    let _ = std::fs::remove_file(&path);
+                }
                 eprintln!("straf3: nothing was recorded, {path} not written");
                 return ExitCode::FAILURE;
             }

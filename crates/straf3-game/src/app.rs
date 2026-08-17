@@ -27,6 +27,7 @@
 //! The frame rate appears in the first line and the third. It does not appear
 //! in the second, and that is criterion 5.
 
+use std::fmt::Write as _;
 use std::sync::Arc;
 
 use straf3_platform::{Clock, PointerGrab, WindowConfig};
@@ -160,12 +161,51 @@ impl PacingLog {
         self.last = Some(now);
     }
 
+    /// The measurements, warm-up excluded: `(true frame index, delta_ns)`.
+    ///
+    /// The first *rendered* frame contributes nothing — it has no predecessor.
+    /// The interval after it is swapchain warm-up, and it is not a frame time:
+    /// two runs of the same session on the 3060 Ti measured 49 ms and 421 ms
+    /// against a steady 6. So it is not a data row either. See [`Self::to_csv`].
+    fn measurements(&self) -> impl Iterator<Item = (usize, u64)> + '_ {
+        self.deltas_ns
+            .iter()
+            .enumerate()
+            .skip(1)
+            .map(|(frame, delta_ns)| (frame, *delta_ns))
+    }
+
+    /// The swapchain warm-up interval, which is reported but is not a frame
+    /// time.
+    fn warmup_ns(&self) -> Option<u64> {
+        self.deltas_ns.first().copied()
+    }
+
     /// The CSV, in the format `cargo xtask pacing` parses (D-B7).
+    ///
+    /// # Why the warm-up is not a row
+    ///
+    /// It used to be row 0, with a `#` comment saying to exclude it. The
+    /// consumers of this file are a parser and a reviewer skimming for a
+    /// number, and neither reads header prose — so a parser taking every data
+    /// row would publish a 421 ms worst-case frame time on a 165 Hz display,
+    /// and it would look like a finding rather than a swapchain coming up. It
+    /// is now `warmup_ns` in the header, still available to anyone who wants
+    /// it, and impossible to include by accident.
+    ///
+    /// `frame` stays the **true** frame index, so the data starts at 1 rather
+    /// than being renumbered from 0. Renumbering would misalign this file
+    /// against the session's own logs to save one line of parsing.
     fn to_csv(&self) -> String {
         // One row is at most 27 characters; sizing for that up front keeps the
         // exit path from growing the string a hundred thousand times.
         let mut out = String::with_capacity(32 * self.deltas_ns.len() + 512);
-        out.push_str("# straf3 pacing log v1\n");
+        // v2, not v1: the data section's meaning changed — the warm-up interval
+        // used to be a row and is not one any more. A parser written against v1
+        // must refuse this file rather than quietly read one fewer sample than
+        // it expects, which is the same rule that put the warm-up in the header
+        // in the first place.
+        out.push_str("# straf3 pacing log v2\n");
         out.push_str(&format!(
             "# present_mode_requested={}  build={}\n",
             requested_present_mode(),
@@ -174,6 +214,11 @@ impl PacingLog {
             } else {
                 "release"
             },
+        ));
+        out.push_str(&format!(
+            "# warmup_ns={}  frames={}\n",
+            self.warmup_ns().unwrap_or(0),
+            self.measurements().count(),
         ));
         // The field is named for what it holds, not for what a reader wants it
         // to hold. This crate asks for nothing and configures nothing:
@@ -185,6 +230,10 @@ impl PacingLog {
             "# present_mode_requested is the STRAF3_PRESENT_MODE value; the renderer's \
              own log line records what was configured\n",
         );
+        out.push_str(
+            "# warmup_ns is the first-to-second rendered frame: swapchain warm-up, not a \
+             frame time, and NOT a data row below\n",
+        );
         if self.deltas_ns.len() > self.reserved {
             out.push_str(&format!(
                 "# WARNING: {} frames exceeded the {} reserved, so at least one sample \
@@ -194,8 +243,11 @@ impl PacingLog {
             ));
         }
         out.push_str("frame,delta_ns\n");
-        for (frame, delta_ns) in self.deltas_ns.iter().enumerate() {
-            out.push_str(&format!("{frame},{delta_ns}\n"));
+        for (frame, delta_ns) in self.measurements() {
+            // `writeln!` rather than `push_str(&format!(..))`: this runs once
+            // per frame of the session, and the latter allocates a `String` per
+            // row only to copy it and drop it. Writing into `out` cannot fail.
+            let _ = writeln!(out, "{frame},{delta_ns}");
         }
         out
     }
@@ -355,8 +407,14 @@ impl App {
                 playback.source,
                 playback.cmds.len(),
                 options.rate.hz(),
+                // Saturating rather than `as u32`: this is a log line, and a
+                // stream long enough to overflow it should print a wrong
+                // duration rather than a wrapped one.
                 clock_ms(
-                    playback.cmds.len() as u32 * u32::from(options.rate.command_millis())
+                    u32::try_from(
+                        playback.cmds.len() as u64 * u64::from(options.rate.command_millis())
+                    )
+                    .unwrap_or(u32::MAX)
                 ),
                 spawn.x,
                 spawn.y,
@@ -619,8 +677,13 @@ impl App {
         let finished = matches!(run, straf3_sim::RunState::Finished { .. });
         match (run.elapsed_ms(state.time_ms), &mut self.ghost) {
             (Some(elapsed_ms), Some(ghost)) if finished => {
-                self.split_ms =
-                    Some((i64::from(elapsed_ms) - i64::from(ghost.run_time_ms())) as i32);
+                let difference = i64::from(elapsed_ms) - i64::from(ghost.run_time_ms());
+                self.split_ms = Some(
+                    difference
+                        .clamp(i64::from(i32::MIN), i64::from(i32::MAX))
+                        .try_into()
+                        .expect("clamped into range"),
+                );
             }
             (Some(elapsed_ms), Some(ghost)) => {
                 self.split_ms = Some(ghost.split_ms(state.player.origin, elapsed_ms));
@@ -676,8 +739,8 @@ impl App {
     /// "the run on screen is bit-identical to the headless replay of the same
     /// file" is only ever an eyeball comparison. A test drives this over a
     /// deliberately hostile frame schedule and compares the resulting checksum
-    /// with [`crate::replay::replay`]'s. [`App::frame`] calls it and then draws
-    /// — there is no second stepping path for a test to be fooled by.
+    /// with [`crate::replay::replay`]'s. The winit redraw handler calls this and
+    /// then draws — there is no second stepping path for a test to be fooled by.
     pub fn simulate_frame(&mut self, delta_ms: u64, session_elapsed_ms: u64) -> bool {
         self.game.advance(delta_ms);
         self.report_playback_end();
@@ -880,19 +943,29 @@ impl App {
         let Some(pacing) = &self.pacing else {
             return;
         };
-        if pacing.deltas_ns.is_empty() {
+        // Fewer than three frames leaves nothing but the warm-up interval,
+        // which is not a frame time. Writing a file whose data section is empty
+        // would hand the analysis a zero-row set to compute a p99 over; saying
+        // so and writing nothing is the same choice `--pacing-log` with
+        // `--replay` makes, for the same reason.
+        let measured = pacing.measurements().count();
+        if measured == 0 {
             log::warn!(
-                "no frame timings to write to {}: the session drew fewer than two frames",
-                pacing.path
+                "no frame timings to write to {}: the session drew {} frame(s), and the \
+                 only interval a session that short produces is swapchain warm-up",
+                pacing.path,
+                pacing.deltas_ns.len() + 1,
             );
             return;
         }
         match std::fs::write(&pacing.path, pacing.to_csv()) {
             Ok(()) => log::info!(
-                "pacing log written to {} — {} frame deltas, present mode requested `{}` \
-                 (the renderer logs what was configured), {} build",
+                "pacing log written to {} — {} frame deltas (plus {} ns of swapchain \
+                 warm-up, reported in the header and excluded from the rows), present \
+                 mode requested `{}` (the renderer logs what was configured), {} build",
                 pacing.path,
-                pacing.deltas_ns.len(),
+                measured,
+                pacing.warmup_ns().unwrap_or(0),
                 requested_present_mode(),
                 if cfg!(debug_assertions) {
                     "debug"

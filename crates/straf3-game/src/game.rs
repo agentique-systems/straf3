@@ -15,17 +15,51 @@
 //!
 //! # Playback, and why it is *inside* [`Game::advance`]
 //!
-//! [`Game::play`] swaps out where a tick's command comes from: the recorded
-//! stream instead of [`InputState`]. Everything else about the frame — the
-//! accumulator, the recorder, the step function, the two-state interpolation —
-//! is the identical code. That is the point. Playback that lived in the event
-//! loop would be a *second* stepping path, and "the windowed build plays a
-//! recording back exactly as the headless replay does" would then be a
-//! coincidence to be maintained rather than a structural fact.
+//! [`Game::play`] swaps out one thing: where a tick's command comes from — the
+//! recorded stream instead of [`InputState`]. Everything else about the frame
+//! is the identical code, running in the identical order: the accumulator, the
+//! recorder, the step function, the two-state interpolation.
+//!
+//! **This is the whole design, and it is worth defending against tidying.** The
+//! obvious alternative is to drive playback from the event loop: pull `n`
+//! commands per frame and push them through [`Game::apply`]. It looks cleaner,
+//! it keeps `advance` simpler, and it is wrong — it creates a *second stepping
+//! path*. "The windowed build plays a recording back exactly as the headless
+//! replay does" would then be a coincidence maintained by two pieces of code
+//! agreeing, rather than a fact about one piece of code. Every future change to
+//! the frame loop would have to be made twice, correctly, by someone who
+//! remembered there were two.
+//!
+//! The version of that bug this design already avoided: [`Game::apply`] does
+//! not feed the recorder, and a personal best is built out of the recorder. An
+//! event-loop playback would therefore have crossed the finish line and saved
+//! **nothing**, and the failure would have looked like a bug in the personal-best
+//! path rather than in the playback. Because playback runs through `advance`,
+//! the recorder sees it for free. Nothing had to remember to make that work.
 //!
 //! The frame rate decides *when* commands are consumed. It never decides which
-//! ones or how many per unit of simulated time, because it never did: the tick
+//! ones, or how many per unit of simulated time, because it never did: the tick
 //! count still comes from [`crate::FixedStep`].
+//!
+//! # What this bought, measured
+//!
+//! One recorded run of `coil` (864 commands, 125 Hz, cpm) produced a single
+//! identical [`SimState::checksum`] down **five** paths: the windowed client on
+//! an RTX 3060 Ti twice, the Windows headless `--replay`, the same replay under
+//! a deliberately hostile frame schedule (`--frame-ms 1,97,3,250,8`), and the
+//! Linux headless `--replay`. The windowed sessions drew at ~165 fps against
+//! 125 Hz commands, so the frame rate and the tick rate genuinely disagreed,
+//! across two operating systems and a real GPU, and the answer did not move.
+//!
+//! That is the strongest determinism evidence this project has: `cargo xtask
+//! determinism` compares four *targets* running the same headless code, which
+//! is a compiler-and-architecture check. This additionally crosses the seam —
+//! the same simulation with a window, a swapchain and an overlay in front of
+//! it — which is the part a player would actually be affected by.
+//!
+//! No checksum literal is written down anywhere. The tests assert the
+//! *equality* of two paths in one build, so they keep meaning this when
+//! `SimState`'s encoding changes.
 //!
 //! # Interpolation, and why two states are kept
 //!
