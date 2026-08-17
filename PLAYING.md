@@ -142,10 +142,15 @@ colours, and the wgpu draw. Its layout is covered by unit tests that read the
 drawn strings back out of egui, and it has been rendered to a real texture on
 this machine through the software adapter.
 
-**It is not yet called from the windowed client.** `straf3-game` still has to
-hand it the frame; until that lands, the once-a-second console line below is
-what you read while playing, and the overlay is seen through the offscreen
-renderer:
+**It is now called from the windowed client.** `straf3-game` hands it the frame
+every tick, and the ghost is drawn into the same pass. That wiring landed at the
+close of this wave, together with the PB and ghost work described below.
+
+One honest limit on that claim: this box has no GPU, and the windowed client was
+never launched here to look at it. The wiring is landed, compiles, and the whole
+workspace suite is green — but **nobody has yet watched the overlay on screen in
+the windowed client.** Until someone runs it on a real GPU, the offscreen
+renderer below is still the only place its pixels have actually been seen:
 
 ```
 cargo run -p straf3-devtools --example hud-offscreen
@@ -289,11 +294,15 @@ machine with no adapter punishes the correct environment.
 
 Stated plainly so nothing above is read as a promise:
 
-- **The overlay is not yet drawn by the windowed client** (see above).
-- **No personal best is saved and no ghost is raced.** The run clock's
-  start/finish volumes, the `.s3d` recording format and the ghost are landing
-  in this wave; the overlay already draws the time and the split it will be
-  given.
+- **The overlay is drawn by the windowed client, but has not been watched on
+  screen** (see above). Landed and compiling, never visually confirmed here.
+- **A personal best is saved and a ghost is raced — in code that has not been
+  played.** The run clock, the `.s3d` format, PB persistence at
+  `runs/<map>.<profile>.s3d` and the re-simulated ghost all landed this wave and
+  are covered by unit tests. What was verified end to end on this box is the
+  headless path: the shipped binary replays `coil-run.txt` against `coil.map`
+  and produces a 5096 ms run with checksum `0x9a854d1a3653d8b7`. What was *not*
+  verified is a human playing a run, saving a PB and racing it in the window.
 - **No browser client.** The wasm build is proven bit-identical to native by
   `cargo xtask determinism`; a playable URL is deferred (spec rev 2,
   criterion 9).
