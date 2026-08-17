@@ -354,6 +354,12 @@ pub struct Gfx {
     /// Which backend actually got picked, so a bug report can say so rather
     /// than guess.
     pub backend: wgpu::Backend,
+    /// The present mode the surface is actually running in, and how it was
+    /// arrived at. Kept so a caller can report the mode a measurement was
+    /// taken under without re-deriving it from the environment — which would
+    /// re-introduce the possibility of reporting a mode that was requested
+    /// and not granted.
+    pub present: crate::present::Selection,
     /// Kept alive because the surface borrows it for its whole life.
     _window: Arc<Window>,
 }
@@ -417,16 +423,29 @@ impl Gfx {
             .find(|f| f.is_srgb())
             .unwrap_or(caps.formats[0]);
 
+        // Present mode is chosen, logged, and reported — never inherited from
+        // whatever the driver listed first. See `crate::present`: this is the
+        // knob that decides whether a frame-time measurement is of the
+        // display's refresh or of the renderer, and a number published without
+        // it is not attributable to either.
+        let (requested, mode_complaint) = crate::present::request_from_env();
+        let (frame_latency, latency_complaint) = crate::present::frame_latency_from_env();
+        for complaint in [mode_complaint, latency_complaint].into_iter().flatten() {
+            log_line(&format!("straf3-render: {complaint}"));
+        }
+        let selection = crate::present::choose(&caps.present_modes, requested, frame_latency);
+        log_line(&format!("straf3-render: {}", selection.describe()));
+
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
             color_space: Default::default(),
             width,
             height,
-            present_mode: caps.present_modes[0],
+            present_mode: selection.actual,
             alpha_mode: caps.alpha_modes[0],
             view_formats: vec![],
-            desired_maximum_frame_latency: 2,
+            desired_maximum_frame_latency: selection.frame_latency,
         };
         surface.configure(&device, &config);
 
@@ -441,6 +460,7 @@ impl Gfx {
             config,
             scene,
             backend: info.backend,
+            present: selection,
             _window: window,
         }
     }

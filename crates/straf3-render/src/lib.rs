@@ -53,6 +53,7 @@ pub mod camera;
 pub mod ghost;
 mod gfx;
 pub mod mesh;
+pub mod present;
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -214,6 +215,18 @@ impl Renderer {
     #[must_use]
     pub fn backend(&self) -> Option<wgpu::Backend> {
         self.gfx.borrow().as_ref().map(|g| g.backend)
+    }
+
+    /// The present mode the surface is actually configured with, once the
+    /// device exists.
+    ///
+    /// A caller writing a pacing log should take the mode from here rather
+    /// than from the environment it set: [`present::choose`] falls back when a
+    /// mode is unsupported, and a log header that names the requested mode
+    /// instead of the granted one would mislabel every row under it.
+    #[must_use]
+    pub fn present_mode(&self) -> Option<present::Selection> {
+        self.gfx.borrow().as_ref().map(|g| g.present.clone())
     }
 
     /// Tell the renderer the window is now `width` × `height` physical pixels.

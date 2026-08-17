@@ -18,6 +18,11 @@ members = [
     # resolves `glam` through this workspace's Cargo.lock: a check built
     # against a different resolution would be verifying a different tree.
     "tools/det-runner",
+    # The screenshot tool (acceptance criterion 8). A member so the same
+    # `cargo build --target x86_64-pc-windows-gnu` that produces the client
+    # produces the instrument, and so `cargo test --workspace` on Linux still
+    # covers the half of it that decides whether a capture is believed.
+    "tools/straf3-capture",
 ]
 
 [workspace.package]

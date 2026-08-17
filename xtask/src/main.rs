@@ -8,6 +8,8 @@ fn main() -> ExitCode {
         Some("check-seam") => check_seam(),
         Some("check-probes") => check_probes(&argv),
         Some("determinism") => determinism(&argv),
+        Some("capture") => capture(&argv),
+        Some("pacing") => pacing(&argv),
         Some(other) => {
             eprintln!("unknown command: {other}");
             usage();
@@ -70,8 +72,71 @@ usage: cargo xtask <command>
 
                CI uses --emit on a Linux runner and a Windows runner, then
                --compare, so the Windows binary is executed on Windows.
+
+  capture      Screenshot the running straf3 window on the real GPU
+               (criterion 8). Cross-builds tools/straf3-capture for
+               x86_64-pc-windows-gnu and runs it through WSL interop; every
+               other argument is forwarded to it.
+
+               It captures a WINDOW, never the screen. A missing window exits
+               4 and an occluded one exits 5; neither writes a file. The
+               whole-screen diagnostic (--desktop) may only be written under
+               target/, which .gitignore excludes.
+
+                 cargo xtask capture --out shots/coil.png --wait-ms 8000
+                 cargo xtask capture --list
+                 cargo xtask capture -- --help
+
+  pacing       Measure frame times on the real GPU and report mean, p50, p99
+               and max (criterion 7). Runs the release Windows build once per
+               present mode with --pacing-log, then ingests the CSVs.
+
+               Options:
+                 --analyse <file>    report on an existing log, run nothing
+                                     (repeatable)
+                 --mode <mode>       fifo|immediate|mailbox, repeatable;
+                                     default is fifo then immediate
+                 --exit-after <ms>   how long each run lasts (default 8000)
+                 --warmup <n>        intervals dropped from the front
+                                     (default 1: it holds device acquisition)
+                 --renderer-example  measure straf3-render's `window` example
+                                     instead of the client
+                 --out <dir>         where the CSVs go (default target/pacing)
+                 --no-build          use the binaries already built
+
+               Never run on the Linux side: Vulkan is llvmpipe there and
+               presentation has no real vblank, so the numbers are fiction
+               (docs/environment.md §6).
 "
     );
+}
+
+fn capture(argv: &[String]) -> ExitCode {
+    match xtask::capture::run(argv) {
+        Ok(0) => ExitCode::SUCCESS,
+        Ok(code) => ExitCode::from(u8::try_from(code).unwrap_or(1)),
+        Err(e) => {
+            eprintln!("capture could not run: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn pacing(argv: &[String]) -> ExitCode {
+    match xtask::pacing::run(argv) {
+        Ok(true) => ExitCode::SUCCESS,
+        Ok(false) => {
+            eprintln!(
+                "\nA pacing run did not produce usable numbers. Nothing above should be\n\
+                 published as a measurement of this machine."
+            );
+            ExitCode::FAILURE
+        }
+        Err(e) => {
+            eprintln!("pacing could not run: {e}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 fn determinism(argv: &[String]) -> ExitCode {

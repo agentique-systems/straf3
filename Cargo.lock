@@ -2272,6 +2272,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
+name = "straf3-capture"
+version = "0.1.0"
+dependencies = [
+ "png",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "straf3-collision"
 version = "0.1.0"
 dependencies = [
@@ -2347,6 +2355,7 @@ dependencies = [
  "glam",
  "gltf",
  "pollster",
+ "straf3-devtools",
  "straf3-map",
  "straf3-platform",
  "straf3-sim",

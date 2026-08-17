@@ -61,6 +61,12 @@
 #![warn(clippy::all)]
 
 pub mod hud;
+// Native only: this reads `std::time::Instant`, which panics outright on
+// `wasm32-unknown-unknown`, and writes a file, which a browser cannot. Frame
+// pacing is measured on the host with the real GPU or it is not measured —
+// see `docs/environment.md` §6.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod pacing;
 pub mod telemetry;
 
 pub use hud::{Hud, HudFrame, HudStyle, compose};
