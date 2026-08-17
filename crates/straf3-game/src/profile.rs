@@ -41,15 +41,16 @@ use straf3_sim::PhysicsProfile;
 ///
 /// An inherent associated item takes precedence over a trait one. So
 /// `PhysicsProfile::experimental()` below resolves to `straf3-sim`'s own
-/// function the moment it exists, and to this fallback until then. No edit here
-/// is needed at integration.
+/// constructor the moment it reaches this worktree, and to this fallback until
+/// then. No edit here is needed at integration.
 ///
-/// **Both agreed spellings are covered**, because they disagree: the governing
-/// spec's fixed-interfaces line names `PhysicsProfile::experimental()`, while
-/// the brief that set this task named the constant
-/// `PhysicsProfile::EXPERIMENTAL`. The fallback function returns
-/// `Self::EXPERIMENTAL`, which is itself subject to the same rule — so A
-/// landing *either* name wins, and only landing neither leaves the placeholder.
+/// The name is settled: `experimental()`, a constructor alongside `cpm()` and
+/// `vq3()`, per the spec's fixed-interfaces line. This shim exists only to let
+/// the crate compile before A's constructor arrives — deliberately *not* to
+/// tolerate a second spelling. If A lands something else, the compiler says so
+/// at integration and it is a one-line edit, which is the failure mode worth
+/// having; a compatibility shim that outlives the confusion that created it
+/// just leaves the next reader working out which name is real.
 ///
 /// The placeholder is CPM's constants. It is deliberately *not* a set of
 /// invented numbers: choosing straf3's movement is Session A's work, and
@@ -57,16 +58,12 @@ use straf3_sim::PhysicsProfile;
 /// the tree. [`is_stub`] is how a session finds out which it got.
 trait ExperimentalFallback {
     /// See [`ExperimentalFallback`].
-    const EXPERIMENTAL: PhysicsProfile;
-    /// See [`ExperimentalFallback`].
     fn experimental() -> PhysicsProfile;
 }
 
 impl ExperimentalFallback for PhysicsProfile {
-    const EXPERIMENTAL: PhysicsProfile = PhysicsProfile::cpm();
-
     fn experimental() -> PhysicsProfile {
-        Self::EXPERIMENTAL
+        Self::cpm()
     }
 }
 

@@ -267,6 +267,76 @@ fn a_played_run_saves_a_personal_best_that_a_second_session_races() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// **A replay that ran in the wrong world must not exit 0.**
+///
+/// `WorldChoice::or_fallback` drops to the flat plane when no map is installed,
+/// which is right for an interactive session — a window you can move in beats
+/// refusing to start over a missing file. For a replay it is the opposite: the
+/// output *is* the claim, and running a `world map` recording against an
+/// infinite plane produces a full trace, a checksum, a run time and a zero exit
+/// status for a run that happened somewhere else. A determinism check or a
+/// criterion-4 diff would compare against a world nobody played in and see
+/// nothing wrong.
+///
+/// Driven as a subprocess because the exit status is the thing under test, and
+/// because the map is a process-lifetime singleton — this file's own process has
+/// `coil` installed, and a child does not inherit it.
+#[test]
+fn a_replay_that_cannot_reach_its_own_world_fails_instead_of_answering() {
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../probes/coil-course/results/coil-run.txt");
+    let straf3 = std::path::PathBuf::from(env!("CARGO_BIN_EXE_straf3"));
+
+    // `--world flat` stops the default map being installed, so the `world map`
+    // in the file has nothing to resolve to. This is the silent-wrong-answer
+    // case: before, it printed a complete replay of the flat world and exited 0.
+    let refused = std::process::Command::new(&straf3)
+        .args([
+            "--replay",
+            &fixture.to_string_lossy(),
+            "--world",
+            "flat",
+            "--csv",
+        ])
+        .output()
+        .expect("the straf3 binary must run");
+    assert!(
+        !refused.status.success(),
+        "a `world map` recording replayed with no map exited {:?} and printed:\n{}",
+        refused.status.code(),
+        String::from_utf8_lossy(&refused.stdout),
+    );
+    let complaint = String::from_utf8_lossy(&refused.stderr);
+    assert!(
+        complaint.contains("--map"),
+        "the refusal must say how to fix it, got: {complaint}"
+    );
+
+    // The control: with the map it does resolve, the same file replays and the
+    // command succeeds. Without this the assertion above would also pass on a
+    // binary that refused everything.
+    let map = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/maps/coil.map");
+    let accepted = std::process::Command::new(&straf3)
+        .args([
+            "--replay",
+            &fixture.to_string_lossy(),
+            "--map",
+            &map.to_string_lossy(),
+        ])
+        .output()
+        .expect("the straf3 binary must run");
+    assert!(
+        accepted.status.success(),
+        "the same file with its map must replay: {}",
+        String::from_utf8_lossy(&accepted.stderr)
+    );
+    let report = String::from_utf8_lossy(&accepted.stdout);
+    assert!(
+        report.contains(&format!("{COIL_RUN_MS} ms")),
+        "the replay must report the run time the probe measured:\n{report}"
+    );
+}
+
 /// **Spec D2**: an experimental record lives in its own namespace and is never
 /// ranked against a canonical one.
 ///

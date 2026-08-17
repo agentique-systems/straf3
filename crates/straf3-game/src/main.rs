@@ -114,6 +114,14 @@ recording that spanned one could not be replayed.
             }
         };
 
+        // Before the window opens, and before a single command is simulated.
+        if let Some(path) = &options.record_to
+            && let Err(e) = check_recording_destination(path)
+        {
+            eprintln!("straf3: {e}");
+            return ExitCode::FAILURE;
+        }
+
         // Before the map is installed, because the fixture decides which world
         // the session runs in and the map is only compiled for `world map`.
         if let Some(path) = options.play_from.clone() {
@@ -154,6 +162,25 @@ recording that spanned one could not be replayed.
             return run_replay(path, &options.replay);
         }
 
+        // Same rule as `replay::replay`'s, at the other entry point: a played
+        // session that quietly fell back to the flat world would open a window,
+        // draw a run, print a checksum and save a personal best for a run that
+        // happened on geometry this process does not have. The interactive
+        // session's fallback stays — there, a window you can move in beats
+        // refusing to start.
+        if let Some(playback) = &options.session.playback
+            && !options.session.world.is_available()
+        {
+            eprintln!(
+                "straf3: {} was recorded in the `{}` world and no map is installed, so \
+                 it cannot be played here. Pass `--map <file.map>` naming the map it was \
+                 recorded on.",
+                playback.source,
+                options.session.world.spec()
+            );
+            return ExitCode::FAILURE;
+        }
+
         let record_to = options.record_to.clone();
         let fixture = straf3_game::run(options.session);
 
@@ -182,6 +209,55 @@ recording that spanned one could not be replayed.
         replay_from: Option<String>,
         play_from: Option<String>,
         replay: ReplayOptions,
+    }
+
+    /// Prove `--record`'s destination is writable *before* anything is played.
+    ///
+    /// # Why this is not left to the write at the end
+    ///
+    /// The recording is written when the session ends, which is the only moment
+    /// it is complete. So a destination that cannot be written — a directory
+    /// that does not exist, a path with no permission, a name that is itself a
+    /// directory — was discovered *after* the run, and the run was already gone:
+    /// the commands live only in the process that just exited. For a human
+    /// playtest that is somebody's best attempt of the evening; for an
+    /// unattended `--exit-after` session it is the whole point of the session.
+    ///
+    /// Creating the parent directory here rather than complaining about it is
+    /// the same choice [`straf3_game::pb::store`] makes for personal bests, and
+    /// for the same reason: `--record runs/tonight/attempt.txt` is a clear
+    /// instruction, not an error.
+    ///
+    /// The file is opened, not written: an existing recording keeps its
+    /// contents until there is a new one to replace them, so a session that
+    /// crashes does not also destroy the last good file.
+    ///
+    /// # Errors
+    ///
+    /// The parent directory could not be created, or the file could not be
+    /// opened for writing.
+    fn check_recording_destination(path: &str) -> Result<(), String> {
+        if let Some(dir) = std::path::Path::new(path).parent()
+            && !dir.as_os_str().is_empty()
+            && let Err(e) = std::fs::create_dir_all(dir)
+        {
+            return Err(format!(
+                "cannot record to {path}: its directory {} cannot be created: {e}",
+                dir.display()
+            ));
+        }
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .map_err(|e| {
+                format!(
+                    "cannot record to {path}: {e}. Refusing to start rather than \
+                     discovering this after the session, when the commands only exist \
+                     in a process that has exited."
+                )
+            })?;
+        Ok(())
     }
 
     /// Read a recorded command file and make it the session's driver.
@@ -640,6 +716,35 @@ cmd 3 127 0 0 - 0 45
             std::fs::write(&path, "rate 125\nprofile cpm\nworld flat 0\n").unwrap();
             let err = load_playback(&path.to_string_lossy(), &mut session).unwrap_err();
             assert!(err.contains("nothing to play back"), "{err}");
+
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        /// A `--record` destination is proved writable at startup, because
+        /// discovering it afterwards means the session is already lost.
+        #[test]
+        fn an_unwritable_recording_destination_is_refused_before_anything_is_played() {
+            let dir = std::env::temp_dir().join(format!("straf3-rec-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+
+            // A directory that does not exist yet is created, not complained
+            // about: `--record runs/tonight/attempt.txt` is an instruction.
+            let nested = dir.join("tonight").join("attempt.txt");
+            check_recording_destination(&nested.to_string_lossy())
+                .expect("a missing directory is created");
+            assert!(nested.exists());
+
+            // An existing recording keeps its contents until there is a new one
+            // to replace them — a crashed session must not also destroy the
+            // last good file.
+            std::fs::write(&nested, "rate 125\n").unwrap();
+            check_recording_destination(&nested.to_string_lossy()).unwrap();
+            assert_eq!(std::fs::read_to_string(&nested).unwrap(), "rate 125\n");
+
+            // A path that is a directory can never be written as a file, and
+            // that is knowable now rather than after the run.
+            let occupied = dir.join("tonight");
+            assert!(check_recording_destination(&occupied.to_string_lossy()).is_err());
 
             let _ = std::fs::remove_dir_all(&dir);
         }

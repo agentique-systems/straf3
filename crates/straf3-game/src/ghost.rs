@@ -559,6 +559,22 @@ mod tests {
         // recording produces the run it recorded, so a player standing exactly
         // where the ghost was, at exactly its elapsed time, is neither ahead
         // nor behind.
+        //
+        // # What this covers, and what it used to miss
+        //
+        // It feeds the ghost points taken out of its own track, so it can only
+        // detect a track that disagrees with *itself*. `step_by(7)` then walks
+        // over the finish sample — and the finish sample is exactly where a real
+        // bug lived: it carried a copy of the previous command's position, so a
+        // run that tied its own personal best was reported 8 ms behind itself.
+        // This test passed throughout.
+        //
+        // **Do not tidy the stride away to `step_by(1)` and call that the fix.**
+        // The stride is not the problem; feeding the ghost its own data is. The
+        // two tests that actually cover this are
+        // `the_finish_sample_is_the_state_that_crossed_the_line` and
+        // `a_live_run_of_the_recorded_commands_is_level_with_its_own_ghost`,
+        // which drives the player from an independent re-simulation.
         let mut ghost = ghost();
         let track = ghost.track.clone();
         for sample in track.iter().step_by(7) {

@@ -167,7 +167,7 @@ impl PacingLog {
         let mut out = String::with_capacity(32 * self.deltas_ns.len() + 512);
         out.push_str("# straf3 pacing log v1\n");
         out.push_str(&format!(
-            "# present_mode={}  build={}\n",
+            "# present_mode_requested={}  build={}\n",
             requested_present_mode(),
             if cfg!(debug_assertions) {
                 "debug"
@@ -175,14 +175,15 @@ impl PacingLog {
                 "release"
             },
         ));
-        // Said here because the field above cannot be trusted on its own: this
-        // crate asks for nothing and configures nothing. `straf3-render` picks
-        // the mode and logs the one it actually got, including a fallback when
-        // the adapter does not support what was asked for. Read that line, not
-        // this one, when the two could differ.
+        // The field is named for what it holds, not for what a reader wants it
+        // to hold. This crate asks for nothing and configures nothing:
+        // `straf3-render` picks the mode and logs the one it actually got,
+        // including a fallback when the adapter does not support the request.
+        // A field called `present_mode` would have been read as the mode
+        // measured, which is not a fact this file is in a position to state.
         out.push_str(
-            "# present_mode is the STRAF3_PRESENT_MODE *request*; the renderer's own \
-             log line records what was configured\n",
+            "# present_mode_requested is the STRAF3_PRESENT_MODE value; the renderer's \
+             own log line records what was configured\n",
         );
         if self.deltas_ns.len() > self.reserved {
             out.push_str(&format!(
@@ -421,8 +422,8 @@ impl App {
         if profile_name == "experimental" && crate::profile::is_stub() {
             log::warn!(
                 "`experimental` is currently CPM's constants — straf3-sim has not landed \
-                 PhysicsProfile::EXPERIMENTAL yet, so this session is experimental in name \
-                 and record-keeping only, not in how it plays"
+                 PhysicsProfile::experimental() yet, so this session is experimental in \
+                 name and record-keeping only, not in how it plays"
             );
         }
     }
@@ -888,8 +889,8 @@ impl App {
         }
         match std::fs::write(&pacing.path, pacing.to_csv()) {
             Ok(()) => log::info!(
-                "pacing log written to {} — {} frame deltas, present mode requested `{}`, \
-                 {} build",
+                "pacing log written to {} — {} frame deltas, present mode requested `{}` \
+                 (the renderer logs what was configured), {} build",
                 pacing.path,
                 pacing.deltas_ns.len(),
                 requested_present_mode(),
