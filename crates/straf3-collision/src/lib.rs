@@ -40,6 +40,15 @@
 //!
 //! # Where the geometry comes from
 //!
+//! [`testbed`] is the exception, and it is deliberately part of the shipped
+//! crate rather than a test module: the sim tests that *pin* movement
+//! behaviour and the lab harness that *quantifies* it have to be talking about
+//! the same geometry, and the only way to guarantee that is for both to import
+//! the same worlds. They are compiled brushes, not analytic half-spaces,
+//! because edge clipping and overbounce are artefacts of this tracer.
+//!
+//! # Where the geometry comes from
+//!
 //! `straf3-map` compiles `.map` source into hulls and hands them over; nothing
 //! in this crate reads a file or knows what a `.map` is. The recommended path
 //! for one brush is [`hull::compile_hull`], which deduplicates the planes,
@@ -53,6 +62,7 @@
 
 pub mod hull;
 pub mod plane;
+pub mod testbed;
 pub mod trace;
 pub mod winding;
 

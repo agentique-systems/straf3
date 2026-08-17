@@ -1090,34 +1090,126 @@ fn slick_ground_removes_friction_and_ground_acceleration() {
 
 /// Crouching lowers the hull, and standing up is refused while something is in
 /// the way.
+///
+/// # This test used to pass for the wrong reason
+///
+/// It was written against a ceiling 20 units above the floor, with the comment
+/// "above the crouched hull's 16, below the standing hull's 32". Those two
+/// numbers are measured from the **origin**, and the origin stands 24 units
+/// above the feet — so a standing player is 56 units tall and a crouched one is
+/// **40**, not 16. A ceiling at 20 admits neither hull.
+///
+/// The old test therefore asserted that a player embedded in a solid slab stays
+/// crouched, which is true and is not what it claimed to be checking: the
+/// stand-up probe returned `all_solid` because the player was *inside the
+/// ceiling*, not because standing would put them there. The corridor was so low
+/// the player could never have been in it.
+///
+/// The band that actually distinguishes the two hulls is 40 < z < 56, so the
+/// test now runs at 48: the crouched player genuinely fits and genuinely moves
+/// under it, and the refusal to stand is a refusal rather than a symptom. The
+/// impassable case is still covered, at 20, and labelled as what it is.
+///
+/// Found while building `straf3_collision::testbed`, whose `ceiling_at`
+/// documents the arithmetic so the next person does not repeat it.
 #[test]
 fn standing_up_is_refused_under_a_low_ceiling() {
     let p = PhysicsProfile::vq3();
-    // Floor at z=0 and a ceiling slab whose underside is at z=20 — above the
-    // crouched hull's 16, below the standing hull's 32.
-    let world = Boxes(vec![
-        (
-            vec3(s(-4096.0), s(-4096.0), s(-512.0)),
-            vec3(s(4096.0), s(4096.0), s(0.0)),
-        ),
-        (
-            vec3(s(-4096.0), s(-4096.0), s(20.0)),
-            vec3(s(4096.0), s(4096.0), s(512.0)),
-        ),
-    ]);
+    // A crouch corridor rather than a lid over the whole world: the slab starts
+    // at x=32, so the player can stand up where they spawn and has to crawl into
+    // it. A full-width slab at any height a *standing* player does not fit under
+    // spawns them inside it, which is how the old fixture ended up testing being
+    // stuck instead of being crouched.
+    let corridor_at = |z: Scalar| {
+        Boxes(vec![
+            (
+                vec3(s(-4096.0), s(-4096.0), s(-512.0)),
+                vec3(s(4096.0), s(4096.0), s(0.0)),
+            ),
+            (
+                vec3(s(32.0), s(-4096.0), z),
+                vec3(s(4096.0), s(4096.0), s(512.0)),
+            ),
+        ])
+    };
 
     let crouch = UserCmd {
         buttons: Buttons::CROUCH,
         ..still()
     };
-    let base = settle_on(&world, &p, vec3(s(0.0), s(0.0), s(24.0)));
-    let ducked = run(&base, &vec![crouch; 10], &world, &p);
-    assert!(ducked.player.crouched);
+    let crawl = UserCmd {
+        forward_move: 127,
+        ..crouch
+    };
+    let walk = UserCmd {
+        forward_move: 127,
+        ..still()
+    };
 
-    // Release crouch: the standing hull does not fit, so the player stays down.
-    let still_stuck = run(&ducked, &vec![still(); 10], &world, &p);
+    // 48: a crouched player (40 tall) fits with eight units to spare; a
+    // standing one (56 tall) does not.
+    let world = corridor_at(s(48.0));
+    // Spawned above the floor and dropped, not placed at rest height. `Boxes`
+    // has no surface epsilon, so a player spawned at exactly z=24 settles a few
+    // hundredths of a unit low and the *crouched* hull's centre then tests as
+    // inside the expanded floor box — the fixture reports `start_solid` and the
+    // player cannot move at all. Every other test in this file drops the player
+    // in, and this is why.
+    let base = settle_on(&world, &p, vec3(s(-128.0), s(0.0), s(64.0)));
+    assert!(
+        !base.player.crouched,
+        "the player should be standing on open floor before they duck"
+    );
+
+    // Crawl in. Crouched top speed is 320 * 0.25 = 80 ups and the player starts
+    // from rest, so 500 commands — four seconds — covers the 160 units from the
+    // spawn to the corridor mouth at x=32 and well past it.
+    let inside = run(&base, &vec![crawl; 500], &world, &p);
+    assert!(inside.player.crouched);
+    assert!(
+        inside.player.origin.x > s(64.0),
+        "a crouched player should be able to crawl into a 48-unit corridor; they \
+         got to x={}",
+        inside.player.origin.x
+    );
+    // They really are under it, not embedded in it: the crouched hull's top is
+    // 16 above the origin, and the origin rests 24 above the floor.
+    assert!(
+        inside.player.origin.z + p.crouched_height < s(48.0),
+        "the crouched hull is not actually clear of the ceiling: top at {}",
+        inside.player.origin.z + p.crouched_height
+    );
+
+    // Release crouch inside the corridor: the standing hull does not fit, so
+    // the player stays down. This is the assertion the test is named for, and
+    // it is now about the ceiling rather than about being stuck in it.
+    let still_stuck = run(&inside, &vec![still(); 10], &world, &p);
     assert!(
         still_stuck.player.crouched,
-        "stood up into a ceiling 20 units above the floor"
+        "stood up inside a corridor 48 units high"
+    );
+
+    // Walk back out and the same input stands up, which is what makes the
+    // refusal a property of the ceiling and not of `check_duck` never releasing.
+    let leaving = UserCmd {
+        forward_move: -127,
+        ..crouch
+    };
+    let out = run(&still_stuck, &vec![leaving; 500], &world, &p);
+    assert!(out.player.origin.x < s(0.0), "never left the corridor");
+    let stood = run(&out, &vec![still(); 10], &world, &p);
+    assert!(
+        !stood.player.crouched,
+        "refused to stand up back out on the open floor"
+    );
+
+    // The other half of the pairing: a standing player is *stopped* by the
+    // corridor mouth rather than squeezing in. Without this, "crouching let me
+    // through" has nothing to be compared against.
+    let blocked = run(&base, &vec![walk; 500], &world, &p);
+    assert!(
+        blocked.player.origin.x < s(32.0),
+        "a standing player walked into a 48-unit corridor: x={}",
+        blocked.player.origin.x
     );
 }
