@@ -555,6 +555,7 @@ mod tests {
             run: RunReadout::Running { elapsed_ms: 12_480 },
             split_ms: Some(-312),
             fps: 241,
+            foot_clearance: None,
             tick: 1_560,
             sim_ms: 12_480,
         };
