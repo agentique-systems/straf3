@@ -3,7 +3,8 @@
 This is the run document: how to build it, how to start it, what you see, and
 how to check that what you saw was real. It describes what is in the tree right
 now. Anything not yet landed is marked as such rather than described as if it
-were.
+were, and any claim this document's author did not verify personally is marked
+**`[reported]`**.
 
 What exists: a native client that compiles a Valve 220 `.map` into the geometry
 you collide with *and* the geometry you see, a Q3/CPM movement model at a fixed
@@ -11,19 +12,102 @@ you collide with *and* the geometry you see, a Q3/CPM movement model at a fixed
 record/replay path whose checksums three separate readers agree on.
 
 The governing document is [`docs/VISION.md`](docs/VISION.md). Where this file
-and the vision disagree about what the game is for, the vision wins.
+and the vision disagree about what the game is for, the vision wins. If you are
+here to play and report back rather than to develop,
+[`PLAYTEST.md`](PLAYTEST.md) is the shorter document you want.
+
+### Before anything: the numbers in this file age differently
+
+Two kinds of hexadecimal number appear below, and confusing them will make you
+distrust the wrong one.
+
+- A **collision digest** — `0x47263b8845d8bb4b` for `coil` — is folded over the
+  compiled map's convex hulls and trigger volumes, behind a version tag, and
+  over nothing else (`CompiledMap::collision_digest`, in `straf3-map`). No
+  change to the physics can reach it. It is stable, and it is the number that
+  must match on every target.
+- A **state checksum** is folded over the whole simulation state, including
+  every timer the movement code branches on
+  (`crates/straf3-sim/src/state.rs`). That is deliberate — a field the
+  simulation branches on is a way for two builds to disagree about a run — and
+  it means that adding a mechanic which needs a new timer changes the checksum
+  for `vq3` and `cpm` too, without canon movement having moved a millimetre.
+
+So every state checksum printed below is **an illustration of what one command
+printed on one build**, not a value to compare against. What this file claims is
+the *invariant*: that the three readers agree with each other, and that a
+deliberately hostile frame schedule reaches the same state as a regular one.
+Where a literal is quoted, the build that produced it is named.
+
+For the same reason, where this file cites a specification or a decision it
+states what the decision *was*, not only which revision carried it. A bare
+revision number is a citation whose meaning changes without notice. The same
+goes for line numbers: this file cites symbols, which survive an edit above
+them.
 
 ---
 
-## Before you start: this is a headless Linux box
+## Run it on the real GPU
+
+This is the play-and-tune path, and it runs from the WSL shell: no Windows-side
+Rust install, no leaving the terminal. The mechanism is recorded and verified in
+[`docs/environment.md`](docs/environment.md) §3 — the cross-linked `.exe`
+executes through WSL interop as a genuine Windows process, and wgpu reaches the
+host's discrete adapter rather than any WSLg software path.
+
+```
+rustup target add x86_64-pc-windows-gnu   # once; rust-toolchain.toml lists it too
+cargo build --release --target x86_64-pc-windows-gnu -p straf3-game --bin straf3
+./target/x86_64-pc-windows-gnu/release/straf3.exe
+```
+
+**Run it from the repository root.** `assets/maps/coil.map` is resolved relative
+to the working directory, and for an interactive session a map that cannot be
+read is a warning rather than a failure — so from anywhere else you get a flat
+plane, one line on stderr you will not be looking at, and a session that
+measures nothing. (A *replay* refuses instead; see below. The asymmetry is
+deliberate.)
+
+On the host this was developed on, that reaches an RTX 3060 Ti over Vulkan
+(`DiscreteGpu`, driver NVIDIA 560.94). Two caveats from `docs/environment.md` §3
+matter if you are timing anything:
+
+- The exe lives on the Linux filesystem and Windows reaches it over 9p. Process
+  execution is native; **file I/O is not**. For pacing work, build into a
+  Windows-native path:
+  `CARGO_TARGET_X86_64_PC_WINDOWS_GNU_DIR=/mnt/c/straf3-target`.
+- `-gnu` emits DWARF, so Windows-native debuggers will not read symbols.
+  `RUST_BACKTRACE=1` inside the process still works.
+
+> **Hole, marked rather than hidden.** `tools/straf3-capture` — a repeatable
+> screenshot of the running client on the real GPU — is being built in this wave
+> and its invocation, output path and window-not-found behaviour are not yet in
+> this document. Nothing else in this section is pending: `--play`,
+> `--profile experimental` and `--pacing-log` have landed and are described
+> against the binary.
+
+**Standing rule for images: no picture committed to this repository shows
+anything but the straf3 window.** Capture the window, never the screen. A
+full-desktop grab carries whatever else was open — browser tabs, accounts,
+notifications — into a git history that is hard to un-publish, and it does so
+while looking exactly like a correct screenshot. Use the capture command rather
+than a system screenshot key, and if you need a full-desktop grab to diagnose
+something, leave it under `target/`, which `.gitignore` already excludes.
+
+---
+
+## Run it on Linux, and what that is worth
 
 > **There is no GPU here and, in this shell, no working Wayland socket.**
 > Vulkan resolves to the software rasteriser `llvmpipe`, so the window opens
 > and the loop runs, and that is all these instructions verify. **No frame
 > rate, smoothness or latency number produced on this machine means anything**
 > — the vision's pacing budgets (`docs/VISION.md`, "Frame pacing and latency")
-> are measured on the native Windows build and nowhere else. See the README for
-> the Windows recommendation.
+> are measured on the Windows build above and nowhere else.
+
+That warning is about *numbers*, not about the build. Everything headless —
+replay, the offscreen renders, the whole test suite — is exactly as valid here
+as anywhere, and that is most of the working day.
 
 `WAYLAND_DISPLAY` is set here to a socket that does not exist, and winit tries
 Wayland before X11 and then gives up rather than falling back:
@@ -40,19 +124,11 @@ WAYLAND_DISPLAY= cargo run -p straf3-game --bin straf3
 ```
 
 Every windowed command below assumes you have done that if you hit the error.
-Nothing headless — replay, the offscreen renders, the test suite — needs it.
-
----
-
-## Run it
-
-```
-cargo run -p straf3-game --bin straf3
-```
+Nothing headless needs it.
 
 That compiles `assets/maps/coil.map` and drops you at its `info_player_start`,
-under the `cpm` profile at 125 Hz (8 ms commands). A real start on this machine
-prints:
+under the `cpm` profile at 125 Hz (8 ms commands). A start **on the software
+adapter** prints:
 
 ```
 [INFO  straf3_game::scene] map: 26 hulls, 4 triggers, 312 triangles, collision digest 0x47263b8845d8bb4b
@@ -61,10 +137,18 @@ straf3-render: map is 312 triangles
 [INFO  straf3_game::app] straf3 0.1.0 — world Map, cpm profile, 125 Hz (8 ms commands). Click to capture the mouse, Esc to release, R to respawn.
 ```
 
+The first line of that block was reproduced on this tree while writing this
+document; the three that follow it come from a windowed start, which was not
+re-run here — opening a window on the software adapter proves nothing that the
+headless paths do not.
+
+The `adapter=... type=Cpu` line is what tells you which of the two sections you
+are in; on the Windows build it names the discrete GPU instead.
+
 The first line is the compile: the same pass produces the 26 convex hulls you
 collide with and the 312 triangles you see, so there is no way to be shown a
 different world from the one you are hitting. The `collision digest` is over the
-hulls only — it is the number that must match on every target.
+hulls and triggers only — the stable number described at the top of this file.
 
 The two `straf3-render:` lines come from the renderer unprefixed; the rest are
 `log::info!` and carry the logger's `[INFO ...]` prefix.
@@ -96,13 +180,24 @@ be replayed by a program with no renderer in it.
 - **Ctrl** — crouch
 - **Shift** — walk
 - **click** the window to capture the mouse; **Esc** releases it
-- **R** — respawn
+- **R** — respawn, which starts a **new attempt**: the clock resets, the ghost
+  returns to the start line, and **the recording begins again**. A respawn is
+  not a command, so a recording that spanned one could not be re-simulated;
+  the recorder is replaced rather than continued
+  (`crates/straf3-game/src/game.rs`). Everything recorded before your last R is
+  gone. This is the easiest way to lose a session — see the recording rules
+  below.
+
+Under `--play`, live movement input and `R` are ignored: the recording drives
+the session. `Esc` and closing the window still work.
 
 ---
 
 ## What the overlay shows
 
-Four readouts, which are what a movement run is judged by:
+Four readouts, which are what a movement run is judged by. The block below is an
+**illustration** — the values are the ones the overlay's own layout tests use,
+not a transcript of a session:
 
 ```
                         0:12.480        run time, m:ss.mmm
@@ -133,24 +228,24 @@ Four readouts, which are what a movement run is judged by:
 - **Corner line**, bottom left, dim. Frame rate, vertical speed, tick count and
   simulation time. `sim` is the sum of command durations, not wall time; the
   two disagreeing is the interesting case. (The `fps` number is real as a
-  readout and meaningless as a claim — see the warning at the top.)
+  readout and meaningless as a claim when you are on the software adapter.)
 
-### Where it draws today
+### Where it draws
 
-The overlay lives in `crates/straf3-devtools` and is complete: composition,
-colours, and the wgpu draw. Its layout is covered by unit tests that read the
-drawn strings back out of egui, and it has been rendered to a real texture on
-this machine through the software adapter.
+The overlay lives in `crates/straf3-devtools`: composition, colours, and the
+wgpu draw. Its layout is covered by unit tests that read the drawn strings back
+out of egui.
 
-**It is now called from the windowed client.** `straf3-game` hands it the frame
-every tick, and the ghost is drawn into the same pass. That wiring landed at the
-close of this wave, together with the PB and ghost work described below.
+It is called from the windowed client — `straf3-game` hands it the frame every
+tick, and the ghost is drawn into the same pass.
 
-One honest limit on that claim: this box has no GPU, and the windowed client was
-never launched here to look at it. The wiring is landed, compiles, and the whole
-workspace suite is green — but **nobody has yet watched the overlay on screen in
-the windowed client.** Until someone runs it on a real GPU, the offscreen
-renderer below is still the only place its pixels have actually been seen:
+**`[reported]`: it has been watched on screen on a real GPU, but not by this
+document's author, and no screenshot of that session exists in this
+repository.** A prior session played the Windows build on the RTX 3060 Ti and
+reported the overlay legible. See "Not proven yet" below for exactly what that
+rests on and what would retire it.
+
+What anyone can reproduce here, with no GPU, is the offscreen render:
 
 ```
 cargo run -p straf3-devtools --example hud-offscreen
@@ -180,28 +275,58 @@ simulation is:
 [INFO  straf3_game::app] speed    0.0 ups   origin (  -320.0   -736.0     24.1)   ground   tick 125   sim 1000 ms   41 fps
 ```
 
-The same four things, in a terminal. It stays useful after the overlay lands:
-it is the only readout that survives into a redirected log file.
+The same four things, in a terminal. It stays useful alongside the overlay: it
+is the only readout that survives into a redirected log file.
 
 ---
 
 ## Options
 
+Copied from the binary's own `--help`, which is authoritative — if the two ever
+disagree, the binary is right and this file has a bug.
+
 ```
 usage: straf3 [options]                     open a window and play
+       straf3 --play <file> [options]       open a window and watch a recorded
+                                            run drive it
        straf3 --replay <file> [options]     run a recorded file, no window
 
+  --play <file>               drive the windowed, rendering session from a
+                              recorded command file instead of from the
+                              keyboard. The file's own rate, profile, world,
+                              spawn and yaw are used, exactly as --replay does,
+                              so the run on screen is the run in the file and
+                              lands on the same checksum. Live movement input
+                              and R (respawn) are ignored; Esc and closing the
+                              window still work. When the stream runs out the
+                              final state is held and the window stays open —
+                              --exit-after is what ends an unattended session.
   --map <file.map>            Valve 220 map to compile and play (default
                               assets/maps/coil.map)
   --world <map|flat|empty>    geometry to play in (default map). `flat` and
                               `empty` need no map and are the two worlds
                               straf3-headless can reproduce.
-  --profile <cpm|vq3>         movement constants (default cpm)
+  --profile <cpm|vq3|experimental>
+                              movement constants (default cpm). `experimental`
+                              is straf3's own vocabulary: playable and
+                              recordable, but its personal bests are kept under
+                              their own name (runs/<map>.experimental.s3d) and
+                              are never ranked against a cpm or vq3 time.
   --rate <hz>                 command rate, 1..=1000 (default 125)
   --record <file>             write every command produced to <file>, in
                               straf3-headless's input format
+  --pb-dir <dir>              where personal bests are kept (default runs/).
+                              The best saved run for this map and profile is
+                              raced as a ghost, and a finished run that beats
+                              it is written there as <map>.<profile>.s3d
+  --no-pb                     neither load a ghost nor save a personal best
   --exit-after <ms>           close the window after <ms> of wall time, so an
                               unattended run can be recorded and replayed
+  --pacing-log <file>         write one high-resolution frame delta per frame to
+                              <file> as CSV when the session ends. Measurement
+                              only: the simulation keeps taking whole-millisecond
+                              deltas from exactly the path it uses without this
+                              flag. Needs a window, so not with --replay.
   -h, --help                  this
 
 replay options (no window is opened and no GPU adapter is created):
@@ -209,16 +334,59 @@ replay options (no window is opened and no GPU adapter is created):
   --trace                     print one line per tick, not just the final state
   --csv                       print in straf3-headless's CSV form
   --frame-ms <a,b,c,...>      drive the replay on this frame schedule, in whole
-                              wall milliseconds, cycled.
+                              wall milliseconds, cycled. The output must be
+                              identical to the regular schedule's — that
+                              equality is what criterion 5 means.
 ```
 
-`--map`, `--world`, `--profile` and `--rate` only take effect when opening a
-window. A replay always runs under the world, profile and rate recorded in the
-file itself; passing them alongside `--replay` is silently ignored.
+`--trace`, `--csv` and `--frame-ms` are **refused** without `--replay` rather
+than ignored: silently accepting them would let you believe you had measured a
+frame schedule when you had opened a window instead.
 
-A map that cannot be read or compiled is a warning, not a failure — the client
-drops to the flat world, so a missing file still gives you a window you can
-move in rather than a process that dies.
+`--exit-after` counts wall time **from process start**, not from when the
+session begins — adapter creation and window mapping are inside the budget.
+Allow roughly two seconds of startup on top of however long you mean to run,
+or an unattended recording ends early and looks complete.
+
+### What a replay does and does not take from the command line
+
+`--profile` and `--rate` only take effect when opening a window for live play. A
+replay or a playback runs at the rate and under the profile recorded in the file
+itself, and passing them alongside changes nothing.
+
+**`--map` and `--world` are different.** They are read before the replay runs,
+and a recording that says `world map` means "whichever map this process has
+installed" — the fixture format carries no map identity of its own
+(`crates/straf3-game/src/replay.rs`). So they decide what the run is replayed
+*against*, and getting them wrong used to produce a complete, plausible, wrong
+answer with a success exit code. It now refuses:
+
+```
+$ straf3 --replay probes/coil-course/results/coil-run.txt
+straf3: probes/coil-course/results/coil-run.txt: this file was recorded in the `map` world and this process has no map installed, so there is nothing to replay it against. Pass `--map <file.map>` naming the map it was recorded on. (Refusing rather than falling back to the flat world: that would print a trace, a checksum and a run time for a run that happened somewhere else.)
+$ echo $?
+1
+```
+
+`--play` refuses the same case with its own message, also exit 1.
+
+The asymmetry with interactive play is deliberate rather than an inconsistency.
+Starting `straf3` with an unreadable map still drops to the flat world and warns,
+because a window you can move in beats a process that will not start. A replay
+or a playback refuses, because there the **output is the claim** — a trace, a
+checksum and a run time are evidence, and evidence about the wrong world is
+worse than no evidence.
+
+So pass `--map` explicitly whenever you replay a recording made in a map,
+exactly as the probe's own verify command does
+(`probes/coil-course/results/coil.txt`):
+
+```
+$ straf3 --replay probes/coil-course/results/coil-run.txt --map assets/maps/coil.map
+  world         Map
+  run           5096 ms  (5.096 s, start 1800 ms, finish 6896 ms)
+  checksum      0x9a854d1a3653d8b7
+```
 
 An unattended run, for scripting:
 
@@ -226,13 +394,62 @@ An unattended run, for scripting:
 cargo run -p straf3-game --bin straf3 -- --exit-after 2000
 ```
 
+### The experimental profile
+
+`--profile experimental` is accepted, playable and recordable, and its personal
+bests are filed at `runs/<map>.experimental.s3d` so they are never ranked
+against `cpm` or `vq3`.
+
+**The flag landing is not the movement landing.** Those are two sessions' work
+and they merge separately. Until `straf3-sim` lands
+`PhysicsProfile::experimental()`, the profile holds CPM's constants and the
+client says so at startup:
+
+```
+[WARN  straf3_game::app] `experimental` is currently CPM's constants — straf3-sim has not landed PhysicsProfile::experimental() yet, so this session is experimental in name and record-keeping only, not in how it plays
+```
+
+That line is emitted from a digest comparison against `cpm()`, not from a
+hardcoded flag, so it cannot claim the profile has landed while it is still
+canon's constants — and it removes itself when the real constants arrive. It is
+the check to trust, in preference to anything this document says about timing.
+
 ---
 
 ## Record a run and check it reproduces
 
-Every recording names the world it was made in, and every reader prints the
-same 64-bit checksum of the final state. That equality is the point: a last-bit
-divergence is invisible to the eye and obvious to the number.
+Every recording names the world it was made in, and every reader prints the same
+64-bit checksum of the final state. **That equality is the claim**, and it is
+what survives a change to the simulation state; the literal value is an
+illustration of one build's output.
+
+Two rules decide whether you get a usable file:
+
+> - **The recording is written only on a clean exit** — closing the window, or
+>   letting `--exit-after` end the run. The file is written after the event loop
+>   returns, so killing the process (Ctrl-C, `kill`, a closed terminal) skips
+>   that write entirely: you get no file rather than a truncated one, however
+>   long you played, and nothing is printed to say so.
+> - **R discards the recording so far.** See Controls. Play an attempt and then
+>   exit; do not press R and then close the window.
+
+The destination itself is no longer a way to lose a session. A missing directory
+is created — `--record runs/tonight/attempt.txt` makes `runs/tonight/` and
+proceeds, the same choice `pb::store` already made for personal bests. A
+destination that genuinely cannot be written is refused **before the window
+opens**, exit 1, rather than discovered afterwards:
+
+```
+straf3: cannot record to <path>: <the OS's reason>. Refusing to start rather than discovering this after the session, when the commands only exist in a process that has exited.
+```
+
+The text after the colon is the platform's and differs between Linux and
+Windows for the same fault; the straf3 half is the part to match on. An existing
+recording keeps its contents through that check — the file is opened, not
+truncated — so a session that fails does not also destroy the last good file. A
+stray zero-byte file means a session recorded nothing, not that a run was lost.
+
+The three readers, on a flat-world recording that needs no map:
 
 ```
 cargo run -p straf3-game --bin straf3 -- --world flat --record /tmp/flat.rec
@@ -242,35 +459,47 @@ cargo run -p straf3-sim --bin straf3-headless -- /tmp/flat.rec
 cargo run -p straf3-game --bin straf3 -- --replay /tmp/flat.rec --frame-ms 1,97,3,250,8
 ```
 
-All four print one checksum. Verified here on a 180-command session:
-
-```
-  checksum      0xe08d7c7726883be5      # straf3 --replay
-  checksum      0xe08d7c7726883be5      # straf3-headless
-  checksum      0xe08d7c7726883be5      # straf3 --replay --frame-ms 1,97,3,250,8
-```
-
-The last one is the one that matters most: the same input on a deliberately
-hostile frame schedule reaches the identical state. Rendering is decoupled from
-simulation stepping, and this is what says so.
+All four print one checksum, and the three readers must agree. The last one is
+the one that matters most: the same input on a deliberately hostile frame
+schedule reaches the identical state. Rendering is decoupled from simulation
+stepping, and this is what says so.
 
 Play for a few seconds before closing — an unattended, input-free recording
 reproduces trivially and proves nothing.
 
-> **The recording is written only on a clean exit** — closing the window, or
-> letting `--exit-after` end the run. The file is written after the event loop
-> returns, so killing the process (Ctrl-C, `kill`, a closed terminal) skips
-> that write entirely: you get no file rather than a truncated one, however
-> long you played, and nothing is printed to say so.
+That property is demonstrable on a fixture that ships, rather than on a
+temporary file only its author ever had. On the release build of this tree:
+
+```
+$ straf3 --replay probes/coil-course/results/coil-run.txt --map assets/maps/coil.map
+  checksum      0x9a854d1a3653d8b7
+$ straf3 --replay probes/coil-course/results/coil-run.txt --map assets/maps/coil.map \
+         --frame-ms 1,97,3,250,8
+  checksum      0x9a854d1a3653d8b7
+```
+
+Identical, as required. Expect the *value* to change when the simulation state
+gains a field; expect the *equality* not to.
+
+**`[reported]`:** the full loop — play, record, replay — has since been closed on
+the 3060 Ti. A session driven by `--play` and re-recorded produced 864 commands,
+a 5096 ms run, the same checksum as its source, and directives and `cmd` lines
+byte-identical to `coil-run.txt`. This document's author did not run that.
 
 `straf3-headless` lives below the seam and only knows `empty` and `flat <z>`.
-It has no way to spell a compiled map, so it refuses a map recording by name
-and exits non-zero rather than silently running it somewhere else:
+It has no way to spell a compiled map, so it refuses a map recording by name and
+exits non-zero rather than silently running it somewhere else:
 
 ```
-$ cargo run -p straf3-sim --bin straf3-headless -- /tmp/coil.rec
-straf3-headless: /tmp/coil.rec: line 12: unknown world `map` (empty|flat <z>)
+$ cargo run -p straf3-sim --bin straf3-headless -- probes/coil-course/results/coil-run.txt
+straf3-headless: probes/coil-course/results/coil-run.txt: line 10: unknown world `map` (empty|flat <z>)
+$ echo $?
+1
 ```
+
+That is also why the coil fixture above is replayed through `straf3` in replay
+mode — which opens no window and creates no adapter — rather than through
+`straf3-headless`.
 
 ---
 
@@ -284,27 +513,90 @@ cargo run -p straf3-render --example offscreen        # the world, to PPM
 cargo run -p straf3-devtools --example hud-offscreen  # the overlay, to PPM
 ```
 
+> **`cargo xtask determinism` must run with `CARGO_TARGET_DIR` unset.** It looks
+> for each target's artefact at the workspace-relative path, so an override makes
+> it exit non-zero saying the binary "was not produced". That is a loud
+> infrastructure failure rather than a silent pass — nobody gets a false green —
+> but an agent following ordinary shared-build-cache hygiene will hit it and
+> conclude determinism has broken when it has not.
+
+`cargo xtask determinism` is worth understanding precisely, because it is easy
+to overstate. It builds **`tools/det-runner`** — not the game — and runs one
+reference command stream on four targets: `x86_64-unknown-linux-gnu`,
+`x86_64-unknown-linux-musl`, `x86_64-pc-windows-gnu`, and
+`wasm32-unknown-unknown` under Node. Every target must agree with every other,
+bit for bit, across all cases. So what is proven is that **the simulation
+produces identical results on a wasm target, on musl, and on Windows** — a
+stronger and narrower statement than "the wasm build matches native".
+
 The two offscreen examples need a GPU adapter — including a software one — and
 are examples rather than tests for exactly that reason: a test that fails on a
 machine with no adapter punishes the correct environment.
 
 ---
 
-## Not in this build
+## Not proven yet
 
-Stated plainly so nothing above is read as a promise:
+Stated plainly so nothing above is read as a promise. Each item says what would
+retire it.
 
-- **The overlay is drawn by the windowed client, but has not been watched on
-  screen** (see above). Landed and compiling, never visually confirmed here.
-- **A personal best is saved and a ghost is raced — in code that has not been
-  played.** The run clock, the `.s3d` format, PB persistence at
-  `runs/<map>.<profile>.s3d` and the re-simulated ghost all landed this wave and
-  are covered by unit tests. What was verified end to end on this box is the
-  headless path: the shipped binary replays `coil-run.txt` against `coil.map`
-  and produces a 5096 ms run with checksum `0x9a854d1a3653d8b7`. What was *not*
-  verified is a human playing a run, saving a PB and racing it in the window.
-- **No browser client.** The wasm build is proven bit-identical to native by
-  `cargo xtask determinism`; a playable URL is deferred (spec rev 2,
-  criterion 9).
-- **No sound, weapons, menus, multiplayer or leaderboards.** None of these are
-  in scope for this wave.
+- **The overlay has been watched on a real GPU — `[reported]`.** A prior session
+  played the Windows build on the RTX 3060 Ti and reported the overlay legible:
+  ground 320 ups, a strafejump to 648 ups, the start trigger firing, and 7.928 s
+  on the clock when `--exit-after` ended the session. This document's author did
+  not see it, and **no screenshot of that session exists in this repository** —
+  the only images in the tree are from the `wasm-render` probe. *Retired by:* a
+  window-only screenshot committed to the tree and cited here by path.
+
+- **The personal-best and ghost loop has been closed once, and its evidence has
+  not been committed.** This is the sharpest remaining gap and it is worth
+  stating exactly, because the code is not the problem.
+
+  `[reported]`: a run was completed on the 3060 Ti, saved as a first personal
+  best at `0:05.096`, and raced in a second session against a ghost re-simulated
+  over 638 states, with a slower variant finishing `+16 ms` against it. What does
+  **not** exist is the evidence: no screenshot, because the capture tool was not
+  ready and a hand-taken desktop grab is forbidden by the standing image rule
+  above — the right call was to take none rather than take a forbidden one. And
+  the `.s3d` was deliberately not committed.
+
+  That last decision is the interesting one. `crates/straf3-replay/src/identity.rs`
+  folds the physics digest from an exhaustive destructure of `PhysicsProfile`
+  with no `..`, on purpose — a new movement constant is a new way for two builds
+  to disagree, so it must be a new input to the digest — and
+  `crates/straf3-game/src/ghost.rs` turns a mismatch into a refusal to load. So a
+  `.s3d` captured **before** straf3's own movement constants land stops loading
+  **after** they do. Committing it now would ship an artefact guaranteed to be
+  rejected by the code that reads it. *Retired by:* a screenshot and a `.s3d`
+  captured after those constants are final — not by the loop having worked, which
+  it has.
+
+- **No browser client, and no playable URL.** The determinism check above proves
+  the simulation is bit-identical on a wasm target; it does not prove a playable
+  browser build exists, and it does not run the game. A browser client, a
+  records service and leaderboards are **in scope and in progress in a parallel
+  session** — not shipped, and not guaranteed to land this wave. There is a
+  probe (`probes/wasm-render`) that built the whole game for WebGPU and measured
+  it, which is why this is a gap rather than an unknown. *Retired by:* a URL you
+  can play, and a run recorded in the browser that re-simulates natively to the
+  same rolling digest.
+
+- **No leaderboards, no records service.** Also in scope in that parallel
+  session, for the same reason and with the same caveat. This was previously
+  listed here as out of scope; that is no longer true.
+
+- **No pacing or latency numbers from the real GPU.** `--pacing-log` now writes
+  a per-frame CSV, but no frame-time distribution, present-mode comparison or
+  input-to-simulation latency accounting has been published from it. A steady
+  165 fps was observed in a *debug* build, which is consistent with vsync on a
+  165 Hz panel and confirms nothing. *Retired by:* measured frame-time mean,
+  p50, p99 and max from the Windows build, vsynced and uncapped, with the panel
+  refresh stated — being measured in this wave. The vision's 240 Hz-class budget
+  stays **unvalidated**: there is no 240 Hz display here.
+
+- **The experimental profile is experimental in name only.** The flag, the
+  separate personal-best namespace and the startup warning have landed;
+  `PhysicsProfile::experimental()` has not. *Retired by:* the startup line
+  quoted above ceasing to appear, which it does by itself.
+
+- **No sound, weapons, menus or live multiplayer.** Out of scope for this wave.
