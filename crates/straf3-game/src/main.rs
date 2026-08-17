@@ -475,10 +475,7 @@ recording that spanned one could not be replayed.
                 "--profile" => {
                     let name = value()?;
                     session.profile = straf3_game::profile::by_name(&name).ok_or_else(|| {
-                        format!(
-                            "unknown profile `{name}` ({})",
-                            straf3_game::profile::NAMES
-                        )
+                        format!("unknown profile `{name}` ({})", straf3_game::profile::NAMES)
                     })?;
                     session.profile_name = name;
                 }
@@ -719,7 +716,8 @@ cmd 3 127 0 0 - 0 45
             let mut session = Options::default();
             assert!(load_playback("no/such/file.txt", &mut session).is_err());
 
-            let dir = std::env::temp_dir().join(format!("straf3-play-empty-{}", std::process::id()));
+            let dir =
+                std::env::temp_dir().join(format!("straf3-play-empty-{}", std::process::id()));
             std::fs::create_dir_all(&dir).unwrap();
             let path = dir.join("empty.txt");
             // Parses, but has no commands: playing it would open a window on a

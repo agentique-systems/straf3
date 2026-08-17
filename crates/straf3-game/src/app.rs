@@ -155,8 +155,11 @@ impl PacingLog {
     /// Record the start of a frame. Call it once, first thing.
     fn frame(&mut self, now: std::time::Instant) {
         if let Some(last) = self.last {
-            self.deltas_ns
-                .push(now.duration_since(last).as_nanos().min(u128::from(u64::MAX)) as u64);
+            self.deltas_ns.push(
+                now.duration_since(last)
+                    .as_nanos()
+                    .min(u128::from(u64::MAX)) as u64,
+            );
         }
         self.last = Some(now);
     }
@@ -391,9 +394,10 @@ impl App {
         // A personal best needs the commands of whichever attempt turns out to
         // be the good one, and nobody knows that in advance — so recording is
         // on for the whole session whenever personal bests are.
-        let pb_path = options.pb_dir.as_ref().map(|dir| {
-            crate::pb::path_in(dir, world.name(), &options.profile_name)
-        });
+        let pb_path = options
+            .pb_dir
+            .as_ref()
+            .map(|dir| crate::pb::path_in(dir, world.name(), &options.profile_name));
         if options.record || pb_path.is_some() {
             game.record();
         }
@@ -873,10 +877,7 @@ impl App {
         log::info!(
             "playback finished: {} commands applied, tick {}, sim {} ms, \
              checksum {:#018x} — holding the final state",
-            self.options
-                .playback
-                .as_ref()
-                .map_or(0, |p| p.cmds.len()),
+            self.options.playback.as_ref().map_or(0, |p| p.cmds.len()),
             state.tick,
             state.time_ms,
             state.checksum(),
@@ -906,7 +907,9 @@ impl App {
         // when nothing was saved, so a session that ended mid-run does not look
         // like a session that never started one.
         match state.run {
-            straf3_sim::RunState::NotStarted => log::info!("no run: the start line was not crossed"),
+            straf3_sim::RunState::NotStarted => {
+                log::info!("no run: the start line was not crossed")
+            }
             // The finish line was NOT reached — that is what `Running` means
             // here. This line used to say "on the clock at the finish line",
             // which read as a completed time and was untrue of every session
@@ -1386,7 +1389,10 @@ cmd 80 127 127 0 - 0 108.25
                 reference.last().unwrap().checksum(),
                 "schedule {schedule:?}"
             );
-            assert_eq!(app.game().state().time_ms, reference.last().unwrap().time_ms);
+            assert_eq!(
+                app.game().state().time_ms,
+                reference.last().unwrap().time_ms
+            );
         }
     }
 

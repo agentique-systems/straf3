@@ -562,7 +562,10 @@ mod tests {
         // And the resolution is far finer than the band, not merely finer.
         let a = clearance_at(s(0.01));
         let b = clearance_at(s(0.02));
-        assert!(a < b, "0.01 and 0.02 units must be distinguishable: {a} vs {b}");
+        assert!(
+            a < b,
+            "0.01 and 0.02 units must be distinguishable: {a} vs {b}"
+        );
     }
 
     #[test]
