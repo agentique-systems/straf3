@@ -31,18 +31,35 @@ mod native {
     use straf3_game::app::Options;
     use straf3_game::replay::ReplayOptions;
     use straf3_game::scene::WorldChoice;
-    use straf3_sim::{PhysicsProfile, RunState, TickRate};
+    use straf3_sim::{RunState, TickRate};
 
     const USAGE: &str = "\
 usage: straf3 [options]                     open a window and play
+       straf3 --play <file> [options]       open a window and watch a recorded
+                                            run drive it
        straf3 --replay <file> [options]     run a recorded file, no window
 
+  --play <file>               drive the windowed, rendering session from a
+                              recorded command file instead of from the
+                              keyboard. The file's own rate, profile, world,
+                              spawn and yaw are used, exactly as --replay does,
+                              so the run on screen is the run in the file and
+                              lands on the same checksum. Live movement input
+                              and R (respawn) are ignored; Esc and closing the
+                              window still work. When the stream runs out the
+                              final state is held and the window stays open —
+                              --exit-after is what ends an unattended session.
   --map <file.map>            Valve 220 map to compile and play (default
                               assets/maps/coil.map)
   --world <map|flat|empty>    geometry to play in (default map). `flat` and
                               `empty` need no map and are the two worlds
                               straf3-headless can reproduce.
-  --profile <cpm|vq3>         movement constants (default cpm)
+  --profile <cpm|vq3|experimental>
+                              movement constants (default cpm). `experimental`
+                              is straf3's own vocabulary: playable and
+                              recordable, but its personal bests are kept under
+                              their own name (runs/<map>.experimental.s3d) and
+                              are never ranked against a cpm or vq3 time.
   --rate <hz>                 command rate, 1..=1000 (default 125)
   --record <file>             write every command produced to <file>, in
                               straf3-headless's input format
@@ -53,6 +70,11 @@ usage: straf3 [options]                     open a window and play
   --no-pb                     neither load a ghost nor save a personal best
   --exit-after <ms>           close the window after <ms> of wall time, so an
                               unattended run can be recorded and replayed
+  --pacing-log <file>         write one high-resolution frame delta per frame to
+                              <file> as CSV when the session ends. Measurement
+                              only: the simulation keeps taking whole-millisecond
+                              deltas from exactly the path it uses without this
+                              flag. Needs a window, so not with --replay.
   -h, --help                  this
 
 replay options (no window is opened and no GPU adapter is created):
@@ -80,7 +102,7 @@ recording that spanned one could not be replayed.
             .format_timestamp(None)
             .init();
 
-        let options = match parse(std::env::args().skip(1)) {
+        let mut options = match parse(std::env::args().skip(1)) {
             Ok(Some(options)) => options,
             Ok(None) => {
                 print!("{USAGE}");
@@ -91,6 +113,15 @@ recording that spanned one could not be replayed.
                 return ExitCode::FAILURE;
             }
         };
+
+        // Before the map is installed, because the fixture decides which world
+        // the session runs in and the map is only compiled for `world map`.
+        if let Some(path) = options.play_from.clone() {
+            if let Err(e) = load_playback(&path, &mut options.session) {
+                eprintln!("straf3: {e}");
+                return ExitCode::FAILURE;
+            }
+        }
 
         // Reading the file is deliberately here and not in `straf3-map`:
         // `compile` takes text, not a path, because that is what lets the
@@ -149,7 +180,48 @@ recording that spanned one could not be replayed.
         map_path: String,
         record_to: Option<String>,
         replay_from: Option<String>,
+        play_from: Option<String>,
         replay: ReplayOptions,
+    }
+
+    /// Read a recorded command file and make it the session's driver.
+    ///
+    /// # The file wins, and that is the whole rule
+    ///
+    /// A playback session is only a replay if it runs the file's commands
+    /// under the file's own parameters. `--profile`, `--rate` and `--world` are
+    /// therefore overwritten here rather than merged: running a `cpm` recording
+    /// under `vq3` because a flag said so would produce a different run and
+    /// present it as a playback of this file. `--replay` has always behaved
+    /// this way; this makes the windowed path behave identically.
+    ///
+    /// `--map` still selects which `.map` is compiled, because the fixture says
+    /// `world map` and cannot say *which* map — binding a recording to specific
+    /// geometry is the `.s3d` format's job, not this one's.
+    ///
+    /// # Errors
+    ///
+    /// The file could not be read, could not be parsed, or holds no commands.
+    fn load_playback(path: &str, session: &mut Options) -> Result<(), String> {
+        let text = read_input(path).map_err(|e| format!("cannot read {path}: {e}"))?;
+        let fixture = straf3_game::replay::parse(&text).map_err(|e| format!("{path}: {e}"))?;
+        if fixture.cmds.is_empty() {
+            return Err(format!(
+                "{path}: no commands, so there is nothing to play back"
+            ));
+        }
+
+        session.rate = fixture.rate;
+        session.profile = fixture.profile;
+        session.profile_name = fixture.profile_name;
+        session.world = fixture.world;
+        session.playback = Some(straf3_game::Playback {
+            cmds: fixture.cmds,
+            spawn: fixture.spawn,
+            yaw: fixture.yaw,
+            source: path.to_owned(),
+        });
+        Ok(())
     }
 
     /// Where the course lives when `--map` is not given.
@@ -299,6 +371,7 @@ recording that spanned one could not be replayed.
         let mut map_path = DEFAULT_MAP.to_owned();
         let mut record_to = None;
         let mut replay_from = None;
+        let mut play_from = None;
         let mut replay = ReplayOptions::default();
 
         let mut args = args;
@@ -314,11 +387,12 @@ recording that spanned one could not be replayed.
                 "--map" => map_path = value()?,
                 "--profile" => {
                     let name = value()?;
-                    session.profile = match name.as_str() {
-                        "cpm" => PhysicsProfile::cpm(),
-                        "vq3" => PhysicsProfile::vq3(),
-                        other => return Err(format!("unknown profile `{other}` (cpm|vq3)")),
-                    };
+                    session.profile = straf3_game::profile::by_name(&name).ok_or_else(|| {
+                        format!(
+                            "unknown profile `{name}` ({})",
+                            straf3_game::profile::NAMES
+                        )
+                    })?;
                     session.profile_name = name;
                 }
                 "--rate" => {
@@ -344,6 +418,8 @@ recording that spanned one could not be replayed.
                     );
                 }
                 "--replay" => replay_from = Some(value()?),
+                "--play" => play_from = Some(value()?),
+                "--pacing-log" => session.pacing_log = Some(value()?),
                 "--trace" => replay.trace = true,
                 "--csv" => replay.csv = true,
                 "--frame-ms" => {
@@ -378,11 +454,34 @@ recording that spanned one could not be replayed.
             }
         }
 
+        // `--replay` opens no window and draws no frame, so there would be
+        // nothing to time. Accepting the flag and writing an empty file would
+        // look like a measurement of a perfectly smooth session.
+        if replay_from.is_some() && session.pacing_log.is_some() {
+            return Err(
+                "`--pacing-log` needs frames to time, and `--replay` draws none. Run the \
+                 windowed build (with `--play` for a repeatable session)."
+                    .to_owned(),
+            );
+        }
+
+        // They are two different answers to "what runs this file": one opens a
+        // window and one refuses to. Silently preferring either would run
+        // something the command line did not unambiguously ask for.
+        if replay_from.is_some() && play_from.is_some() {
+            return Err(
+                "`--replay` and `--play` are alternatives: `--replay` runs the file with \
+                 no window, `--play` runs it with one. Pick one."
+                    .to_owned(),
+            );
+        }
+
         Ok(Some(Parsed {
             session,
             map_path,
             record_to,
             replay_from,
+            play_from,
             replay,
         }))
     }
@@ -390,6 +489,7 @@ recording that spanned one could not be replayed.
     #[cfg(test)]
     mod tests {
         use super::*;
+        use straf3_sim::PhysicsProfile;
 
         fn parse_args(args: &[&str]) -> Result<Option<Parsed>, String> {
             parse(args.iter().map(|s| (*s).to_owned()))
@@ -457,6 +557,91 @@ recording that spanned one could not be replayed.
             let parsed = parse_args(&["--exit-after", "2000"]).unwrap().unwrap();
             assert_eq!(parsed.session.exit_after_ms, Some(2_000));
             assert!(parse_args(&["--exit-after", "soon"]).is_err());
+        }
+
+        #[test]
+        fn playing_and_replaying_are_alternatives_not_a_combination() {
+            assert_eq!(
+                parse_args(&["--play", "run.txt"])
+                    .unwrap()
+                    .unwrap()
+                    .play_from
+                    .as_deref(),
+                Some("run.txt")
+            );
+            // Silently preferring one would run something the command line did
+            // not unambiguously ask for — with a window or without one.
+            assert!(parse_args(&["--play", "a.txt", "--replay", "b.txt"]).is_err());
+            assert!(parse_args(&["--play"]).is_err());
+        }
+
+        #[test]
+        fn a_pacing_log_needs_frames_so_it_is_refused_with_replay() {
+            assert_eq!(
+                parse_args(&["--pacing-log", "frames.csv"])
+                    .unwrap()
+                    .unwrap()
+                    .session
+                    .pacing_log
+                    .as_deref(),
+                Some("frames.csv")
+            );
+            // An empty CSV from a session that drew nothing would read as a
+            // perfectly smooth one.
+            assert!(parse_args(&["--replay", "r.txt", "--pacing-log", "f.csv"]).is_err());
+            assert!(parse_args(&["--play", "r.txt", "--pacing-log", "f.csv"]).is_ok());
+        }
+
+        /// The file's own parameters win, so a played session cannot be run
+        /// under physics the recording was not made under.
+        #[test]
+        fn a_played_fixture_overrides_the_flags_that_would_change_its_physics() {
+            const FIXTURE: &str = "\
+rate 76
+profile vq3
+world flat 0
+spawn 1 2 24
+yaw 45
+
+cmd 3 127 0 0 - 0 45
+";
+            let dir = std::env::temp_dir().join(format!("straf3-play-cli-{}", std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            let path = dir.join("run.txt");
+            std::fs::write(&path, FIXTURE).unwrap();
+
+            // Deliberately contradicted on the command line.
+            let mut parsed = parse_args(&["--profile", "cpm", "--rate", "125", "--world", "map"])
+                .unwrap()
+                .unwrap();
+            load_playback(&path.to_string_lossy(), &mut parsed.session).unwrap();
+
+            assert_eq!(parsed.session.rate, TickRate::from_hz(76).unwrap());
+            assert_eq!(parsed.session.profile, PhysicsProfile::vq3());
+            assert_eq!(parsed.session.profile_name, "vq3");
+            assert_eq!(parsed.session.world, WorldChoice::Flat);
+            let playback = parsed.session.playback.expect("the stream was loaded");
+            assert_eq!(playback.cmds.len(), 3);
+            assert_eq!(playback.yaw, straf3_sim::num::s(45.0));
+
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        #[test]
+        fn a_playback_file_that_cannot_be_read_or_holds_nothing_is_refused() {
+            let mut session = Options::default();
+            assert!(load_playback("no/such/file.txt", &mut session).is_err());
+
+            let dir = std::env::temp_dir().join(format!("straf3-play-empty-{}", std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            let path = dir.join("empty.txt");
+            // Parses, but has no commands: playing it would open a window on a
+            // player standing still and call it a replay.
+            std::fs::write(&path, "rate 125\nprofile cpm\nworld flat 0\n").unwrap();
+            let err = load_playback(&path.to_string_lossy(), &mut session).unwrap_err();
+            assert!(err.contains("nothing to play back"), "{err}");
+
+            let _ = std::fs::remove_dir_all(&dir);
         }
 
         #[test]

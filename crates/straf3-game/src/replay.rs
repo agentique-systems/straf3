@@ -96,13 +96,16 @@ pub fn parse(text: &str) -> Result<Fixture, String> {
             }
             "profile" => {
                 profile_name = (*f.get(1).unwrap_or(&"")).to_owned();
-                profile = match profile_name.as_str() {
-                    "cpm" => PhysicsProfile::cpm(),
-                    "vq3" => PhysicsProfile::vq3(),
-                    other => {
-                        return Err(at(format!("unknown profile `{other}` (cpm|vq3)")));
-                    }
-                };
+                // One table, shared with `--profile` (see `crate::profile`):
+                // a name the command line accepts and the fixture format does
+                // not would replay a recording under different physics from
+                // the ones it was made under.
+                profile = crate::profile::by_name(&profile_name).ok_or_else(|| {
+                    at(format!(
+                        "unknown profile `{profile_name}` ({})",
+                        crate::profile::NAMES
+                    ))
+                })?;
             }
             "world" => {
                 world = match f.get(1) {
