@@ -137,6 +137,26 @@ pub struct TelemetrySample {
     pub split_ms: Option<i32>,
     /// Frames per second, as measured by the shell over the last interval.
     pub fps: u32,
+    /// Distance straight down from the player's feet to the surface below, in
+    /// units, or `None` when there is nothing underneath.
+    ///
+    /// **Vertical, not perpendicular.** The sweep that produces it mirrors
+    /// `PM_GroundTrace`, which traces straight down — so on a ramp this is the
+    /// drop to the face directly beneath the feet, not the shortest distance to
+    /// the slope. That is the right number for the trace it illustrates and the
+    /// wrong number for "how far am I off this ramp", and anything drawing it
+    /// must not imply the second.
+    ///
+    /// It is also **not a prediction**. Whether a landing overbounces turns on
+    /// where a command boundary falls as the player descends, which is a
+    /// sub-tick question with no signal above the seam: two descents through
+    /// identical clearances at different velocities resolve differently. What
+    /// the number can do is make the quarter-unit band observable, so the
+    /// effect reads as a fraction of a unit rather than as luck.
+    ///
+    /// Computed above the seam and handed in by the shell — the simulation is
+    /// not asked for it, and adding it moved no canon digest.
+    pub foot_clearance: Option<Scalar>,
     /// How many commands have been applied.
     pub tick: u32,
     /// Simulation time in milliseconds — the exact sum of command durations,
@@ -147,9 +167,10 @@ pub struct TelemetrySample {
 impl TelemetrySample {
     /// Read everything the simulation knows.
     ///
-    /// [`Self::fps`] and [`Self::split_ms`] are left at their defaults; they
-    /// are not the simulation's to say. Use [`Self::with_fps`] and
-    /// [`Self::with_split_ms`].
+    /// [`Self::fps`], [`Self::split_ms`] and [`Self::foot_clearance`] are left
+    /// at their defaults; none of them is the simulation's to say. Use
+    /// [`Self::with_fps`], [`Self::with_split_ms`] and
+    /// [`Self::with_foot_clearance`].
     #[must_use]
     pub fn of(state: &SimState) -> Self {
         let v = state.player.velocity;
@@ -160,6 +181,7 @@ impl TelemetrySample {
             run: RunReadout::of(&state.run, state.time_ms),
             split_ms: None,
             fps: 0,
+            foot_clearance: None,
             tick: state.tick,
             sim_ms: state.time_ms,
         }
@@ -176,6 +198,16 @@ impl TelemetrySample {
     #[must_use]
     pub const fn with_split_ms(mut self, split_ms: Option<i32>) -> Self {
         self.split_ms = split_ms;
+        self
+    }
+
+    /// Attach the shell's vertical foot-clearance sweep, if it took one.
+    ///
+    /// See [`Self::foot_clearance`] for what the number is and, more
+    /// importantly, what it is not.
+    #[must_use]
+    pub const fn with_foot_clearance(mut self, units: Option<Scalar>) -> Self {
+        self.foot_clearance = units;
         self
     }
 }
@@ -455,11 +487,23 @@ mod tests {
     }
 
     #[test]
-    fn the_two_things_the_simulation_cannot_know_are_added_by_the_shell() {
+    fn the_things_the_simulation_cannot_know_are_added_by_the_shell() {
         let sample = TelemetrySample::of(&SimState::default())
             .with_fps(241)
-            .with_split_ms(Some(-312));
+            .with_split_ms(Some(-312))
+            .with_foot_clearance(Some(s(0.125)));
         assert_eq!(sample.fps, 241);
         assert_eq!(sample.split_ms, Some(-312));
+        assert_eq!(sample.foot_clearance, Some(s(0.125)));
+    }
+
+    #[test]
+    fn a_sample_read_from_the_simulation_alone_claims_no_clearance() {
+        // `None` and "zero clearance" are opposite readings — one is "nothing
+        // underneath", the other is "standing on it" — so the default must not
+        // be a number.
+        let sample = TelemetrySample::of(&SimState::default());
+        assert_eq!(sample.foot_clearance, None);
+        assert_eq!(sample.with_foot_clearance(None).foot_clearance, None);
     }
 }
