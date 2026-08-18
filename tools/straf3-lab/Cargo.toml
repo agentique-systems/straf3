@@ -1,0 +1,37 @@
+# The movement lab: an instrument, not a shipped subsystem.
+#
+# It lives under `tools/` rather than `crates/` for the same reason
+# `straf3-det-runner` does — it is something the project *runs at itself*, not
+# something the game links. And it must live above the seam, because writing a
+# results document means writing a file, which nothing below the line may do.
+#
+# It is a workspace member (rather than standalone like `probes/`) so it
+# resolves `glam` through this workspace's Cargo.lock. A measurement taken
+# against a different resolution would be describing a different tree, which is
+# exactly the failure mode `tools/det-runner`'s manifest warns about.
+[package]
+name = "straf3-lab"
+description = "Measures the movement language and publishes the numbers. Deterministic, headless."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "straf3_lab"
+
+[[bin]]
+name = "straf3-lab"
+path = "src/main.rs"
+
+# The thing under measurement, and the tracer the game actually uses.
+#
+# `straf3-map` is deliberately absent. The lab measures *movement*, and every
+# world it measures in is built from brushes here (see `geometry.rs`) so a
+# measurement can be reproduced without a `.map` file, a compiler, or a
+# filesystem read on the measurement path. Depending on a crate the lab does
+# not call would put a version in this manifest that nothing verifies.
+[dependencies]
+straf3-sim.workspace = true
+straf3-collision.workspace = true

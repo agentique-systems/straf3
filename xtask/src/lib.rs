@@ -12,15 +12,19 @@
 //!   command reaches, so a probe cannot rot unnoticed the way two did when
 //!   C3 changed the command boundary.
 //!
-//! Two more are instruments rather than checks — they exist so that a claim
-//! about the real GPU is something a reader can reproduce with one command
-//! instead of a paragraph of shell:
+//! Three more are instruments rather than checks — they exist so that a claim
+//! about how the game moves, or about the real GPU, is something a reader can
+//! reproduce with one command instead of a paragraph of shell:
 //!
+//! - [`lab`] measures the movement language and publishes the numbers, so a
+//!   decision about how the game moves can be argued from evidence instead of
+//!   from taste.
 //! - [`capture`] takes a screenshot of the running client (criterion 8).
 //! - [`pacing`] runs and analyses frame-time measurements (criterion 7).
 
 pub mod capture;
 pub mod determinism;
+pub mod lab;
 pub mod pacing;
 pub mod probes;
 pub mod seam;

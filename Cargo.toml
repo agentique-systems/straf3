@@ -23,6 +23,10 @@ members = [
     # produces the instrument, and so `cargo test --workspace` on Linux still
     # covers the half of it that decides whether a capture is believed.
     "tools/straf3-capture",
+    # The movement lab (spec D1): measures the movement language and publishes
+    # the numbers. A workspace member for the same reason det-runner is — it
+    # must measure the tree this Cargo.lock describes, not a neighbouring one.
+    "tools/straf3-lab",
 ]
 
 [workspace.package]

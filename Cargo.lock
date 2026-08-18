@@ -2326,6 +2326,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "straf3-lab"
+version = "0.1.0"
+dependencies = [
+ "straf3-collision",
+ "straf3-sim",
+]
+
+[[package]]
 name = "straf3-map"
 version = "0.1.0"
 dependencies = [

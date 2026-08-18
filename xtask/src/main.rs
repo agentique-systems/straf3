@@ -10,6 +10,7 @@ fn main() -> ExitCode {
         Some("determinism") => determinism(&argv),
         Some("capture") => capture(&argv),
         Some("pacing") => pacing(&argv),
+        Some("lab") => lab(&argv),
         Some(other) => {
             eprintln!("unknown command: {other}");
             usage();
@@ -107,6 +108,32 @@ usage: cargo xtask <command>
                Never run on the Linux side: Vulkan is llvmpipe there and
                presentation has no real vblank, so the numbers are fiction
                (docs/environment.md §6).
+
+  lab          Measure the movement language and publish the numbers, so that a
+               decision about how the game moves can be argued from evidence
+               instead of from taste. Every mechanic in this project so far has
+               rested on Quake 3 heritage and on somebody's judgement; the
+               vision asks for evidence, and this is the instrument.
+
+               Runs headless and deterministically — no GPU, no clock, no
+               randomness, no libm on any path that feeds a number — so the same
+               invocation produces the same bytes on any machine. It measures,
+               for every physics profile: the strafe speed-gain curve against
+               entry speed and held angle, the technique timing windows in whole
+               milliseconds, ramp-angle response across the walkable/sliding
+               flip, whether overbounce occurs and under what conditions, edge
+               and step clipping, and the terminal speed each technique reaches.
+
+               Writes docs/movement-lab.md and the machine-readable fixture
+               beside it, and stamps the commit it measured from into the
+               document. Takes about ten seconds.
+
+               Options (see `straf3-lab --help` for the full list):
+                 --check             recompute and compare against the pinned
+                                     fixture, naming which measurements moved.
+                                     Writes nothing; exits non-zero if any did.
+                 --emit <file>       write the document somewhere else
+                 --stdout            print it instead of writing it
 "
     );
 }
@@ -134,6 +161,31 @@ fn pacing(argv: &[String]) -> ExitCode {
         }
         Err(e) => {
             eprintln!("pacing could not run: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn lab(argv: &[String]) -> ExitCode {
+    println!(
+        "measuring the movement language (spec criterion 1)...\n\
+         headless, deterministic, and slow enough to be worth waiting for:\n\
+         tens of millions of simulation commands, about ten seconds.\n"
+    );
+    match xtask::lab::run(argv) {
+        Ok(true) => ExitCode::SUCCESS,
+        Ok(false) => {
+            eprintln!(
+                "\nThe movement numbers are not the ones that were pinned.\n\
+                 Each line above names a measurement that moved. If the change\n\
+                 was intended, run `cargo xtask lab` without --check and commit\n\
+                 the new numbers in the same commit as the movement change, with\n\
+                 the reason in the message."
+            );
+            ExitCode::FAILURE
+        }
+        Err(e) => {
+            eprintln!("the lab could not run: {e}");
             ExitCode::FAILURE
         }
     }
