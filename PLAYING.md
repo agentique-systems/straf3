@@ -102,8 +102,10 @@ something, leave it under `target/`, which `.gitignore` already excludes.
 > Vulkan resolves to the software rasteriser `llvmpipe`, so the window opens
 > and the loop runs, and that is all these instructions verify. **No frame
 > rate, smoothness or latency number produced on this machine means anything**
-> — the vision's pacing budgets (`docs/VISION.md`, "Frame pacing and latency")
-> are measured on the Windows build above and nowhere else.
+> — the vision's refresh-class targets (`docs/VISION.md` §9, Native game and
+> browser game: the 240 Hz class on desktop where hardware permits it, and
+> roughly the 120 Hz class in the browser on capable systems) are measured on
+> the Windows build above and nowhere else.
 
 That warning is about *numbers*, not about the build. Everything headless —
 replay, the offscreen renders, the whole test suite — is exactly as valid here
