@@ -31,6 +31,29 @@ That decision is fixed and C9 states it rather than reopening it. Rev 6 §Q1 als
 own the trigonometry, we do not pin the server to musl — and §R made the rolling digest a recorded
 protocol constraint, which §3.2 already implements.
 
+**Note — the revised `docs/VISION.md`, and the one tension it creates for this document.** This
+document is written against the specification, as its header states, and cites no vision document,
+so the revision corrects no pointer here. It does create exactly one tension, and this is it: the
+vision says "The native Straf3 client is the uncompromised reference experience", while §9.2
+recommends building the browser first and treating it as *the primary client*, and §11 item E asks
+the operator to confirm exactly that. Which client is the reference experience and which client
+leads development are separable questions, but they are close enough to be worth naming. The
+decision stays where it already sits — with the operator, under item E — and this note does not
+pre-empt it.
+
+**§9.2's build-order argument is unaffected whichever way item E goes.** Its four reasons are about
+tooling and determinism, not about release framing or which client is the reference: `wgpu`/`winit`
+target web and native from one implementation; the wasm module links its own maths and so settles
+the determinism question structurally in the browser's favour; this machine cannot evaluate a native
+client under WSL2; and D4 already leans that way. None of them asserts that the browser is the
+better game, and none of them is weakened by calling the native client the reference experience —
+the vision itself asks that development "pursue browser gameplay aggressively" and judge it on
+"measured reality rather than ideology", which is what §9.2 does.
+
+**Nothing settled is reopened.** C1, §3.2's rolling digest and C9 are unaffected: they rest on the
+probe's measurements and on rev 6 §Q1, §R and §Q2 respectively, not on any claim about which client
+is primary, and they read the same under either answer to item E.
+
 ---
 
 ## 0. Summary — the eight things to act on
