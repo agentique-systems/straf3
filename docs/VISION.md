@@ -1,552 +1,947 @@
-# Straf3 — Vision, Scope, and Development Goals
+# Straf3 — Vision, Product Principles, and Development Direction
 
-## Governing thesis
+**Status:** Working vision
+**Purpose:** Define the intended identity, player experience, product direction, and development principles for Straf3. This document is intended to align both humans and AI agents working on the game.
 
-> **The whole product is the quality of the movement.**
+## 1. North star
 
-This is the decision rule above every feature list, technology choice, content plan, and business model. If a choice weakens movement feel, mastery, responsiveness, clarity, or competitive integrity, it is wrong for Straf3—even if it would make another part of the product easier to build or market.
+**Straf3 is a next-generation competitive first-person movement game, strongly inspired by Quake 3 Defrag but built to establish its own identity for the modern era.**
 
-## Vision
+Movement is the center of the game.
 
-Straf3 is a modern competitive movement sport for native desktop and the web. Players learn a compact but extraordinarily deep movement language, discover routes through abstract futuristic arenas, and pursue per-map world records whose evidence can be replayed, raced, analyzed, and preserved.
+Movement in Straf3 is both **an art and a science**.
 
-The game combines three first-class modes:
+It is a science because speed, acceleration, angles, timing, collision, routes, inputs, and execution can be understood, measured, analyzed, and optimized.
 
-1. **Verified asynchronous competition** — the central record sport and the source of its highest prestige.
-2. **Live multiplayer racing and practice** — head-to-head races, shared free-practice spaces, tricking, spectating, and events.
-3. **Training and unranked play** — a permanent mastery system that teaches movement primitives, then combinations, then the open-ended application of both in real maps.
+It is an art because great movement should also contain flow, creativity, improvisation, style, discovery, and personal expression.
 
-Straf3 is also the foundation of a full ecosystem. A map is not merely a file: it has a page, versions, records, ghosts, analysis, servers, editing and remixing entry points, and a durable competitive history. A player should be able to follow a link and immediately play a map, race a ghost, watch a record, open an editor, or join a server.
+The fundamental design goal is:
 
-The native client and browser client are peers. They share the same simulation truth, content, competitive access, and live multiplayer ecosystem. The custom Rust engine exists to serve this product first; reusable engine systems are extracted as the needs of Straf3 prove them.
+> **Easy to learn. Difficult to master. Deep enough that mastery continues to reveal new possibilities.**
 
-## The decisive proof
+Straf3 should give new players an understandable path into advanced movement while preserving the depth required for expert players to spend hundreds or thousands of hours improving.
 
-The earliest decisive proof that Straf3 works is not feature count, visual spectacle, or a large audience:
+The quality of the movement is the most important property of the game. Technology, graphics, maps, multiplayer systems, AI, web infrastructure, and other features exist to support that experience.
 
-> **Movement experts voluntarily grind the same small map because improving their time remains compelling.**
+---
 
-This is the first proof of product truth. Every broader system amplifies that truth; none can substitute for it.
+## 2. Product identity
 
-## Product identity
+Straf3 is:
 
-### What Straf3 is
+* a competitive first-person movement game;
+* a multiplayer game that can also be played entirely alone;
+* a game about movement mastery, execution, route discovery, flow, and competition;
+* a modern successor in spirit to the type of experience pioneered by Quake 3 Defrag, without being constrained to reproduce Defrag exactly;
+* a game with one canonical competitive movement ruleset;
+* a game where additional movement profiles and experimental rulesets can be explored without fragmenting the primary competitive identity;
+* a native game with a major ambition to also make the complete game playable directly through the web;
+* a game connected to a first-class web portal that acts as its launcher, competitive hub, content browser, replay viewer, server browser, and community platform;
+* a flagship game built using a custom modular Rust engine;
+* a game where maps are critical to the quality of the experience;
+* a game whose development process makes deep use of AI agents, tools, automation, and reinforcement learning.
 
-- A competitive movement sport.
-- A deep first-person mastery game.
-- A native-and-browser game built around permanent, verifiable runs.
-- A map, training, replay, analysis, and community platform.
-- A creator environment with first-class AI assistance and an eventual RL-driven map-development loop.
-- A flagship game built on a custom, modular Rust engine.
+Straf3 should respect its Quake and Defrag heritage while being willing to change, extend, modernize, and improve upon it.
 
-### Who it is for
+The objective is not preservation.
 
-The initial audience spans:
+The objective is to create **Straf3 movement**.
 
-- movement enthusiasts whose expectations have been modernized by contemporary games;
-- speedrunners and competitive runners;
-- existing Defrag and arena-FPS veterans;
-- broader FPS players who already enjoy advanced movement and want a path into deeper mastery.
+---
 
-The product should respect experts without requiring prior Defrag knowledge. Accessibility comes primarily from excellent teaching, feedback, practice structure, and course design—not by removing the depth experts value.
+## 3. The player promise
 
-### World and tone
+A new player should be able to begin moving, understand why something worked or failed, experience moments of flow early, and see a clear path toward deeper mastery.
 
-Straf3 uses pure or near-pure abstract arenas with minimal fiction. Its visual identity is a modern, stylized, light-themed, minimal science-fiction aesthetic, drawing broad inspiration from games such as Diabotical and Reflex Arena and from strong contemporary Defrag mapping.
+An expert player should continue finding reasons to improve.
 
-The art exists to make space, motion, collision, speed, routes, and competitive action beautiful and legible. Extensive narrative, lore, characters, and worldbuilding are not current priorities.
+A great Straf3 run can contain several qualities at once:
 
-## The player promise
+### Flow
 
-A first session should deliver a quick taste of flow followed by a visible path toward mastery.
+Movement becomes rhythmic and continuous. Individual inputs disappear into a larger sequence that feels almost effortless when performed correctly.
 
-An excellent run should support all of these experiences:
+### Mastery
 
-- **Flow:** movement becomes rhythmic, musical, and apparently effortless.
-- **Mastery:** improvement is earned, understandable, and attributable to player decisions.
-- **Adrenaline:** a record attempt or live race carries pressure and spectacle.
-- **Discovery:** routes, transitions, techniques, and combinations feel inventable rather than exhausted.
+Improvement comes from understanding and execution. Better players should be able to explain, demonstrate, and reproduce why they are faster.
 
-The player should always understand that a better run is possible and have useful evidence about how to pursue it.
+### Precision
 
-## Movement vision
+Small differences in timing, angle, positioning, speed, and technique can matter.
 
-### Straf3 owns its ruleset
+### Creativity
 
-Quake 3, VQ3, CPM, and Defrag are foundations and sources of accumulated design knowledge; they are not preservation constraints. Straf3 will develop a distinct canonical movement ruleset through prototyping, measurement, and expert playtesting.
+Players should be able to combine movement mechanics and map geometry in expressive ways.
 
-The intended vocabulary includes:
+### Discovery
 
-- strafejumping and circle jumping;
-- ramp interaction and boosts;
-- steps, clipping, overbounce, and other valuable emergent collision interactions;
-- CPM-style air control, double jumps, and related extensions;
-- crouch slides, dashes, wall interaction, and other modern movement ideas that survive testing;
-- modular experimental abilities outside the primary ranked ruleset.
+Maps should leave room for new routes, transitions, techniques, optimizations, and combinations to emerge.
 
-The final canonical set is not predetermined. Mechanics earn their place through the quality and depth of the movement they create.
+### Competition
 
-### Compact input, combinatorial depth
+Records and live races should create pressure, rivalry, spectacle, and meaningful achievements.
 
-Players use a compact, universal input language. Advanced behavior should emerge from timing, context, geometry, speed, and the interaction of mechanics rather than from a large ability bar or many isolated buttons.
+The game should balance **execution and discovery**.
 
-Every canonical mechanic should aim to be:
+A map should neither reduce entirely to executing one prescribed solution nor become so unconstrained that deliberate course design loses meaning.
 
-- simple to invoke but difficult to master;
-- meaningfully composable with several other mechanics;
-- deterministic and clearly attributable;
-- capable of producing route choices, not merely one mandatory execution;
-- visually and audibly readable to players and spectators.
+---
 
-### Movement anti-goals
+## 4. Movement
 
-Straf3 should resist:
+### 4.1 Quake and Defrag are the foundation, not the boundary
 
-- automation that replaces execution or timing;
-- opaque exploits that cannot be learned through feedback;
-- hard speed caps or excessive forced slowdown;
-- cooldown rotations that replace momentum mastery;
-- mechanic overload that weakens the coherence of the shared movement language.
+Straf3 begins from the accumulated knowledge of Quake movement, Defrag, VQ3, CPM, and related movement games.
 
-### Assists are an experiment, not a present priority
+Important concepts include, among others:
 
-Training assists and persistent movement assists may be explored later. A ranked assist would at minimum need to be deterministic, transparent, equally available, and compatible with the ultimate skill ceiling. The architecture should allow controlled experimentation without requiring the product vision to settle the rules now.
+* strafejumping;
+* circle jumping;
+* air acceleration and air control;
+* ramp interaction;
+* speed preservation;
+* steps and collision interaction;
+* double jumps and related chained techniques;
+* overbounces and other valuable emergent interactions where they create understandable depth;
+* crouch sliding;
+* carefully designed new movement mechanics.
 
-## Game modes
+The exact canonical movement system must be discovered through implementation, experimentation, measurement, map design, and expert playtesting.
 
-### 1. Verified asynchronous competition
+No mechanic is included merely because it existed in an older game.
 
-This is the backbone of the sport.
+Likewise, new mechanics should not be added merely because they are modern.
 
-- Players cross a start line, complete a map, and pursue a personal or world-best time.
-- Per-map world records carry the highest competitive prestige.
-- Runs are verified continuously rather than trusted solely because their final state matches.
-- Any published record can become a replay, ghost, comparison target, and subject of analysis.
-- Map and ruleset changes create new versioned leaderboards; the old record books remain intact.
+Every mechanic must improve the movement language.
 
-Seasonal circuits, events, and broader ratings may be added, but they do not replace the clarity of the per-map record.
+### 4.2 Compact input, deep results
 
-### 2. Live multiplayer
+The input vocabulary should remain relatively compact.
 
-The full scope includes:
+Depth should emerge primarily through:
 
-- official regional matchmaking and race servers;
-- live head-to-head races;
-- shared free-practice and tricking servers;
-- community-hosted public servers with link-based joining;
-- private friend, team, and practice sessions;
-- persistent practice spaces with records and trick challenges;
-- live spectating and tournament broadcast sessions.
+* timing;
+* direction;
+* geometry;
+* speed;
+* momentum;
+* positioning;
+* sequencing;
+* transitions;
+* mechanical interactions;
+* route decisions.
 
-Live competition is a distinct discipline alongside asynchronous records, not a replacement for them.
+Advanced movement should come from combining understandable primitives rather than accumulating a large collection of unrelated abilities.
 
-### 3. Training and unranked play
+A strong mechanic should generally be:
 
-Training is a full mode rather than a disposable tutorial.
+* understandable at a basic level;
+* difficult to perfect;
+* responsive;
+* deterministic;
+* composable with other mechanics;
+* useful in multiple situations;
+* capable of supporting player expression;
+* readable through visual, audio, and diagnostic feedback.
 
-- Authored courses progress from fundamentals to elite techniques.
-- Individual trick jumps teach the primitives of the movement language.
-- Combination courses teach players to connect primitives into fluent sequences.
-- Real maps then ask players to discover and tailor their own combinations.
-- Adaptive exercises and personalized progression respond to a player's demonstrated needs.
-- Unranked play provides room to practice, explore, experiment, and use provisional mechanics.
+### 4.3 One canonical competitive ruleset
 
-The long-term training vision may include AI/RL demonstrations and deeper coaching, but the confirmed center is structured skill acquisition followed by open-ended composition.
+Straf3 should eventually establish one authoritative movement ruleset that defines the primary competitive game.
 
-## Maps and content
+This ruleset is what it means to play canonical Straf3.
 
-### Required map disciplines
+Development should still support experimentation with:
 
-The official portfolio should deliberately support:
+* alternate movement profiles;
+* provisional mechanics;
+* modified physics;
+* training experiments;
+* unusual map concepts;
+* research-oriented rulesets.
 
-- fast flow and sustained speed;
-- technical precision and difficult trick jumps;
-- route discovery, shortcuts, and emergent techniques;
-- long-form endurance and full-map movement combinations.
+Experiments should be easy to conduct without prematurely incorporating them into ranked play.
 
-Different maps may emphasize one discipline, but the total game should support all of them.
+A mechanic enters the canonical ruleset because testing demonstrates that it improves Straf3.
 
-### Content trust tiers
+### 4.4 Movement anti-goals
 
-Maps belong to one of three broad trust tiers:
+Avoid mechanics or systems that:
 
-1. **Official** — curated as part of the authoritative competitive core.
-2. **Verified community** — community-created content that passes defined technical and quality gates.
-3. **Experimental** — provisional content, mechanics, and experiences with fewer competitive guarantees.
+* automate execution that should belong to player skill;
+* make important outcomes opaque or impossible to understand;
+* impose arbitrary speed limits to compensate for poor design;
+* replace momentum mastery with cooldown rotations;
+* introduce complexity without increasing meaningful depth;
+* reduce movement to memorizing ability sequences;
+* weaken responsiveness for visual spectacle;
+* make the canonical movement language incoherent.
 
-The official core is governed through studio curation while community tools and servers remain open. The precise outer boundary of creator scripting, custom rules, and deep modding is deliberately unresolved.
+---
 
-### Map publication gates
+## 5. Core game modes
 
-A verified or official map should demonstrate:
+The initial game is organized around three primary forms of play.
 
-- deterministic collision and identical gameplay behavior across platforms;
-- performance and visual readability on target hardware;
-- human-completable routes with declared skill and mechanic coverage;
-- RL-assisted analysis of routes, exploits, difficulty, and flow;
-- human curation for quality, originality, and competitive value.
+Other modes may be explored later.
 
-Automation informs curation; it does not replace human judgment.
+### 5.1 Ranked time attack
 
-## Map editor, AI, and RL
+Players run maps individually and attempt to achieve the fastest possible completion time.
 
-### One editor core
+This is the primary record-oriented mode.
 
-Native and browser editing share one editor core, with interfaces adapted to each platform. The web is not a read-only portal: creating, publishing, and community participation are part of the browser product.
+Players compete against:
 
-### First-class AI copilot
+* their own personal best;
+* friends;
+* other players;
+* map leaderboards;
+* world records;
+* replay ghosts.
 
-The AI copilot should eventually be able to:
+Runs should be recordable, replayable, analyzable, and verifiable.
 
-- create and modify geometry, materials, entities, and routes from intent;
-- generate training obstacles for named mechanics and skill levels;
-- analyze routes, exploits, difficulty, flow, readability, and performance;
-- iterate with RL agents and propose validated revisions;
-- expose editor operations through MCP and other automation interfaces.
+Per-map records are an important part of Straf3's competitive identity.
 
-The near-term identity is **copilot**, not autonomous replacement: a creator remains able to direct, inspect, refine, and accept changes.
+### 5.2 Live competitive racing
 
-### RL development path
+Players compete against each other live.
 
-The intended progression is:
+The exact formats can evolve, but the foundation is direct multiplayer racing using the same movement system that powers solo record play.
 
-1. teach agents individual movement primitives;
-2. compose primitives into movement combinations;
-3. connect learned combinations into complete map runs;
-4. use agents to assess solvability, route diversity, difficulty, exploits, and flow;
-5. use the results to generate and refine training content and full maps for specified skill levels;
-6. eventually support more autonomous map generation, still subject to technical and human curation gates.
+Live competition should preserve:
 
-AI and RL are both product capabilities and internal content-development accelerators.
+* movement responsiveness;
+* competitive integrity;
+* clarity;
+* fairness;
+* spectatability;
+* connection to the same maps and movement language used elsewhere.
 
-## Competition, records, and sporting history
+Live multiplayer is not a secondary version of the game. It is one of the core ways Straf3 is played.
 
-### A record is evidence, not just a time
+### 5.3 Training and unranked play
 
-Every ranked world record should expose:
+Players can run maps without ranked consequences.
 
-- a downloadable replay and raceable ghost;
-- versioned map, movement rules, engine, and platform metadata;
-- a public verification result with continuous run-integrity evidence;
-- input, speed, route, and comparison analysis;
-- moderation, challenge, and adjudication history when a result is disputed.
+This supports:
 
-### Permanent, versioned history
+* learning;
+* practice;
+* experimentation;
+* route exploration;
+* mechanical experimentation;
+* warmup;
+* casual play;
+* training maps.
 
-- A material map or movement update creates a new leaderboard version.
-- Old record books remain browsable and meaningful.
-- Old runs remain replayable through versioned simulation runtimes.
-- Content and simulation identities are explicit; a record never silently changes meaning underneath the player.
+Training should be a permanent part of the game rather than a disposable tutorial.
 
-Replay preservation is a product promise and an engineering responsibility.
+---
 
-## Browser, native, and the web platform
+## 6. Training and movement primitives
 
-### Browser from the beginning
+Straf3 should treat movement as a language that can be decomposed into **movement primitives**.
 
-The browser is not a later port or companion-only experience. The first meaningful public release targets:
+Training maps should isolate and teach these primitives.
 
-- full competitive play;
-- live multiplayer;
-- training and unranked play;
-- timed runs, ghosts, verification, and leaderboards;
-- editing, publishing, and community participation;
-- equivalent visual features and graphical fidelity, within platform-appropriate quality scaling.
+Examples may include:
 
-### Native and browser parity
+* initial acceleration;
+* circle jumps;
+* strafejump timing;
+* air-control changes;
+* ramp interactions;
+* precision landings;
+* crouch slides;
+* chained transitions;
+* combinations of several mechanics.
 
-The non-negotiable shared truth is:
+Training should then progress from isolated primitives toward combinations.
 
-- identical simulation outcomes;
-- identical input interpretation at the simulation boundary;
-- identical maps and collision;
-- identical replay results;
-- access to the same ranked competition and live multiplayer.
+Eventually, players leave controlled training scenarios and apply those techniques creatively inside real maps.
 
-The implementations may use platform-specific shells and optimizations, but the competitive game must not fork into browser and native variants.
+The intended learning progression is approximately:
 
-### The web as connective tissue
+**primitive → controlled repetition → combination → route segment → complete map → optimization → personal expression**
 
-A map page should allow a player to:
+Importantly, these training environments are not intended only for human players.
 
-- launch the map in browser or native;
-- browse records and race any available ghost;
-- watch, analyze, and compare runs;
-- open, fork, and remix the map in the editor;
-- start or join a live practice or racing server.
+**Humans and reinforcement-learning agents should train using the same fundamental movement environments.**
 
-Similar durable links should exist for players, records, replays, events, and servers. Joining a community should feel as direct as following a link.
+This creates a shared language between:
 
-## Technical and production vision
+* game design;
+* player training;
+* movement analysis;
+* RL development;
+* map evaluation;
+* difficulty estimation.
 
-### A custom Rust engine serving Straf3
+---
 
-The engine is the abstract technical core of the product, but Straf3 is developed first. Reusable systems are extracted from demonstrated game needs rather than designed as a separate general-purpose engine in advance.
+## 7. Maps
 
-The engine should:
+Maps are one of the most important components of Straf3.
 
-- be modular and explicit about subsystem boundaries;
-- use established libraries, patterns, and algorithms where they meet the requirements;
-- avoid reinvention for its own sake;
-- support native and browser targets from the beginning;
-- make simulation, rendering, tools, networking, content, and services independently testable;
-- support the iteration speed required by a small team heavily augmented by AI.
+Movement mechanics cannot be evaluated independently from the spaces in which those mechanics are used.
 
-### Patterns serve constraints
+Great maps should expose different aspects of movement.
 
-ECS, ability systems, data-oriented design, and other proven game-development patterns should be applied selectively.
+The first-party map portfolio should deliberately include different emphases such as:
 
-- The deterministic simulation remains purpose-built, explicit, and testable.
-- Advanced movement can be described and composed through ability-system concepts and data.
-- No pattern is required to own a subsystem when profiling, prototypes, or correctness constraints show a better design.
-- "Best practice" means demonstrated fitness for Straf3, not architectural fashion.
+* sustained flow and speed;
+* technical execution;
+* precision;
+* difficult movement combinations;
+* route choice;
+* shortcuts;
+* discovery;
+* experimental geometry;
+* long-form endurance;
+* transitions between different movement styles.
 
-### The seam remains a principle, not necessarily today's crate graph
+Some maps may emphasize pure execution.
 
-The lasting architectural idea is a hard dependency boundary:
+Others may emphasize discovering better routes.
 
-- **Below the seam:** deterministic simulation truth, collision, map semantics, and replay/verification logic. No filesystem, wall clock, GPU, nondeterministic randomness, or platform-owned behavior.
-- **Above the seam:** platform input, rendering, audio, networking transport, UI, editor presentation, storage, services, and orchestration.
+The game as a whole should support both.
 
-The exact crates and internal layout may change. The property to preserve is that the competitive result is a pure, reproducible consequence of versioned state and commands.
+### First-party maps first
 
-## Quality as correctness
+The immediate focus is building excellent Straf3 maps ourselves.
 
-### 1. Movement feel
+Community-created maps, extensive modding ecosystems, creator economies, and similar systems should not dictate the early architecture or product roadmap.
 
-Movement must remain responsive, expressive, learnable, compositional, and worth repeating. Expert playtesting is a core development instrument, not a late polish pass.
+The editor should nevertheless be designed as a serious internal production tool and should avoid unnecessary assumptions that would prevent broader use later.
 
-### 2. Determinism
+Quality comes before content volume.
 
-Competitive simulation must be bit-identical across supported native, browser, headless, and verification targets. Determinism applies continuously across a run, not only to the final checksum.
+A small number of exceptional maps is more valuable than a large number of mediocre ones.
 
-### 3. Frame pacing and latency
+---
 
-Performance is judged through measurement, not average frame-rate claims.
+## 8. Competition, records, ghosts, and replays
 
-- Desktop development targets the 240 Hz class for competitive play.
-- Browser development targets the 120 Hz class on capable hardware.
-- Frame pacing, refresh behavior, and end-to-end input latency have published budgets and regression tests.
-- Visual settings may scale, but competitive timing and movement truth do not.
+Competitive history remains a major part of Straf3.
 
-### 4. AAA production quality
+A record should be more than a leaderboard number.
 
-For Straf3, AAA quality means:
+A competitive run should be capable of becoming:
 
-- exceptional response, latency, pacing, and movement feel;
-- cohesive high-end art, lighting, effects, animation, and audio;
-- deeply polished maps, training, UI, editor, and creator workflows;
-- reliable multiplayer, records, sharing, and community services.
+* a replay;
+* a ghost;
+* a comparison target;
+* an analysis target;
+* evidence for a record;
+* material for learning;
+* material for spectating.
 
-It does not primarily mean photorealism, narrative scale, or feature volume.
+Players should be able to understand how another player moved faster.
 
-### 5. Built-in diagnostics
+Useful analysis may include:
 
-Developer-grade truth should be available as product-grade tooling:
+* position;
+* velocity;
+* acceleration;
+* view angle;
+* inputs;
+* movement state;
+* route;
+* split times;
+* differences against another run.
 
-- frame pacing, refresh, and end-to-end latency inspection;
-- determinism checksums and local replay verification;
-- input, velocity, angle, collision, and route visualization;
-- cross-run comparison and regression analysis;
-- exportable diagnostics for bug reports and competitive disputes.
+### Competitive integrity
 
-## Development model
+Ranked results should be reproducible and verifiable.
 
-### Team assumption
+The simulation should be deterministic enough that authoritative run data can be replayed and independently checked.
 
-The planning assumption is a small core team heavily augmented by AI.
+Verification should consider the complete run rather than trusting only its final result.
 
-### Parallel workstreams
+Map, engine, or canonical movement changes that materially affect competition should be versioned.
 
-Development proceeds across parallel but continuously integrated workstreams:
+Historical records should not silently change meaning when the game evolves.
 
-1. **Movement and deterministic simulation**
-2. **Engine, rendering, audio, and platform runtime**
-3. **Game modes, training, UI, and player experience**
-4. **Maps, editor, content pipeline, AI, and RL**
-5. **Web platform, identity, records, verification, and analysis**
-6. **Networking, live servers, spectating, and community hosting**
-7. **Devtools, testing, performance, and release infrastructure**
+Where technically practical, old competitive runs should remain replayable and understandable.
 
-Parallel work does not mean waiting until the end to connect independent systems. Each workstream should contribute to frequent integrated proofs using the same maps, commands, versions, identities, and quality budgets.
+---
 
-### Recommended integration proofs
+## 9. Native game and browser game
 
-These are evidence gates, not a proposal to postpone the other workstreams:
+### Native is uncompromised
 
-#### Proof A — Movement truth
+The native Straf3 client is the uncompromised reference experience.
 
-- A small test arena supports the intended foundational vocabulary.
-- Native, browser, and headless results are bit-identical.
-- Pacing and latency are measured under intentionally hostile frame schedules.
-- Invited Defrag and movement experts voluntarily repeat runs to improve.
+It should prioritize:
 
-#### Proof B — Complete personal-best loop
+* very high refresh rates;
+* low input latency;
+* stable frame pacing;
+* high visual quality;
+* competitive reliability.
 
-- Training leads into a timed map.
-- A run records, verifies, saves, replays, and becomes a ghost.
-- The player can compare inputs, route, and movement against the ghost.
-- The result is linkable and playable in native and browser clients.
+Desktop competitive play should be engineered for high-refresh hardware, including the 240 Hz class where hardware permits it.
 
-#### Proof C — Connected competitive loop
+### Full browser play is a major goal
 
-- A versioned map has an auditable leaderboard and permanent record history.
-- Players can race records asynchronously and challenge them through supported processes.
-- Browser and native players compete in the same record book.
+We want the actual game to be playable directly in a modern browser if performance, latency, platform capabilities, and smoothness can meet an acceptable quality bar.
 
-#### Proof D — Live movement sport
+The browser version should aim to look visually equivalent to the native game, with platform-appropriate optimizations where necessary.
 
-- A link joins an official or community live race/practice server.
-- High-refresh movement remains responsive and fair under real network conditions.
-- Spectators can follow and understand the action.
+The important concern is not intentionally reducing the browser experience. The concern is whether browser limitations allow sufficiently smooth competitive gameplay.
 
-#### Proof E — Creator loop
+Development should therefore pursue browser gameplay aggressively but evaluate it based on measured reality rather than ideology.
 
-- A creator edits, validates, publishes, shares, and revises a map.
-- The same map behaves identically in native, browser, server, and verification environments.
-- AI assistance operates through inspectable editor actions.
+Browser performance targets should aim toward high-refresh play, including roughly the 120 Hz class on capable systems where practical.
 
-#### Proof F — AI/RL content loop
+If complete competitive browser play proves unsuitable in some environments, the web platform must still provide first-class access to the rest of the Straf3 ecosystem.
 
-- Agents demonstrate primitives and combinations.
-- Analysis finds useful route, difficulty, exploit, or flow information.
-- A proposed map revision improves a declared target and passes human review.
+At minimum, the browser should be excellent for:
 
-#### Proof G — Production scale
+* discovering maps;
+* viewing maps;
+* browsing leaderboards;
+* viewing profiles;
+* watching replays;
+* analyzing runs;
+* browsing servers;
+* joining servers;
+* sharing links;
+* launching content into the native client when necessary.
 
-- Art, audio, content, tools, services, and operations meet explicit quality budgets.
-- The team can add maps, mechanics, training content, and platform features without destabilizing competitive history.
+Native and browser simulation should share the same underlying gameplay truth wherever the browser game is supported.
 
-## Development goals
+---
 
-### Goal 1 — Establish the best movement in the category
+## 10. The Straf3 web portal
 
-Create a coherent canonical ruleset that experts want to grind and newcomers can learn. Treat feel, response, compositional depth, route diversity, and readable feedback as one inseparable design problem.
+Straf3 should not require a traditional launcher separate from its web ecosystem.
 
-**Primary evidence:** repeated expert play on limited content; continued discovery; understandable improvement; no pressure to add rewards merely to make repetition tolerable.
+The **web portal itself can serve as the launcher**.
 
-### Goal 2 — Make every run reproducible and permanent
+It should become the primary connective layer around the game.
 
-Ensure that every competitive result has a versioned simulation, map, command stream, continuous integrity evidence, and a future playback path.
+Important entities include:
 
-**Primary evidence:** bit-identical results on all verification targets; old-version replay tests; versioned leaderboards that never reinterpret past records.
+* maps;
+* players;
+* profiles;
+* runs;
+* records;
+* leaderboards;
+* replays;
+* ghosts;
+* servers;
+* events.
 
-### Goal 3 — Deliver competitive responsiveness everywhere
+These should have durable web identities and links.
 
-Build native and browser clients around measured high-refresh pacing and latency rather than treating the browser as a reduced product.
+A map page should eventually allow a player to:
 
-**Primary evidence:** explicit 240 Hz-class desktop and 120 Hz-class browser budgets; repeatable latency measurements; stable pacing under hostile scheduling and real play.
+* understand the map;
+* launch it;
+* play it in-browser where supported;
+* open it in the native game;
+* inspect its records;
+* watch the world record;
+* race a ghost;
+* analyze runs;
+* find active servers running it;
+* join a server.
 
-### Goal 4 — Build the complete mastery loop
+A server link should lead naturally toward joining that server.
 
-Connect training primitives, combination courses, real maps, personal bests, ghosts, analysis, and records into one continuous player journey.
+A replay link should lead naturally toward watching or analyzing that replay.
 
-**Primary evidence:** a new player reaches flow quickly, understands a next improvement, and graduates from authored instruction to self-directed route and technique work.
+A map link should lead naturally toward playing that map.
 
-### Goal 5 — Establish the per-map record sport
+The boundary between website and game should feel thin.
 
-Make each map's world record a prestigious, inspectable, raceable, and permanent achievement.
+---
 
-**Primary evidence:** a record page contains sufficient evidence to trust, learn from, race, compare, moderate, and preserve the run.
+## 11. Multiplayer and servers
 
-### Goal 6 — Add live racing without weakening the asynchronous core
+Straf3 is fundamentally multiplayer even though much of the game can be enjoyed alone.
 
-Support official and community live servers, racing, shared practice, tricking, private sessions, and spectating through link-based access.
+The multiplayer ecosystem should eventually support:
 
-**Primary evidence:** native and browser users join the same session easily; live competition remains readable, responsive, and compatible with the canonical movement rules.
+* live competitive races;
+* practice sessions;
+* private sessions;
+* official servers;
+* community-hosted servers;
+* spectators;
+* events;
+* link-based joining.
 
-### Goal 7 — Make maps a programmable product surface
+Players practicing independently and players racing live should still inhabit the same broader game ecosystem.
 
-Create a shared editor and publication pipeline in which a map carries content, validation, versions, trust tier, records, analysis, and community context.
+Networking should never be allowed to compromise the quality of local movement.
 
-**Primary evidence:** one map moves from creation to validation, publication, play, record competition, revision, and historical preservation without ad hoc steps.
+Server architecture, prediction, reconciliation, and race rules must be designed around the requirements of the movement system rather than forcing the movement system to fit generic multiplayer assumptions.
 
-### Goal 8 — Make AI and RL genuine creative leverage
+---
 
-Use AI first as an inspectable editor copilot, then use trained movement agents for analysis, coaching, validation, iteration, and eventually autonomous generation.
+## 12. AI-first map creation
 
-**Primary evidence:** AI/RL improves creator throughput or map quality against a declared measure while human creators retain control and final judgment.
+The map editor is strategically important.
 
-### Goal 9 — Build the ecosystem around durable links
+The current concept is **AI-first**, but this direction is intentionally still exploratory.
 
-Connect maps, players, runs, ghosts, servers, editing, and spectating through a coherent web platform.
+AI-first does not mean that humans disappear from the process.
 
-**Primary evidence:** a shared link turns intent into action—play, watch, race, edit, or join—with minimal friction.
+It means the primary production workflow may increasingly look like:
 
-### Goal 10 — Grow a reusable engine through the game
+**human intent → AI agent → tools → editor → rendered result → inspection → iteration**
 
-Build a modular Rust engine that provides the abstract core Straf3 needs, extracting reusable systems only after game requirements demonstrate the abstraction.
+Agents should eventually be capable of operating map-development systems using whatever interfaces prove appropriate, potentially including:
 
-**Primary evidence:** engine modularity accelerates new Straf3 features and platforms; it does not create a separate roadmap that delays the game.
+* structured tools;
+* editor APIs;
+* MCP;
+* command-line interfaces;
+* skills;
+* scripts;
+* screenshots;
+* rendered views;
+* scene information;
+* game telemetry;
+* automated playtests.
 
-## Decision hierarchy
+The exact interface is not predetermined.
 
-When goals conflict, use this order:
+The editor should expose operations in ways that agents can reason about and manipulate reliably.
 
-1. Movement quality and mastery
-2. Deterministic competitive integrity
-3. Measured responsiveness, pacing, and latency
-4. Coherence and fairness of the sport
-5. Native/browser competitive parity
-6. Creation, community, and link-based access
-7. Visual and production ambition
-8. Feature breadth, reuse, and business-model optimization
+At the same time, a human developer or designer should be able to visually follow what is happening inside the editor, inspect the map, intervene, and direct the agent.
 
-This hierarchy does not make the lower items optional. It identifies what they must serve.
+The goal is not an invisible autonomous content generator.
 
-## Confirmed anti-goals
+The goal is a development environment in which humans and increasingly capable AI agents can build and iterate on maps together.
 
-- No pay-to-win or sale of movement advantages.
-- No automation that substitutes for skillful execution.
-- No opaque movement outcomes that players cannot investigate and learn.
-- No arbitrary speed suppression used to compensate for weak course or mechanic design.
-- No cooldown-centric ability rotation replacing momentum, geometry, timing, and route mastery.
-- No architectural pattern applied merely because it is fashionable or common in large studios.
-- No browser product that silently becomes a mechanically different or competitively secondary game.
+This area requires experimentation before its final architecture is decided.
 
-## Deliberately deferred decisions
+---
 
-These questions should remain visible without blocking present game development:
+## 13. Reinforcement learning and movement agents
 
-- the final business model; the current provisional direction is a free core game, possibly with subscriptions for leaderboards or other services;
-- the exact subscription boundaries and operating economics;
-- source-code, protocol, SDK, and server licensing;
-- the deepest limits of creator scripting, custom rulesets, modding, and commercial content;
-- whether creator rulesets can ever enter the official competitive canon;
-- the precise rules for training assists or ranked movement assists;
-- console, mobile, and other platform roles beyond Windows, Linux, macOS, and the browser;
-- the final mechanic set, input mapping, simulation frequency, and network model;
-- exact content counts, release dates, and staffing plans.
+RL agents are a major research and development direction for Straf3.
 
-Deferred does not mean ignored. The engine and data model should avoid needless barriers to later experimentation, but speculative flexibility must not weaken current correctness or delay the core game.
+The initial objective is to create agents capable of learning the same movement language that human players learn.
 
-## Working risks to validate
+The intended development progression is approximately:
 
-No formal existential-risk list was selected during the interview. The following are therefore working risks inferred from the scope, not settled conclusions:
+1. learn individual movement primitives;
+2. perform primitives reliably;
+3. combine primitives;
+4. solve movement sequences;
+5. construct complete routes;
+6. complete maps;
+7. optimize routes and execution;
+8. analyze alternative routes;
+9. assess difficulty and movement requirements;
+10. contribute to map testing and generation.
 
-- parallel engine, game, browser, web, tools, online, and AI development may exceed the integration capacity of a small team;
-- expanding beyond Quake-derived movement may weaken coherence unless every mechanic meets the shared design doctrine;
-- browser/native competitive and visual parity may conflict with AAA presentation and high-refresh performance targets;
-- permanent replay execution may become expensive as maps, rulesets, compilers, platforms, and services evolve;
-- AI/RL systems may generate volume or metrics without producing maps that expert humans consider excellent;
-- a general-engine roadmap could compete with the game despite the stated game-first extraction model;
-- service operation, moderation, verification, and community hosting may demand substantially different expertise from movement and engine development.
+### Skill as a variable
 
-These risks should be tested with integrated proofs rather than addressed only through up-front architecture.
+The objective is not merely to create the strongest possible agent.
 
-## Open questions for later interviews
+Agents should be able to represent different levels of player capability.
 
-1. What exact competitive rules determine whether a new mechanic enters the canonical profile?
-2. How are map trust tiers awarded, reviewed, appealed, and revoked?
-3. What parts of the creator sandbox can affect ranked play?
-4. What long-term operating model funds verification, storage, matchmaking, moderation, and permanent replay support?
-5. What is the source and protocol openness policy?
-6. What accessibility capabilities are required beyond teaching and training?
-7. What privacy, identity, moderation, and child-safety model fits the community platform?
-8. What spectator presentation makes high-level movement understandable to new viewers?
-9. What content and quality threshold defines alpha, beta, 1.0, and post-launch operation?
-10. Which current implementation choices should be retained, rewritten, or replaced after the vision is accepted?
+Skill level should eventually become an input or controllable property.
 
-## One-paragraph north star
+This could include differences in:
 
-Straf3 should become the definitive modern movement sport: a native-and-browser game whose compact controls produce near-limitless mastery across beautiful abstract arenas; whose movement feels exceptional at competitive refresh rates; whose records are bit-identical, auditable, raceable, and permanently replayable; whose training turns primitives into personal expression; whose live servers and web pages make play instantly shareable; and whose shared editor, AI copilot, and RL agents help a small team and its community create an enduring supply of excellent maps without compromising the canonical sport.
+* timing precision;
+* reaction;
+* route knowledge;
+* mechanical vocabulary;
+* consistency;
+* optimization ability;
+* execution errors.
+
+This makes it possible to ask questions such as:
+
+* Can a beginner complete this?
+* Where does an intermediate player struggle?
+* Which route would an advanced player discover?
+* Is an expert route substantially different?
+* Is this jump appropriate for the intended skill level?
+* Does this map accidentally require techniques above its target level?
+
+### RL-assisted map development
+
+The long-term loop is:
+
+**learn primitives → learn combinations → solve routes → model skill levels → test maps → analyze results → propose or generate changes → test again**
+
+Agents may eventually help identify:
+
+* impossible routes;
+* unintended shortcuts;
+* alternative routes;
+* difficulty spikes;
+* weak sections;
+* flow problems;
+* redundant geometry;
+* interesting emergent movement;
+* opportunities for better combinations.
+
+Eventually, the same systems may help generate or modify maps for specified skill levels.
+
+Human judgment remains the final measure of whether a map is actually good.
+
+An agent solving a map does not prove that the map is fun.
+
+---
+
+## 14. Custom modular Rust engine
+
+Straf3 should be built on a custom modular Rust engine.
+
+The engine exists first to serve Straf3.
+
+It should not become an independent general-purpose engine project that competes with development of the game.
+
+Reusable systems should emerge from real Straf3 requirements.
+
+The engine should favor:
+
+* clear subsystem boundaries;
+* modularity;
+* testability;
+* deterministic simulation;
+* high performance;
+* native and web targets;
+* strong tooling;
+* automation;
+* agent-accessible interfaces;
+* rapid iteration.
+
+Established libraries and algorithms should be used when they solve the problem well.
+
+We should not reinvent technology merely because the engine is custom.
+
+### Deterministic simulation boundary
+
+The competitive movement simulation should have a strong architectural boundary from platform-dependent systems.
+
+Simulation truth should not depend on things such as:
+
+* wall-clock timing;
+* GPU state;
+* filesystem behavior;
+* nondeterministic randomness;
+* platform-specific side effects.
+
+Rendering, audio, UI, networking transport, storage, web integration, and operating-system interfaces can remain outside this deterministic core.
+
+The exact crate graph and architecture may evolve.
+
+The important property is that a competitive movement result is a reproducible consequence of known state, inputs, content, and rules.
+
+---
+
+## 15. Performance and responsiveness
+
+Movement quality depends directly on technical quality.
+
+Frame pacing, latency, simulation behavior, input processing, and rendering are therefore game-design concerns.
+
+Performance should be measured rather than inferred from average FPS.
+
+Important metrics include:
+
+* input-to-simulation latency;
+* simulation-to-display latency;
+* frame-time distribution;
+* missed frame deadlines;
+* refresh synchronization;
+* input sampling behavior;
+* network effects during live play.
+
+Performance regressions that damage movement feel should be treated as gameplay regressions.
+
+Native Straf3 should aim at extremely high competitive responsiveness.
+
+Browser Straf3 should aim as close to that standard as the platform allows.
+
+Competitive simulation behavior must not change merely because graphical settings change.
+
+---
+
+## 16. Visual and audio direction
+
+Straf3 should have AAA production quality without pursuing photorealism or unnecessary content scale.
+
+The visual identity is:
+
+* stylized;
+* modern;
+* minimal;
+* science-fiction;
+* abstract or near-abstract;
+* clean;
+* highly readable in motion.
+
+The world exists primarily to make movement, geometry, speed, routes, and competition beautiful and understandable.
+
+Art should support gameplay.
+
+Lighting should support gameplay.
+
+Effects should support gameplay.
+
+Animation should support gameplay.
+
+Audio should support gameplay.
+
+Visual complexity that damages spatial understanding or competitive readability should be avoided.
+
+AAA quality for Straf3 means exceptional execution across:
+
+* movement feel;
+* responsiveness;
+* rendering;
+* lighting;
+* effects;
+* animation;
+* sound;
+* music where appropriate;
+* UI;
+* maps;
+* networking;
+* tooling;
+* replay presentation;
+* web presentation;
+* overall polish.
+
+It does not require photorealism, cinematic storytelling, enormous world scale, or feature count for its own sake.
+
+---
+
+## 17. Diagnostics and analysis
+
+Developer-grade truth should be accessible throughout development.
+
+Useful tooling includes:
+
+* frame pacing inspection;
+* latency inspection;
+* simulation checksums;
+* replay verification;
+* velocity visualization;
+* acceleration visualization;
+* input visualization;
+* view-angle visualization;
+* collision inspection;
+* movement-state inspection;
+* route visualization;
+* cross-run comparison;
+* profiling;
+* automated regression tests.
+
+These systems are useful for developers, AI agents, competitive verification, map design, player learning, and dispute investigation.
+
+Where appropriate, development diagnostics should become polished player-facing analysis features.
+
+---
+
+## 18. Development model
+
+The project assumes a relatively small core team making extensive use of AI.
+
+AI agents working on Straf3 should treat this vision as a statement of product intent rather than merely a list of features.
+
+When implementation choices conflict, agents should reason from the intended player experience.
+
+Development will naturally involve parallel work across areas such as:
+
+1. movement and deterministic simulation;
+2. engine and rendering;
+3. audio and presentation;
+4. maps and training;
+5. multiplayer and networking;
+6. records, replays, and verification;
+7. web portal and services;
+8. editor and map-production systems;
+9. AI tooling;
+10. reinforcement learning;
+11. testing, profiling, diagnostics, and release infrastructure.
+
+These systems should be integrated continuously.
+
+The engine should not be developed for years before proving the game.
+
+The web platform should not be built in isolation from real maps, records, and servers.
+
+RL research should not drift away from the actual movement system.
+
+The editor should be tested by actually building Straf3 maps.
+
+Each major technical system should repeatedly reconnect to the playable game.
+
+---
+
+## 19. Development priorities
+
+When priorities conflict, use approximately this order:
+
+1. **Movement quality**
+2. **Responsiveness and feel**
+3. **Depth, mastery, and movement coherence**
+4. **Competitive integrity and determinism**
+5. **Map quality**
+6. **Multiplayer quality**
+7. **Records, replays, ghosts, and competitive infrastructure**
+8. **Native production quality**
+9. **Browser accessibility and integration**
+10. **Web ecosystem**
+11. **AI-assisted development**
+12. **RL-assisted development**
+13. **Architectural reuse**
+14. **Feature breadth**
+
+This order does not mean lower items are unimportant.
+
+It means they should support the items above them.
+
+A sophisticated AI map pipeline is not useful if the generated maps are poor.
+
+A perfect web platform is not useful if movement is uninteresting.
+
+A beautiful renderer is not useful if input latency damages the game.
+
+A reusable engine abstraction is not valuable if building it delays proving Straf3.
+
+---
+
+## 20. Core development proofs
+
+Several concrete proofs should guide development.
+
+### Proof 1 — Movement is compelling
+
+A small number of maps and mechanics are enough for skilled players to continue replaying them voluntarily because improving feels rewarding.
+
+### Proof 2 — Movement is understandable
+
+Players can learn primitives, combine them, understand failures, and deliberately improve.
+
+### Proof 3 — Movement survives the technology
+
+The game retains excellent responsiveness under real rendering workloads, high-refresh displays, multiplayer conditions, and browser constraints.
+
+### Proof 4 — Ranked competition is trustworthy
+
+Runs can be recorded, replayed, verified, compared, and preserved.
+
+### Proof 5 — Live racing works
+
+Players can compete directly without networking destroying movement quality or fairness.
+
+### Proof 6 — Training transfers to real maps
+
+Skills learned in training maps become useful tools that players creatively apply elsewhere.
+
+### Proof 7 — RL learns the same movement language
+
+Agents successfully progress from primitives to combinations to routes using the same fundamental environments as human training.
+
+### Proof 8 — RL provides useful map information
+
+Agents find route, difficulty, exploit, flow, or skill-level information that materially helps human map development.
+
+### Proof 9 — AI materially improves map production
+
+Human-directed agents can operate the map-development toolchain and produce useful, inspectable improvements.
+
+### Proof 10 — Web and game feel like one ecosystem
+
+A link to a map, replay, record, profile, or server naturally turns into the corresponding action.
+
+---
+
+## 21. Confirmed anti-goals
+
+Straf3 should not become:
+
+* a generic ability shooter with movement mechanics attached;
+* a simplified Defrag clone;
+* a museum preserving Quake mechanics exactly as they were;
+* a game where automation replaces execution;
+* a game where excessive complexity substitutes for depth;
+* a game where arbitrary speed caps solve map-design problems;
+* a cooldown-rotation game;
+* a game whose rendering ambition damages movement readability;
+* a game whose networking requirements weaken local movement;
+* a web platform with a mediocre game attached;
+* an engine project that happens to contain Straf3;
+* an AI research project that happens to contain a game;
+* a content-generation machine optimized for map quantity rather than map quality;
+* a project that prioritizes community-created map infrastructure before establishing an excellent first-party game.
+
+There should be no pay-to-win system or sale of competitive movement advantages.
+
+---
+
+## 22. Areas intentionally left open
+
+Several important questions should remain open until experimentation produces evidence.
+
+These include:
+
+* the final canonical movement mechanic set;
+* exact crouch-slide behavior;
+* experimental movement profiles;
+* the criteria through which a new mechanic becomes canonical;
+* simulation frequency;
+* detailed multiplayer networking architecture;
+* browser performance limits;
+* exact native/browser graphical differences if any become necessary;
+* the precise AI-editor architecture;
+* MCP versus other agent interfaces;
+* how agents consume screenshots and rendered views;
+* the exact RL algorithms and training infrastructure;
+* representation of player skill for RL agents;
+* eventual community map support;
+* eventual modding scope;
+* business model;
+* server-hosting model;
+* source-code and protocol openness;
+* exact launch content;
+* release schedule;
+* staffing.
+
+These questions should remain visible without forcing premature answers.
+
+Architecture should allow sensible experimentation where doing so is cheap.
+
+Speculative flexibility should not damage the clarity or quality of the current game.
+
+---
+
+## 23. Guidance for AI agents working on Straf3
+
+AI agents should not interpret this document as permission to maximize every stated ambition simultaneously.
+
+When making implementation decisions:
+
+1. Determine how the work affects the actual Straf3 player experience.
+2. Protect movement responsiveness and correctness first.
+3. Prefer simple systems that allow rapid experimentation.
+4. Measure performance-sensitive assumptions.
+5. Preserve deterministic competitive behavior where required.
+6. Avoid introducing generic abstractions before Straf3 demonstrates a need for them.
+7. Keep experimental movement mechanics isolated from the canonical ruleset until validated.
+8. Treat maps as essential game design, not test geometry.
+9. Treat browser support as an ambitious engineering goal rather than justification for weakening native play.
+10. Treat AI and RL as tools for making Straf3 better, not goals independent of the game.
+11. Do not assume community-created maps are an immediate requirement.
+12. When uncertain about a product decision, optimize for the movement experience described in this document rather than inventing a new product direction.
+
+---
+
+## 24. One-paragraph vision
+
+**Straf3 is a next-generation competitive first-person movement game inspired by Quake 3 Defrag but built to establish its own modern identity. Movement is both an art and a science: easy to begin learning, extraordinarily difficult to master, mechanically understandable yet expressive enough for flow, creativity, route discovery, precision, and competition. Players train, pursue records, race each other live, analyze replays, and move through stylized minimal science-fiction maps built to AAA standards of quality and responsiveness. A custom modular Rust engine powers an uncompromised native experience while making full browser play a major goal, connected through a web portal that acts as the launcher and hub for maps, records, replays, profiles, leaderboards, and servers. The same movement primitives used to teach human players also train RL agents, eventually allowing agents with different skill levels to analyze, test, and help create maps. AI agents should become first-class participants in the map-development workflow while humans remain able to direct, inspect, and judge the work. Every technical system exists ultimately to serve the movement, the maps, and the quality of the game.**
