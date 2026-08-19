@@ -5,7 +5,8 @@ the checklist in §3, and the `.rec` files from §2. Free text beats a rating �
 "I lost 80 ups on that ramp and I don't know why" is worth more than any score
 out of ten, because the first one is a lead and the second one isn't.
 
-Read this before playing. It is four sections and it is short on purpose.
+Read this before playing. It is four sections and an appendix, and it is short
+on purpose.
 
 [`PLAYING.md`](PLAYING.md) is the longer document, for when you want to know how
 something works rather than what to do.
@@ -110,15 +111,20 @@ against a flat plane and reported as though it were your run.
 ## §3 — What to feel for
 
 Every question below has an answer that is a **number, a place, or a yes/no** —
-nothing here should be answerable with "felt fine". They come from the five
-things `docs/VISION.md` asks of a movement mechanic: simple to invoke but hard
-to master, composable with other mechanics, deterministic and clearly
-attributable, productive of route *choices* rather than one mandatory
-execution, and readable to a player watching.
+nothing here should be answerable with "felt fine". They are tagged against the
+eight qualities section 4.2 of `docs/VISION.md` asks of a strong mechanic:
+understandable at a basic level; difficult to perfect; responsive;
+deterministic; composable with other mechanics; useful in multiple situations;
+capable of supporting player expression;
+readable through visual, audio, and diagnostic feedback.
+The tags are many-to-many: one quality is tested by several questions, and one
+question tests several qualities. The appendix records every tag that changed.
 
 Answer what you can; skipping half of it is fine and says something too.
 
-**A. Speed you can read** *(is it attributable?)*
+**A. Speed you can read**
+*Tests: understandable at a basic level; difficult to perfect;
+readable through visual, audio, and diagnostic feedback.*
 
 1. Circle jump from the spawn — what is the highest ups the overlay shows you in
    one jump?
@@ -128,7 +134,10 @@ Answer what you can; skipping half of it is fine and says something too.
 3. The last time you lost speed: could you tell *why* from what was on screen,
    or only *that* you had? One concrete example.
 
-**B. The emergent vocabulary** *(is it learnable?)*
+**B. The emergent vocabulary**
+*Tests: understandable at a basic level; difficult to perfect; deterministic;
+composable with other mechanics; useful in multiple situations;
+readable through visual, audio, and diagnostic feedback.*
 
 4. Take the ramp at roughly 320 ups, then again at roughly 450. Two numbers out.
    Did the faster entry pay more, less, or the same?
@@ -139,24 +148,30 @@ Answer what you can; skipping half of it is fine and says something too.
 7. Did the amber `SLIDE` state appear anywhere you didn't expect it? Which
    surface?
 
-**C. Route** *(does it produce choices, or one execution?)*
+**C. Route**
+*Tests: useful in multiple situations; capable of supporting player expression.*
 
 8. Did you find more than one line through `coil`? Which was faster, and by how
    much on the clock?
 9. Is there a section with exactly one way through and no alternative? Which?
 
-**D. Readability** *(can a player follow it?)*
+**D. Readability**
+*Tests: readable through visual, audio, and diagnostic feedback.*
 
 10. Can you read the clock and the split while moving at speed, or do you have
     to stop watching the world to do it?
 11. Anything you went looking for on the overlay and couldn't find?
 
-**E. Connection** *(does it feel like yours?)*
+**E. Connection**
+*Tests: responsive; capable of supporting player expression.*
 
 12. Does turning fast feel connected, or does the view trail the mouse?
 13. Did anything feel like the game deciding for you rather than you executing?
 
 **F. `--profile experimental`** — crouch slide, dash, wall interaction.
+*Tests: deterministic; composable with other mechanics;
+capable of supporting player expression;
+readable through visual, audio, and diagnostic feedback.*
 
 **One gate, and the client answers it for you.** Start it and read the console.
 If you see this line, stop — there is nothing to measure yet:
@@ -197,3 +212,55 @@ can play it freely without polluting anything.
 
 If a session produced no file, say so and say what you did — that is a bug
 report about §2, and §2 is where playtests are lost.
+
+---
+
+## Appendix — reconciling §3 to section 4.2 of the vision
+
+Section 4.2 of `docs/VISION.md` lists eight qualities a strong mechanic should
+generally have. §3's preamble used to cite a shorter, superseded list, and the
+group headers A–E carried tags from that list. **The preamble and the group tags
+were rewritten. No question was added, deleted, renumbered or reworded** — all
+seventeen still stand in §3 exactly as they read before, and each has a row in
+the table below.
+
+Two of the superseded criteria — clear attribution, and route *choices* rather
+than one mandatory execution — are not literally among the eight. The questions
+that hung off them (3, 8, 9) were retained and re-tagged, not dropped: each
+still tests something section 4.2 asks for.
+
+Tags are many-to-many, so a question can appear under more than one quality and
+a quality under more than one question. The per-question tags below are the
+covering map fixed by the conservation decision, with one disclosure: that map
+does not name question 9, because question 8 already covers the qualities it
+would contribute. Question 9 is tagged here to the same two qualities as the
+rest of its group, which is what it tests — a section with exactly one way
+through is a section where the mechanic is *not* useful in multiple situations
+and where expression is closed off.
+
+| Question | Wording | Old tag | New tag(s) |
+|---|---|---|---|
+| 1 | unchanged | A — "is it attributable?" | understandable at a basic level |
+| 2 | unchanged | A — "is it attributable?" | difficult to perfect |
+| 3 | unchanged | A — "is it attributable?" | readable through visual, audio, and diagnostic feedback |
+| 4 | unchanged | B — "is it learnable?" | difficult to perfect; composable with other mechanics |
+| 5 | unchanged | B — "is it learnable?" | deterministic; readable through visual, audio, and diagnostic feedback |
+| 6 | unchanged | B — "is it learnable?" | understandable at a basic level |
+| 7 | unchanged | B — "is it learnable?" | useful in multiple situations |
+| 8 | unchanged | C — "does it produce choices, or one execution?" | useful in multiple situations; capable of supporting player expression |
+| 9 | unchanged | C — "does it produce choices, or one execution?" | useful in multiple situations; capable of supporting player expression |
+| 10 | unchanged | D — "can a player follow it?" | readable through visual, audio, and diagnostic feedback |
+| 11 | unchanged | D — "can a player follow it?" | readable through visual, audio, and diagnostic feedback |
+| 12 | unchanged | E — "does it feel like yours?" | responsive |
+| 13 | unchanged | E — "does it feel like yours?" | capable of supporting player expression |
+| 14 | unchanged | F — none; the group carried no property tag | composable with other mechanics |
+| 15 | unchanged | F — none; the group carried no property tag | deterministic |
+| 16 | unchanged | F — none; the group carried no property tag | readable through visual, audio, and diagnostic feedback |
+| 17 | unchanged | F — none; the group carried no property tag | capable of supporting player expression |
+
+Every quality section 4.2 names is tested by at least one question: 1 and 6
+(understandable at a basic level), 2 and 4 (difficult to perfect), 12
+(responsive), 5 and 15 (deterministic), 4 and 14 (composable with other
+mechanics), 7, 8 and 9 (useful in multiple situations), 8, 9, 13 and 17
+(capable of supporting player expression), 3, 5, 10, 11 and 16 (readable
+through visual, audio, and diagnostic feedback).
