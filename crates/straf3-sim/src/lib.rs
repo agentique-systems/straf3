@@ -66,9 +66,11 @@
 //!
 //! # The movement
 //!
-//! [`step`] is a transcription of Quake 3's `PmoveSingle`: friction,
-//! acceleration, the jump check, the multi-plane slide solver and step-up, in
-//! that order, against the [`World`] seam. VQ3's constants are id's, asserted
+//! [`step`] is a transcription of Quake 3's `Pmove` and `PmoveSingle`:
+//! friction, acceleration, the jump check, the multi-plane slide solver and
+//! step-up, in that order, against the [`World`] seam — run once per sub-step
+//! by a loop that chops a command longer than [`PMOVE_SUBSTEP_MAX_MS`] into
+//! bounded pieces, as id's `Pmove` does. VQ3's constants are id's, asserted
 //! numerically in [`PhysicsProfile`]'s tests; CPM's air control, air-stop,
 //! strafe acceleration and double jump are the *same* code path with different
 //! numbers, which is why [`PhysicsProfile`] is data and there is no profile
@@ -76,8 +78,6 @@
 //!
 //! # What is not here yet
 //!
-//! - Sub-stepping a long command (`pmove_msec`), which must land before any
-//!   reference replay is recorded, because it changes results.
 //! - Everything scripted: jump pads, teleporters, knockback. The state and the
 //!   timer they need ([`Timers::movement_locked_ms`]) are here; the triggers
 //!   are not, because there is no map format yet.
@@ -102,5 +102,5 @@ pub use cmd::{
 };
 pub use profile::PhysicsProfile;
 pub use state::{GroundState, PlayerState, RunState, SimState, Timers};
-pub use step::{run, step, step_in_place};
+pub use step::{PMOVE_SUBSTEP_MAX_MS, run, step, step_in_place};
 pub use world::{SurfaceFlags, Sweep, Trace, TriggerSet, World};
