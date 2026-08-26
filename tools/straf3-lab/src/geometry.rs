@@ -119,9 +119,8 @@ mod tests {
         );
         let dropped = ledge(s(128.0));
         assert!(
-            (landed_z(&dropped, vec3(s(256.0), s(0.0), s(200.0)))
-                - resting_origin_z(s(-128.0)))
-            .abs()
+            (landed_z(&dropped, vec3(s(256.0), s(0.0), s(200.0))) - resting_origin_z(s(-128.0)))
+                .abs()
                 < s(0.5)
         );
         let platform = drop_from(s(128.0));

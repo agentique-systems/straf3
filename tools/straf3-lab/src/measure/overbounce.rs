@@ -44,7 +44,7 @@ use straf3_sim::{GroundState, PhysicsProfile, SimState, step};
 use crate::dataset::{Measurement, Section, Table};
 use crate::geometry;
 use crate::harness::{HZ, settle_on, still};
-use crate::measure::{pad, profiles};
+use crate::measure::pad;
 use crate::num::horizontal_speed;
 
 /// The sweep: every drop height from [`FALL_MIN`] to [`FALL_MAX`], sampled every
@@ -103,7 +103,7 @@ const HANDED_FALL_SPEEDS: &[f32] = &[100.0, 300.0, 600.0, 1000.0];
 /// 3.2 s, and a full overbounce sends the player back up for as long again.
 const FALL_CAP: usize = 1600;
 
-pub(crate) fn measure() -> Section {
+pub(crate) fn measure(profiles: &[(&str, PhysicsProfile)]) -> Section {
     let mut section = Section::new("4. Overbounce");
     section.say(format!(
         "The sweep: a motionless player is dropped onto the floor from every \
@@ -165,7 +165,8 @@ pub(crate) fn measure() -> Section {
         ],
     );
 
-    for (name, profile) in profiles() {
+    for (name, profile) in profiles {
+        let profile = *profile;
         for (world_name, sweep) in [
             ("brush floor", sweep_drops(&brush_floor, &profile)),
             ("analytic plane", sweep_drops(&analytic, &profile)),
@@ -226,13 +227,19 @@ pub(crate) fn measure() -> Section {
 
         for &height in PROBES {
             let landing = drop_onto(&brush_floor, &profile, s(height), s(0.0));
-            let key = format!(
-                "{name}.overbounce.drop{}",
-                pad((height * 1000.0) as u32, 7)
-            );
-            section.record(Measurement::ups(format!("{key}.impact_ups"), landing.impact));
-            section.record(Measurement::ups(format!("{key}.upward_ups"), landing.upward));
-            section.record(Measurement::ratio(format!("{key}.return_ratio"), landing.ratio()));
+            let key = format!("{name}.overbounce.drop{}", pad((height * 1000.0) as u32, 7));
+            section.record(Measurement::ups(
+                format!("{key}.impact_ups"),
+                landing.impact,
+            ));
+            section.record(Measurement::ups(
+                format!("{key}.upward_ups"),
+                landing.upward,
+            ));
+            section.record(Measurement::ratio(
+                format!("{key}.return_ratio"),
+                landing.ratio(),
+            ));
             probes.push(vec![
                 name.to_string(),
                 format!("{height:.3}"),
@@ -345,12 +352,17 @@ pub(crate) fn measure() -> Section {
          `OVERCLIP`, which is what the mechanism above predicts.",
     );
     section.say(
-        "**This is the number most likely to move.** Whether a fall overbounces \
-         is a question about which fraction of a command the hull is inside when \
-         it meets the floor, and `pmove_msec` sub-stepping (`step.rs`, \
-         `TODO(wave3)`) changes exactly that. Every count here is a statement \
-         about the current single-step integration and should be re-taken when \
-         sub-stepping lands.",
+        "**This was the number expected to move under sub-stepping, and it did \
+         not.** Whether a fall overbounces is a question about which fraction of \
+         a command the hull is inside when it meets the floor, and sub-stepping \
+         moves the command boundary — so both this seat and the sim seat said in \
+         writing that these counts would change. They were re-taken under \
+         sub-stepped integration and every one of them is identical, because a \
+         command at any rate the game offers is a single sub-step and a single \
+         sub-step is the integration these counts were first taken under. \
+         Section 8 has the mechanism and the durations where it does bite. The \
+         prediction was wrong in the safe direction, and it is left on the record \
+         rather than quietly removed.",
     );
 
     section
@@ -564,18 +576,9 @@ fn launch_from_velocity<W: World>(
 /// a one-command event; what happens afterwards is friction, and friction is
 /// measured in section 2. `after_a_second` is published beside it so nobody
 /// mistakes the peak for something a player keeps.
-fn launch<W: World>(
-    world: &W,
-    profile: &PhysicsProfile,
-    height: Scalar,
-    entry: Scalar,
-) -> Launch {
+fn launch<W: World>(world: &W, profile: &PhysicsProfile, height: Scalar, entry: Scalar) -> Launch {
     let mut st = SimState::spawned_at(
-        vec3(
-            s(0.0),
-            s(0.0),
-            geometry::resting_origin_z(s(0.0)) + height,
-        ),
+        vec3(s(0.0), s(0.0), geometry::resting_origin_z(s(0.0)) + height),
         s(0.0),
     );
     st.player.ground = GroundState::Airborne;

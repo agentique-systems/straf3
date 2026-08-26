@@ -1084,6 +1084,80 @@ crossvalidation.vq3.ramp.deg26.uphill_seam_ratio_less_friction.agrees	1.0000
 crossvalidation.vq3.ramp.deg45.uphill_seam_ratio_less_friction.agrees	1.0000	
 crossvalidation.vq3.ramp.flip_angle_observed.agrees	1.0000	
 crossvalidation.vq3.step.highest_climbable.agrees	1.0000	
+substep.air_control.ms0008.speed_ups	640.00	ups
+substep.air_control.ms0008.turned_deg	24.78	deg
+substep.air_control.ms0033.speed_ups	640.00	ups
+substep.air_control.ms0033.turned_deg	23.89	deg
+substep.air_control.ms0066.speed_ups	640.00	ups
+substep.air_control.ms0066.turned_deg	22.81	deg
+substep.air_control.ms0132.speed_ups	640.00	ups
+substep.air_control.ms0132.turned_deg	22.81	deg
+substep.air_control.ms0264.speed_ups	640.00	ups
+substep.air_control.ms0264.turned_deg	22.81	deg
+substep.bound_ms	66	ms
+substep.friction.ms0004.remaining_ups	780.80	ups
+substep.friction.ms0008.remaining_ups	761.60	ups
+substep.friction.ms0013.remaining_ups	737.60	ups
+substep.friction.ms0033.remaining_ups	641.60	ups
+substep.friction.ms0066.remaining_ups	483.20	ups
+substep.friction.ms0066.single_step_delta_ups	0.00	ups
+substep.friction.ms0067.remaining_ups	480.30	ups
+substep.friction.ms0067.single_step_delta_ups	1.90	ups
+substep.friction.ms0100.remaining_ups	384.63	ups
+substep.friction.ms0100.single_step_delta_ups	64.63	ups
+substep.friction.ms0132.remaining_ups	291.85	ups
+substep.friction.ms0200.remaining_ups	174.16	ups
+substep.friction.ms0200.single_step_delta_ups	174.16	ups
+substep.friction.ms0264.remaining_ups	106.47	ups
+substep.friction.ms0500.remaining_ups	0.00	ups
+substep.friction.ms0500.single_step_delta_ups	0.00	ups
+substep.friction.ms1000.remaining_ups	0.00	ups
+substep.rate.hz076.command_ms	13	ms
+substep.rate.hz076.substeps	1	n
+substep.rate.hz076.unchanged	yes	
+substep.rate.hz125.command_ms	8	ms
+substep.rate.hz125.substeps	1	n
+substep.rate.hz125.unchanged	yes	
+substep.rate.hz250.command_ms	4	ms
+substep.rate.hz250.substeps	1	n
+substep.rate.hz250.unchanged	yes	
+substep.slowest_rate_command_ms	13	ms
+substep.split.ms0004.air_matches	yes	
+substep.split.ms0004.ground_matches	yes	
+substep.split.ms0004.substeps	1	n
+substep.split.ms0008.air_matches	yes	
+substep.split.ms0008.ground_matches	yes	
+substep.split.ms0008.substeps	1	n
+substep.split.ms0013.air_matches	yes	
+substep.split.ms0013.ground_matches	yes	
+substep.split.ms0013.substeps	1	n
+substep.split.ms0033.air_matches	yes	
+substep.split.ms0033.ground_matches	yes	
+substep.split.ms0033.substeps	1	n
+substep.split.ms0066.air_matches	yes	
+substep.split.ms0066.ground_matches	yes	
+substep.split.ms0066.substeps	1	n
+substep.split.ms0067.air_matches	yes	
+substep.split.ms0067.ground_matches	yes	
+substep.split.ms0067.substeps	2	n
+substep.split.ms0100.air_matches	yes	
+substep.split.ms0100.ground_matches	yes	
+substep.split.ms0100.substeps	2	n
+substep.split.ms0132.air_matches	yes	
+substep.split.ms0132.ground_matches	yes	
+substep.split.ms0132.substeps	2	n
+substep.split.ms0200.air_matches	yes	
+substep.split.ms0200.ground_matches	yes	
+substep.split.ms0200.substeps	4	n
+substep.split.ms0264.air_matches	yes	
+substep.split.ms0264.ground_matches	yes	
+substep.split.ms0264.substeps	4	n
+substep.split.ms0500.air_matches	yes	
+substep.split.ms0500.ground_matches	yes	
+substep.split.ms0500.substeps	8	n
+substep.split.ms1000.air_matches	yes	
+substep.split.ms1000.ground_matches	yes	
+substep.split.ms1000.substeps	16	n
 vq3.edge.clip.drop032.speed200.worst_command_loss_ups	0.00	ups
 vq3.edge.clip.drop032.speed400.worst_command_loss_ups	0.00	ups
 vq3.edge.clip.drop032.speed600.worst_command_loss_ups	0.00	ups

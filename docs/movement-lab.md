@@ -2,7 +2,7 @@
 
 # The movement lab
 
-Measured from `102894dcebedadefd45e69ed367ee0e3d65a65b2` **plus uncommitted changes** by `cargo xtask lab`, which runs `tools/straf3-lab`.
+Measured from `6b9d3283a6dbfc558ec4d93d9bffbd8b30d91eb9` **plus uncommitted changes** by `cargo xtask lab`, which runs `tools/straf3-lab`.
 
 Every number below was produced by running the simulation. Nothing here is a constant restated: where a value is also a constant in `PhysicsProfile`, the report says so and prints both, because a constant that is stored and never read is indistinguishable from one that is used until something measures it.
 
@@ -12,18 +12,18 @@ Every number below was produced by running the simulation. Nothing here is a con
 |---|---|
 | Command rate | 125 Hz — 8 ms commands, spec D2's default. Not swept; see *Limits*. |
 | Profiles | `vq3`, `cpm` |
-| Worlds | Brushes compiled by `straf3-collision`, traced by the tracer the game uses. **These are the lab's mirror of `straf3_collision::testbed`, not the module itself** — see *Limits*. |
-| Measurements | 2137 named values, in the machine-readable section at the end. |
+| Worlds | Brushes compiled by `straf3-collision`, traced by the tracer the game uses. The shared `straf3_collision::testbed` fixtures, the same ones the sim tests pin behaviour against. |
+| Measurements | 2211 named values, in the machine-readable section at the end. |
 | Determinism | No clock, no randomness, no parallelism, no libm on any path that feeds a number. Same invocation, same bytes. |
 
 ## Limits
 
 These are stated first because each one changes how a number below should be read.
 
-1. **`pmove_msec` sub-stepping is not implemented** (`crates/straf3-sim/src/step.rs`, `TODO(wave3)`). Quake 3 splits a long command into sub-steps so a large duration cannot tunnel through geometry or skip a jump window. This tree integrates each command once. **Every number in this document is valid for the current single-step integration only.** Section 4 is the one most exposed: overbounce's precondition is a command that *ends* with the player's feet inside the ground probe, which is a per-command artefact, and sub-stepping moves the command boundary. Both this seat and the sim seat expect those counts to change; **neither has measured it**, because the sub-stepping does not exist yet. That is an open question, not a settled one.
+1. **Sub-stepping has landed, and the delta is zero — this limit is closed.** Earlier editions of this document said that every number in it was valid for single-step integration only, that section 4's overbounce counts were the most exposed, and that neither this seat nor the sim seat had measured the difference. `crates/straf3-sim` now splits a command into sub-steps of at most `PMOVE_SUBSTEP_MAX_MS` = 66 ms; every number in this document was **re-measured under it and none of them moved**, including section 4's counts. Section 8 publishes why and what the split is worth past the bound. The short version: the slowest rate the game offers is 13 ms a command, which is one sub-step, and one sub-step is the integration that was there before.
 2. **CPM's constants are community reconstructions, not id source** (`crates/straf3-sim/src/profile.rs`). `air_control` 150, `air_stop_accelerate` 2.5, `strafe_accelerate` 70, `strafe_wish_speed_cap` 30, the 400 ms double-jump window and its 100 ups boost are all `TODO(wave2)`. **A `cpm` number in this document is a measurement of this tree, not of CPMA.** The `vq3` numbers are different in kind: those constants are verified against id's GPL release.
-3. **One command rate.** Everything is at 125 Hz. The rate is part of the physics, not of the frame loop, so 76 Hz and 250 Hz are different simulations with different jump heights and different usable windows. Sweeping the rate is a report this one does not contain.
-4. **The worlds are the lab's mirror of the shared fixtures.** `straf3_collision::testbed` is the single owner of the ramp, step, ledge and corner geometry, so that a sim test pinning a behaviour and a lab measurement quantifying it are talking about the same world. It was not yet in this workspace when these numbers were taken, so `tools/straf3-lab/src/geometry.rs` reproduces it from the published API and coordinate table — same constructors, same constants, same coordinates, same `compile_hull` path. **The measurements in sections 3 and 5 must be re-taken against the real module and compared before they are trusted as the shared number.**
+3. **One command rate.** Every measurement in sections 1 to 7 is at 125 Hz. The rate is part of the physics, not of the frame loop, so 76 Hz and 250 Hz are different simulations with different jump heights and different usable windows. Sweeping the rate is a report this one does not contain — section 8 sweeps command *duration*, which is a question about the integrator rather than about the movement language, and is not the same sweep.
+4. **The worlds are the shared fixtures, and this limit is closed too.** An earlier edition measured against this crate's own mirror of `straf3_collision::testbed`, because that module was in another seat's unmerged worktree at the time, and said sections 3 and 5 had to be re-taken against the real module before they were trusted. They have been: `geometry.rs` is now one `pub use` of the shared module, and every measurement in this document is identical either way. That agreement is the only evidence the mirror was ever faithful, so it is recorded rather than dropped along with the caveat.
 5. **No human input.** Every technique here is held exactly. A player holds it imperfectly, so these are ceilings, not expectations.
 6. **Route diversity is not measured here.** Whether `coil` offers enough distinct routes to judge a mechanic against is a real open question and is deliberately not answered: the only perturbation harness that exists varies an *absolute*-view-angle command stream, so a perturbed run is not a delayed run but a different one aimed at geometry the angles were never chosen for. A measurement worth publishing would perturb something a player controls — entry speed, turn rate, launch timing — against angles expressed relative to the current heading. It stays open rather than being answered badly.
 7. **`overclip` is not the dial these behaviours turn on**, despite what the comment on `PhysicsProfile::overclip` implies. The sim seat measured setting it to 1.0 and found it changes these numbers by a fraction of a percent everywhere except a player landing exactly perpendicular onto flat ground. This report deliberately carries no `overclip` sensitivity column: it would be a column of zeros presented as an analysis. What the behaviours actually turn on is `PM_WalkMove`'s length-preserving rescale and the 0.25-unit ground probe.
@@ -317,7 +317,7 @@ The sweep: a motionless player is dropped onto the floor from every height betwe
 
 **The analytic-plane row is a control, not a duplicate.** It shares the whole mover and differs only in what answers the trace, so a difference between the two rows would place the behaviour in the brush tracer's bevels and epsilons rather than in the movement code. Read them together: agreement says overbounce is a property of `PM_WalkMove` and `OVERCLIP`, which is what the mechanism above predicts.
 
-**This is the number most likely to move.** Whether a fall overbounces is a question about which fraction of a command the hull is inside when it meets the floor, and `pmove_msec` sub-stepping (`step.rs`, `TODO(wave3)`) changes exactly that. Every count here is a statement about the current single-step integration and should be re-taken when sub-stepping lands.
+**This was the number expected to move under sub-stepping, and it did not.** Whether a fall overbounces is a question about which fraction of a command the hull is inside when it meets the floor, and sub-stepping moves the command boundary — so both this seat and the sim seat said in writing that these counts would change. They were re-taken under sub-stepped integration and every one of them is identical, because a command at any rate the game offers is a single sub-step and a single sub-step is the integration these counts were first taken under. Section 8 has the mechanism and the durations where it does bite. The prediction was wrong in the safe direction, and it is left on the record rather than quietly removed.
 
 
 ## 5. Edge clip and step-up
@@ -448,7 +448,72 @@ The sim seat measured the same five behaviours this wave from the test side, wit
 
 Neither number is wrong; they answer different questions. The closed form is the ceiling of the mechanism, and it is what a doctrine argument about whether this belongs in the game should use. The peak is what a player gets, and it is what a route planner should use. This report publishes both, and the two seats' figures are reconciled by which of the two each was measuring.
 
-One thing **neither seat measured**, stated so it is not mistaken for a settled question: whether any of section 4 survives `pmove_msec` sub-stepping. Overbounce's precondition is a per-command artefact — a command that ends with the feet inside the ground probe — and sub-stepping moves the command boundary. Both seats expect the counts to change and neither has run it, because the sub-stepping does not exist yet (`crates/straf3-sim/src/step.rs`, `TODO(wave3)`).
+One thing **neither seat had measured** when this section was written — whether any of section 4 survives sub-stepping — has since been measured by both, from opposite sides, and they agree. The sim seat asserted every command duration from 1 to the bound integrates bit-for-bit as before; this seat re-took all of section 4 under the sub-stepped mover and none of it moved. Section 8 is that measurement. It is worth noting as a cross-validation in its own right: the two seats' methods share nothing but the mover.
+
+
+## 8. Sub-stepping
+
+`crates/straf3-sim/src/step.rs` now runs Quake 3's outer `Pmove` loop: a command longer than **66 ms** (`straf3_sim::PMOVE_SUBSTEP_MAX_MS`) is split into sub-steps of at most that length, and each sub-step gets its own `dt`, its own ground probe, its own timer drop and its own solver. Before it, one command of any length was integrated once — which did not risk tunnelling, because `slide_move` sweeps a hull continuously, but did integrate friction, gravity and every timer in a single lump and spend the whole bump budget on one enormous move.
+
+**This section closes the limit this document has carried since it was written.** Every previous edition said that every number in it was valid for single-step integration only, that section 4's overbounce counts were the most exposed, and that neither this seat nor the sim seat had measured the difference. It is measured now, and the delta is **zero at every rate the game offers**. The three tables below are why: the first shows that no rate produces more than one sub-step, the second checks the split rule from outside the simulation, and the third shows what the split is worth where it does apply — because a zero whose mechanism is not published is indistinguishable from a measurement nobody took.
+
+**Sub-steps per command, at every rate the game offers.** A command at or below 66 ms is one sub-step, and one sub-step is the integration that was there before — so a column of ones is the reason every number in this document is unchanged.
+
+| rate | command | sub-steps | same as single-step |
+|---|---|---|---|
+| 250 Hz | 4 ms | 1 | yes |
+| 125 Hz | 8 ms | 1 | yes |
+| 76 Hz | 13 ms | 1 | yes |
+
+**The split rule, checked from outside.** One command of `d` ms against the sub-step lengths it claims to split into, delivered as separate commands. The player state must be identical — not close — or the sub-step sequence published is not the one being run. Two openings, because the ground path and the air path split the same way but integrate different rules.
+
+| command | sub-steps | lengths | coasting: identical | airborne: identical |
+|---|---|---|---|---|
+| 4 ms | 1 | 4 | yes | yes |
+| 8 ms | 1 | 8 | yes | yes |
+| 13 ms | 1 | 13 | yes | yes |
+| 33 ms | 1 | 33 | yes | yes |
+| 66 ms | 1 | 66 | yes | yes |
+| 67 ms | 2 | 66 + 1 | yes | yes |
+| 100 ms | 2 | 66 + 34 | yes | yes |
+| 132 ms | 2 | 66 + 66 | yes | yes |
+| 200 ms | 4 | 66 + 66 + 66 + 2 | yes | yes |
+| 264 ms | 4 | 66 + 66 + 66 + 66 | yes | yes |
+| 500 ms | 8 | 66 + 66 + 66 + 66 + 66 + 66 + 66 + 38 | yes | yes |
+| 1000 ms | 16 | 66 + 66 + 66 + 66 + 66 + 66 + 66 + 66 + 66 + 66 + 66 + 66 + 66 + 66 + 66 + 10 | yes | yes |
+
+**Ground friction: horizontal speed remaining after one command.** Coasting from 800 ups on flat ground with no keys held, so `PM_Friction` is the only rule acting. `sub-stepped` is measured here; `single-step` is the sim seat's published figure for the integration this replaced, restated rather than recomputed (see the note below the tables). The delta is **exactly zero at and below the bound**, which is the row that matters for every other number in this document.
+
+| command | sub-steps | sub-stepped | single-step (sim seat) | delta |
+|---|---|---|---|---|
+| 4 ms | 1 | 780.80 | — | — |
+| 8 ms | 1 | 761.60 | — | — |
+| 13 ms | 1 | 737.60 | — | — |
+| 33 ms | 1 | 641.60 | — | — |
+| 66 ms | 1 | 483.20 | 483.20 | +0.00 |
+| 67 ms | 2 | 480.30 | 478.40 | +1.90 |
+| 100 ms | 2 | 384.63 | 320.00 | +64.63 |
+| 132 ms | 2 | 291.85 | — | — |
+| 200 ms | 4 | 174.16 | 0.00 | +174.16 |
+| 264 ms | 4 | 106.47 | — | — |
+| 500 ms | 8 | 0.00 | 0.00 | +0.00 |
+| 1000 ms | 16 | 0.00 | — | — |
+
+**Air control: the same 264 ms, chopped differently.** Airborne at 640 ups in empty space with the view fixed 30° off the entry heading, on the forward axis alone — which is what switches CPM's `air_control` on. `PM_Aircontrol` renormalises a direction once per step, so it is the one airborne rule whose answer depends on how the time was divided. **The last three rows are identical, and that is the point**: sub-stepping pins a long command to the 66 ms answer instead of letting it slide further down this curve, which is what integrating it in one step did.
+
+| command | commands | steps of | total steps | speed | heading turned |
+|---|---|---|---|---|---|
+| 8 ms | 33 | 8 ms | 33 | 640.00 ups | 24.78° |
+| 33 ms | 8 | 33 ms | 8 | 640.00 ups | 23.89° |
+| 66 ms | 4 | 66 ms | 4 | 640.00 ups | 22.81° |
+| 132 ms | 2 | 66 ms | 4 | 640.00 ups | 22.81° |
+| 264 ms | 1 | 66 ms | 4 | 640.00 ups | 22.81° |
+
+**Where the delta lives is ground friction, and the 200 ms row of the friction table is the whole argument.** `PM_Friction` removes `speed · friction · dt` per step. One 200 ms step takes 800 · 6 · 0.2 = 960 ups from a player who has 800, so it stops them dead; four sub-steps decay them and leave them running. That is the "framerate dependent behavior" id's own comment names, and it is a stall being converted from a full stop into a slowdown.
+
+**Air control is the one airborne rule that is genuinely step-size dependent**, because `PM_Aircontrol` renormalises a direction vector once per step: chop the same elapsed time more finely and the steering is applied more often. The sim seat flagged this and could not measure it — its fixture holds the view diagonally, which is exactly what gates air control off (`move_dir` must be pure forward/back) — so the fourth table is that case, held on the forward axis alone. The gap is large: the same held input turns a player noticeably further when the time is chopped finely. **It is still zero at every rate the game offers**, for the same reason everything else here is — an 8 ms command is one step either way — and what sub-stepping buys is the row a *long* command lands on, which is now the 66 ms answer rather than whatever a single step of that length would have produced.
+
+**What is measured here and what is cited.** The single-step column of the friction table is the sim seat's published number, restated in the same way section 7 restates that seat's other figures. The lab cannot re-measure it: the superseded integration is reachable only through `step_bounded`, which is private on purpose so that the comparison runs through the shipped code rather than through a copy of it, and writing a second integrator here to get at it would produce a comparison against a game nobody runs. Every other number in this section is this crate's own.
 
 
 ## Machine-readable results
@@ -1534,6 +1599,80 @@ crossvalidation.vq3.ramp.deg26.uphill_seam_ratio_less_friction.agrees	1.0000
 crossvalidation.vq3.ramp.deg45.uphill_seam_ratio_less_friction.agrees	1.0000	
 crossvalidation.vq3.ramp.flip_angle_observed.agrees	1.0000	
 crossvalidation.vq3.step.highest_climbable.agrees	1.0000	
+substep.air_control.ms0008.speed_ups	640.00	ups
+substep.air_control.ms0008.turned_deg	24.78	deg
+substep.air_control.ms0033.speed_ups	640.00	ups
+substep.air_control.ms0033.turned_deg	23.89	deg
+substep.air_control.ms0066.speed_ups	640.00	ups
+substep.air_control.ms0066.turned_deg	22.81	deg
+substep.air_control.ms0132.speed_ups	640.00	ups
+substep.air_control.ms0132.turned_deg	22.81	deg
+substep.air_control.ms0264.speed_ups	640.00	ups
+substep.air_control.ms0264.turned_deg	22.81	deg
+substep.bound_ms	66	ms
+substep.friction.ms0004.remaining_ups	780.80	ups
+substep.friction.ms0008.remaining_ups	761.60	ups
+substep.friction.ms0013.remaining_ups	737.60	ups
+substep.friction.ms0033.remaining_ups	641.60	ups
+substep.friction.ms0066.remaining_ups	483.20	ups
+substep.friction.ms0066.single_step_delta_ups	0.00	ups
+substep.friction.ms0067.remaining_ups	480.30	ups
+substep.friction.ms0067.single_step_delta_ups	1.90	ups
+substep.friction.ms0100.remaining_ups	384.63	ups
+substep.friction.ms0100.single_step_delta_ups	64.63	ups
+substep.friction.ms0132.remaining_ups	291.85	ups
+substep.friction.ms0200.remaining_ups	174.16	ups
+substep.friction.ms0200.single_step_delta_ups	174.16	ups
+substep.friction.ms0264.remaining_ups	106.47	ups
+substep.friction.ms0500.remaining_ups	0.00	ups
+substep.friction.ms0500.single_step_delta_ups	0.00	ups
+substep.friction.ms1000.remaining_ups	0.00	ups
+substep.rate.hz076.command_ms	13	ms
+substep.rate.hz076.substeps	1	n
+substep.rate.hz076.unchanged	yes	
+substep.rate.hz125.command_ms	8	ms
+substep.rate.hz125.substeps	1	n
+substep.rate.hz125.unchanged	yes	
+substep.rate.hz250.command_ms	4	ms
+substep.rate.hz250.substeps	1	n
+substep.rate.hz250.unchanged	yes	
+substep.slowest_rate_command_ms	13	ms
+substep.split.ms0004.air_matches	yes	
+substep.split.ms0004.ground_matches	yes	
+substep.split.ms0004.substeps	1	n
+substep.split.ms0008.air_matches	yes	
+substep.split.ms0008.ground_matches	yes	
+substep.split.ms0008.substeps	1	n
+substep.split.ms0013.air_matches	yes	
+substep.split.ms0013.ground_matches	yes	
+substep.split.ms0013.substeps	1	n
+substep.split.ms0033.air_matches	yes	
+substep.split.ms0033.ground_matches	yes	
+substep.split.ms0033.substeps	1	n
+substep.split.ms0066.air_matches	yes	
+substep.split.ms0066.ground_matches	yes	
+substep.split.ms0066.substeps	1	n
+substep.split.ms0067.air_matches	yes	
+substep.split.ms0067.ground_matches	yes	
+substep.split.ms0067.substeps	2	n
+substep.split.ms0100.air_matches	yes	
+substep.split.ms0100.ground_matches	yes	
+substep.split.ms0100.substeps	2	n
+substep.split.ms0132.air_matches	yes	
+substep.split.ms0132.ground_matches	yes	
+substep.split.ms0132.substeps	2	n
+substep.split.ms0200.air_matches	yes	
+substep.split.ms0200.ground_matches	yes	
+substep.split.ms0200.substeps	4	n
+substep.split.ms0264.air_matches	yes	
+substep.split.ms0264.ground_matches	yes	
+substep.split.ms0264.substeps	4	n
+substep.split.ms0500.air_matches	yes	
+substep.split.ms0500.ground_matches	yes	
+substep.split.ms0500.substeps	8	n
+substep.split.ms1000.air_matches	yes	
+substep.split.ms1000.ground_matches	yes	
+substep.split.ms1000.substeps	16	n
 vq3.edge.clip.drop032.speed200.worst_command_loss_ups	0.00	ups
 vq3.edge.clip.drop032.speed400.worst_command_loss_ups	0.00	ups
 vq3.edge.clip.drop032.speed600.worst_command_loss_ups	0.00	ups

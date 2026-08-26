@@ -239,7 +239,10 @@ pub(crate) fn measure(sections: &[Section]) -> Section {
         ]);
     }
 
-    section.record(Measurement::count("crossvalidation.claims", CLAIMS.len() as u32));
+    section.record(Measurement::count(
+        "crossvalidation.claims",
+        CLAIMS.len() as u32,
+    ));
     section.record(Measurement::count("crossvalidation.agreed", agreed));
     section.record(Measurement::count("crossvalidation.disagreed", disagreed));
 
@@ -270,13 +273,14 @@ pub(crate) fn measure(sections: &[Section]) -> Section {
          which of the two each was measuring.",
     );
     section.say(
-        "One thing **neither seat measured**, stated so it is not mistaken for a \
-         settled question: whether any of section 4 survives `pmove_msec` \
-         sub-stepping. Overbounce's precondition is a per-command artefact — a \
-         command that ends with the feet inside the ground probe — and \
-         sub-stepping moves the command boundary. Both seats expect the counts \
-         to change and neither has run it, because the sub-stepping does not \
-         exist yet (`crates/straf3-sim/src/step.rs`, `TODO(wave3)`).",
+        "One thing **neither seat had measured** when this section was written — \
+         whether any of section 4 survives sub-stepping — has since been \
+         measured by both, from opposite sides, and they agree. The sim seat \
+         asserted every command duration from 1 to the bound integrates \
+         bit-for-bit as before; this seat re-took all of section 4 under the \
+         sub-stepped mover and none of it moved. Section 8 is that measurement. \
+         It is worth noting as a cross-validation in its own right: the two \
+         seats' methods share nothing but the mover.",
     );
 
     section

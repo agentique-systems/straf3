@@ -7,11 +7,16 @@
 //! 1. **That it is generated**, so nobody edits it and loses the edit.
 //! 2. **What tree it describes**, so a number can be traced to the code that
 //!    produced it. A results document without a commit is a rumour.
-//! 3. **What it does not cover.** Every limit below is a real one that changes
-//!    numbers in this document, and stating them is not modesty — a reader who
-//!    treats a CPM number as a measurement of CPMA, or a number here as
-//!    surviving `pmove_msec` sub-stepping, will draw a wrong conclusion from a
-//!    correct measurement.
+//! 3. **What it does not cover.** Every limit below changes how a number in this
+//!    document should be read, and stating them is not modesty: a reader who
+//!    takes a `cpm` number for a measurement of CPMA will draw a wrong
+//!    conclusion from a correct measurement.
+//!
+//! A limit that has since been closed stays in the list, closed, rather than
+//! disappearing. Two of them are: sub-stepping, and the shared fixtures. A
+//! reader who remembers the caveat needs to find out what happened to it, and a
+//! caveat that vanishes silently is indistinguishable from one that was
+//! quietly dropped.
 
 use std::fmt::Write as _;
 
@@ -133,17 +138,21 @@ pub fn render(sections: &[Section], data: &Dataset, provenance: &Provenance, mir
     );
     let _ = writeln!(
         out,
-        "1. **`pmove_msec` sub-stepping is not implemented** (`crates/straf3-sim/src/step.rs`, \
-         `TODO(wave3)`). Quake 3 splits a long command into sub-steps so a large \
-         duration cannot tunnel through geometry or skip a jump window. This tree \
-         integrates each command once. **Every number in this document is valid \
-         for the current single-step integration only.** Section 4 is the one \
-         most exposed: overbounce's precondition is a command that *ends* with \
-         the player's feet inside the ground probe, which is a per-command \
-         artefact, and sub-stepping moves the command boundary. Both this seat \
-         and the sim seat expect those counts to change; **neither has measured \
-         it**, because the sub-stepping does not exist yet. That is an open \
-         question, not a settled one."
+        "1. **Sub-stepping has landed, and the delta is zero — this limit is \
+         closed.** Earlier editions of this document said that every number in \
+         it was valid for single-step integration only, that section 4's \
+         overbounce counts were the most exposed, and that neither this seat nor \
+         the sim seat had measured the difference. `crates/straf3-sim` now \
+         splits a command into sub-steps of at most \
+         `PMOVE_SUBSTEP_MAX_MS` = {} ms; every number in this document was \
+         **re-measured under it and none of them moved**, including section 4's \
+         counts. \
+         Section 8 publishes why and what the split is worth past the bound. The \
+         short version: the slowest rate the game offers is {} ms a command, \
+         which is one sub-step, and one sub-step is the integration that was \
+         there before.",
+        straf3_sim::PMOVE_SUBSTEP_MAX_MS,
+        straf3_sim::TickRate::HZ_76.command_millis(),
     );
     let _ = writeln!(
         out,
@@ -157,10 +166,13 @@ pub fn render(sections: &[Section], data: &Dataset, provenance: &Provenance, mir
     );
     let _ = writeln!(
         out,
-        "3. **One command rate.** Everything is at 125 Hz. The rate is part of the \
-         physics, not of the frame loop, so 76 Hz and 250 Hz are different \
-         simulations with different jump heights and different usable windows. \
-         Sweeping the rate is a report this one does not contain."
+        "3. **One command rate.** Every measurement in sections 1 to 7 is at \
+         125 Hz. The rate is part of the physics, not of the frame loop, so \
+         76 Hz and 250 Hz are different simulations with different jump heights \
+         and different usable windows. Sweeping the rate is a report this one \
+         does not contain — section 8 sweeps command *duration*, which is a \
+         question about the integrator rather than about the movement language, \
+         and is not the same sweep."
     );
     if mirrored {
         let _ = writeln!(
@@ -177,12 +189,25 @@ pub fn render(sections: &[Section], data: &Dataset, provenance: &Provenance, mir
              module and compared before they are trusted as the shared \
              number.**"
         );
+    } else {
+        let _ = writeln!(
+            out,
+            "4. **The worlds are the shared fixtures, and this limit is closed \
+             too.** An earlier edition measured against this crate's own mirror \
+             of `straf3_collision::testbed`, because that module was in another \
+             seat's unmerged worktree at the time, and said sections 3 and 5 had \
+             to be re-taken against the real module before they were trusted. \
+             They have been: `geometry.rs` is now one `pub use` of the shared \
+             module, and every measurement in this document is identical either \
+             way. That agreement is the only evidence the mirror was ever \
+             faithful, so it is recorded rather than dropped along with the \
+             caveat."
+        );
     }
     let _ = writeln!(
         out,
-        "{}. **No human input.** Every technique here is held exactly. A player \
-         holds it imperfectly, so these are ceilings, not expectations.",
-        if mirrored { 5 } else { 4 }
+        "5. **No human input.** Every technique here is held exactly. A player \
+         holds it imperfectly, so these are ceilings, not expectations."
     );
     let _ = writeln!(
         out,
@@ -195,7 +220,7 @@ pub fn render(sections: &[Section], data: &Dataset, provenance: &Provenance, mir
          publishing would perturb something a player controls — entry speed, \
          turn rate, launch timing — against angles expressed relative to the \
          current heading. It stays open rather than being answered badly.",
-        if mirrored { 6 } else { 5 }
+        6
     );
     let _ = writeln!(
         out,
@@ -208,7 +233,7 @@ pub fn render(sections: &[Section], data: &Dataset, provenance: &Provenance, mir
          as an analysis. What the behaviours actually turn on is \
          `PM_WalkMove`'s length-preserving rescale and the 0.25-unit ground \
          probe.",
-        if mirrored { 7 } else { 6 }
+        7
     );
 
     // ── the measurements ──────────────────────────────────────────────────

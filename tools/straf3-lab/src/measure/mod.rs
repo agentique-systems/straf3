@@ -3,14 +3,24 @@
 //! Each submodule owns one, returns a [`Section`], and knows nothing about the
 //! others. Adding a seventh is adding a module and a line to [`all`].
 //!
-//! # Why the profile list is a function
+//! # Why the profile list is an argument
 //!
-//! `experimental` does not exist in this tree yet — the candidates seat adds
-//! `PhysicsProfile::experimental()` this wave, and criterion 5's assessment of
-//! each new mechanic will be written against these numbers. When it lands,
-//! every measurement below covers it by adding one line to [`profiles`]: no
-//! measurement function names a profile, no table is shaped around there being
-//! two, and no key format assumes a profile's name is three letters.
+//! It used to be a function returning the two canon profiles, with a note
+//! saying that `PhysicsProfile::experimental()` would one day be appended to it.
+//! It is a parameter now, and the reason is G2.
+//!
+//! `docs/movement-canon.md` §1.1's second gate asks for the *whole* published
+//! measurement set, re-taken under a candidate profile and diffed against the
+//! control — "every measurement that does not involve the mechanic's own input
+//! must be bit-identical". That is not a column added to a table. It is this
+//! whole family of measurements, run again, under a profile that is not in the
+//! report. So [`vocabulary`] takes the profiles it is to measure and [`all`]
+//! passes it the report's two; the candidate harness passes it one candidate at
+//! a time.
+//!
+//! No measurement function names a profile, no table is shaped around there
+//! being two, and no key format assumes a profile's name is three letters —
+//! which is what makes the second caller possible at all.
 
 use straf3_sim::PhysicsProfile;
 
@@ -21,19 +31,39 @@ pub mod overbounce;
 pub mod ramps;
 pub mod steps;
 pub mod strafe;
+pub mod substepping;
 pub mod terminal;
 pub mod windows;
 
-/// The profiles under measurement, in report order.
+/// The profiles the published report measures, in report order.
 ///
-/// Canon only, this wave. When `PhysicsProfile::experimental()` exists, append
-/// `("experimental", PhysicsProfile::experimental())` here and every section
-/// grows a column.
+/// Canon only. The candidates are deliberately **not** here: they are measured
+/// against a control in section 8 rather than published as two more columns of
+/// canon's tables, because a column beside `vq3` and `cpm` reads as a third
+/// ruleset the game has, and none of the three has earned that.
 #[must_use]
 pub fn profiles() -> Vec<(&'static str, PhysicsProfile)> {
     vec![
         ("vq3", PhysicsProfile::vq3()),
         ("cpm", PhysicsProfile::cpm()),
+    ]
+}
+
+/// The six measurement families, taken under whichever profiles are asked for.
+///
+/// Cross-validation is not here: it restates another seat's published `vq3`
+/// numbers, so it means nothing under a profile list that does not contain
+/// `vq3`, and re-running it per candidate would report the same agreement three
+/// more times.
+#[must_use]
+pub fn vocabulary(profiles: &[(&str, PhysicsProfile)]) -> Vec<Section> {
+    vec![
+        strafe::measure(profiles),
+        windows::measure(profiles),
+        ramps::measure(profiles),
+        overbounce::measure(profiles),
+        steps::measure(profiles),
+        terminal::measure(profiles),
     ]
 }
 
@@ -45,15 +75,11 @@ pub fn profiles() -> Vec<(&'static str, PhysicsProfile)> {
 /// checking a second implementation nobody is being asked to trust.
 #[must_use]
 pub fn all() -> Vec<Section> {
-    let mut sections = vec![
-        strafe::measure(),
-        windows::measure(),
-        ramps::measure(),
-        overbounce::measure(),
-        steps::measure(),
-        terminal::measure(),
-    ];
+    let canon = profiles();
+    let canon: Vec<(&str, PhysicsProfile)> = canon.iter().map(|(n, p)| (*n, *p)).collect();
+    let mut sections = vocabulary(&canon);
     sections.push(crossvalidate::measure(&sections));
+    sections.push(substepping::measure());
     sections
 }
 

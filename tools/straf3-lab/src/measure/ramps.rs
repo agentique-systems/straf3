@@ -34,7 +34,7 @@ use straf3_sim::{GroundState, PhysicsProfile, SimState, step};
 use crate::dataset::{Measurement, Section, Table};
 use crate::geometry;
 use crate::harness::{settle_on, still};
-use crate::measure::{pad, profiles};
+use crate::measure::pad;
 use crate::num::horizontal_speed;
 
 /// Ramp angles swept, in degrees. Dense either side of the flip, which sits
@@ -76,7 +76,7 @@ const RUN_UP: f32 = 8.0;
 /// Most commands a crossing search waits before giving up.
 const CROSSING_CAP: usize = 400;
 
-pub(crate) fn measure() -> Section {
+pub(crate) fn measure(profiles: &[(&str, PhysicsProfile)]) -> Section {
     let mut section = Section::new("3. Ramp-angle response");
     section.say(format!(
         "Three measurements per angle, all with no movement keys held and all \
@@ -102,7 +102,8 @@ pub(crate) fn measure() -> Section {
          arrived is published as `at seam`."
     ));
 
-    for (name, profile) in profiles() {
+    for (name, profile) in profiles {
+        let profile = *profile;
         let mut surface = Table::new(
             format!(
                 "**{name} — the surface.** `standing` is what `GroundState` \
@@ -147,7 +148,10 @@ pub(crate) fn measure() -> Section {
             ));
 
             let standing = ground_label(&stand_on_slope(&profile, d));
-            section.record(Measurement::label(format!("{key}.standing_state"), standing));
+            section.record(Measurement::label(
+                format!("{key}.standing_state"),
+                standing,
+            ));
             surface.push(vec![
                 format!("{degrees:.0}°"),
                 format!("{:.4}", normal.z),
@@ -182,7 +186,11 @@ pub(crate) fn measure() -> Section {
             let launch = cross(
                 &world,
                 &profile,
-                vec3(geometry::RAMP_RUN + s(RUN_UP) - half, s(0.0), rise + s(64.0)),
+                vec3(
+                    geometry::RAMP_RUN + s(RUN_UP) - half,
+                    s(0.0),
+                    rise + s(64.0),
+                ),
                 -s(DOWNHILL_ENTRY),
             );
             record_crossing(&mut section, &format!("{key}.off_the_top"), &launch);
@@ -336,16 +344,31 @@ struct Crossing {
 /// the horizontal and the ramp looks free; report only the total and a
 /// descending player looks fast for speed they cannot spend.
 fn record_crossing(section: &mut Section, key: &str, c: &Crossing) {
-    section.record(Measurement::ups(format!("{key}_before_seam_ups"), c.before_seam));
-    section.record(Measurement::ups(format!("{key}_seam_total_ups"), c.seam_total));
-    section.record(Measurement::ratio(format!("{key}_seam_ratio"), c.seam_ratio()));
+    section.record(Measurement::ups(
+        format!("{key}_before_seam_ups"),
+        c.before_seam,
+    ));
+    section.record(Measurement::ups(
+        format!("{key}_seam_total_ups"),
+        c.seam_total,
+    ));
+    section.record(Measurement::ratio(
+        format!("{key}_seam_ratio"),
+        c.seam_ratio(),
+    ));
     section.record(Measurement::ups(format!("{key}_at_seam_ups"), c.at_seam));
-    section.record(Measurement::ups(format!("{key}_after_total_ups"), c.after_total));
+    section.record(Measurement::ups(
+        format!("{key}_after_total_ups"),
+        c.after_total,
+    ));
     section.record(Measurement::ups(
         format!("{key}_after_horizontal_ups"),
         c.after_horizontal,
     ));
-    section.record(Measurement::ups(format!("{key}_flat_control_ups"), c.control));
+    section.record(Measurement::ups(
+        format!("{key}_flat_control_ups"),
+        c.control,
+    ));
     section.record(Measurement::ups(
         format!("{key}_vs_flat_ups"),
         c.after_total - c.control,
@@ -363,12 +386,7 @@ fn record_crossing(section: &mut Section, key: &str, c: &Crossing) {
 /// speeds fifteen units is two commands of the sixteen being measured. The flat
 /// surfaces here carry an exactly axial normal — they are compiled axial planes
 /// and `SnapPlane` puts them on the axis — so the comparison is exact.
-fn cross<W: World>(
-    world: &W,
-    profile: &PhysicsProfile,
-    from: Vec3,
-    speed_x: Scalar,
-) -> Crossing {
+fn cross<W: World>(world: &W, profile: &PhysicsProfile, from: Vec3, speed_x: Scalar) -> Crossing {
     let mut st = settle_on(world, profile, from);
     st.player.velocity = vec3(speed_x, s(0.0), s(0.0));
 

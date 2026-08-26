@@ -48,6 +48,7 @@
 #![warn(missing_docs)]
 #![warn(clippy::all)]
 
+pub mod candidate;
 pub mod dataset;
 pub mod geometry;
 pub mod harness;

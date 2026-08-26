@@ -254,8 +254,10 @@ impl Dataset {
     /// moved, which is exactly the failure it exists to prevent.
     #[must_use]
     pub fn from_sections(sections: &[Section]) -> Self {
-        let mut entries: Vec<Measurement> =
-            sections.iter().flat_map(|s| s.data.iter().cloned()).collect();
+        let mut entries: Vec<Measurement> = sections
+            .iter()
+            .flat_map(|s| s.data.iter().cloned())
+            .collect();
         entries.sort_by(|a, b| a.key.cmp(&b.key));
         for pair in entries.windows(2) {
             assert_ne!(
@@ -620,14 +622,8 @@ mod tests {
             .map(|i| format!("cpm.strafe.forward.entry{i:04}.gain_per_s"))
             .chain((0..3).map(|i| format!("vq3.ramp.deg{i:02}.normal_z")))
             .collect();
-        let pinned = ds(&keys
-            .iter()
-            .map(|k| (k.as_str(), "1"))
-            .collect::<Vec<_>>());
-        let now = ds(&keys
-            .iter()
-            .map(|k| (k.as_str(), "2"))
-            .collect::<Vec<_>>());
+        let pinned = ds(&keys.iter().map(|k| (k.as_str(), "1")).collect::<Vec<_>>());
+        let now = ds(&keys.iter().map(|k| (k.as_str(), "2")).collect::<Vec<_>>());
 
         let changes = diff(&pinned, &now);
         assert_eq!(changes.len(), 503);
@@ -638,7 +634,10 @@ mod tests {
         assert!(report.contains("3  vq3.ramp.*"), "{report}");
         // The enumeration is bounded, and says so rather than trailing off.
         assert!(report.contains("and 463 more"), "{report}");
-        assert!(report.lines().count() < 60, "the report is a wall: {report}");
+        assert!(
+            report.lines().count() < 60,
+            "the report is a wall: {report}"
+        );
         // All 503 are movement changes, so the headline says so and does not
         // mention a stale fixture.
         assert!(report.contains("503 measurement(s) MOVED"), "{report}");
@@ -656,11 +655,13 @@ mod tests {
             .collect();
         let pinned = ds(&canon.iter().map(|k| (k.as_str(), "1")).collect::<Vec<_>>());
 
-        let mut with_new: Vec<(String, &str)> =
-            canon.iter().map(|k| (k.clone(), "1")).collect();
-        with_new.extend(
-            (0..20).map(|i| (format!("experimental.strafe.forward.entry{i:04}.gain_per_s"), "2")),
-        );
+        let mut with_new: Vec<(String, &str)> = canon.iter().map(|k| (k.clone(), "1")).collect();
+        with_new.extend((0..20).map(|i| {
+            (
+                format!("experimental.strafe.forward.entry{i:04}.gain_per_s"),
+                "2",
+            )
+        }));
         let now = ds(&with_new
             .iter()
             .map(|(k, v)| (k.as_str(), *v))
