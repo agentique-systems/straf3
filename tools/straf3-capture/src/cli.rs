@@ -14,6 +14,14 @@ usage: straf3-capture --out <file.png> [options]
   --out <file.png>       where to write the capture. Required unless --list.
   --title <substring>    match a top-level window whose title contains this,
                          case-insensitively (default: straf3)
+  --process <exe>        the window must also belong to a process with this
+                         executable file name (default: straf3.exe). A title
+                         is not an identity: an editor holding a straf3 file
+                         matches --title too.
+  --any-process          match on the title alone, whatever owns the window.
+                         Only for a client this tool does not know the name
+                         of — it re-opens the wrong-window capture that
+                         --process closes.
   --wait-ms <ms>         keep looking for the window for up to this long
                          before giving up (default: 0, look once)
   --settle-ms <ms>       wait this long after finding the window, so the
@@ -32,12 +40,13 @@ usage: straf3-capture --out <file.png> [options]
   -h, --help             this text
 
 THIS TOOL CAPTURES A WINDOW, NEVER THE SCREEN. There is no fallback: if the
-straf3 window is not found, or is covered by something else, the tool fails
-and writes nothing. Both refusals are deliberate. The capture is read from the
-desktop device context — a GPU window's own DC comes back black — so it reads
-whatever is on screen over the window's rectangle. Without those checks, a
-missing or occluded window would produce a perfectly valid PNG of somebody's
-browser, and that image would then be committed as evidence about straf3.
+straf3 window is not found, or is not the straf3 process, or is covered by
+something else, the tool fails and writes nothing. All three refusals are
+deliberate. The capture is read from the desktop device context — a GPU
+window's own DC comes back black — so it reads whatever is on screen over the
+window's rectangle. Without those checks, a missing, misidentified or occluded
+window would produce a perfectly valid PNG of somebody's browser, and that
+image would then be committed as evidence about straf3.
 
 --desktop exists only to answer \"was the window even up?\". It grabs the whole
 virtual screen, including everything else on it, so it is restricted to paths
@@ -49,7 +58,7 @@ Exit codes:
   1  bad arguments, or the capture failed outright
   2  not running on Windows
   3  the capture was written but is blank (see the reason on stderr)
-  4  no window matched; nothing was written
+  4  no window matched the title and the process; nothing was written
   5  the window is covered by something else; nothing was written
 ";
 
@@ -66,6 +75,15 @@ pub enum Source {
     /// else.
     Window {
         title: String,
+        /// Executable file name the owning process must have, matched
+        /// case-insensitively. `None` only via `--any-process`.
+        ///
+        /// This is the identity check and the title is merely a filter. The
+        /// tool captured a Notepad window called `straf3 - Notepad` on this
+        /// project's own host, cleanly and with exit 0, because a substring
+        /// match on `straf3` is satisfied by any editor holding a project
+        /// file. `straf3_capture::win::owner_exe` has the measured case.
+        process: Option<String>,
         /// Try to bring it to the front before capturing.
         raise: bool,
         /// Minimum fraction of the window's area, in tenths of a percent,
@@ -107,6 +125,7 @@ pub enum Request {
 pub fn parse<I: IntoIterator<Item = String>>(argv: I) -> Result<Request, String> {
     let mut out: Option<PathBuf> = None;
     let mut title = "straf3".to_owned();
+    let mut process: Option<String> = Some("straf3.exe".to_owned());
     let mut wait_ms = 0u64;
     let mut settle_ms = 300u64;
     let mut desktop = false;
@@ -133,6 +152,23 @@ pub fn parse<I: IntoIterator<Item = String>>(argv: I) -> Result<Request, String>
             }
             "--out" => out = Some(PathBuf::from(value()?)),
             "--title" => title = value()?,
+            "--any-process" => process = None,
+            "--process" => {
+                let name = value()?;
+                if name.is_empty() {
+                    // An empty --process would silently mean "any process",
+                    // which is what --any-process says out loud. Two spellings
+                    // of the same dangerous thing, one of them by accident from
+                    // an unset shell variable, is how the check gets disabled
+                    // without anyone deciding to disable it.
+                    return Err(
+                        "`--process` needs an executable name; use `--any-process` to match \
+                         on the title alone"
+                            .into(),
+                    );
+                }
+                process = Some(name);
+            }
             "--wait-ms" => wait_ms = number(&value()?, "--wait-ms")?,
             "--settle-ms" => settle_ms = number(&value()?, "--settle-ms")?,
             "--min-colours" | "--min-colors" => {
@@ -194,6 +230,7 @@ pub fn parse<I: IntoIterator<Item = String>>(argv: I) -> Result<Request, String>
         } else {
             Source::Window {
                 title,
+                process,
                 raise,
                 min_visible_permille,
             }
@@ -241,12 +278,50 @@ mod tests {
             o.source,
             Source::Window {
                 title: "straf3".to_owned(),
+                process: Some("straf3.exe".to_owned()),
                 raise: true,
                 min_visible_permille: 900,
             }
         );
         assert_eq!(o.settle_ms, 300);
         assert_eq!(o.wait_ms, 0);
+    }
+
+    #[test]
+    fn a_window_must_prove_which_process_owns_it_by_default() {
+        // The regression. With the process check absent, running this tool on
+        // this project's own host captured a Notepad window titled
+        // "straf3 - Notepad" — exit 0, 100 % of the occlusion hit test, a
+        // valid non-blank PNG of the operator's document. The title matched
+        // because the file was called straf3-something, and nothing else in
+        // the tool can tell those two windows apart.
+        match options(&["--out", "s.png"]).source {
+            Source::Window { process, .. } => {
+                assert_eq!(
+                    process.as_deref(),
+                    Some("straf3.exe"),
+                    "the process check must be on by default, or a title match is the \
+                     only thing standing between a screenshot and somebody's editor"
+                );
+            }
+            other => panic!("expected a window source, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_process_check_can_be_renamed_or_waived_but_not_emptied() {
+        match options(&["--out", "s.png", "--process", "straf3-dev.exe"]).source {
+            Source::Window { process, .. } => assert_eq!(process.as_deref(), Some("straf3-dev.exe")),
+            other => panic!("expected a window source, got {other:?}"),
+        }
+        // Waiving it is a decision someone has to spell out.
+        match options(&["--out", "s.png", "--any-process"]).source {
+            Source::Window { process, .. } => assert_eq!(process, None),
+            other => panic!("expected a window source, got {other:?}"),
+        }
+        // `--process "$SOME_UNSET_VAR"` must not quietly become --any-process.
+        assert!(parse_args(&["--out", "s.png", "--process", ""]).is_err());
+        assert!(parse_args(&["--out", "s.png", "--process"]).is_err());
     }
 
     #[test]

@@ -47,17 +47,43 @@ To watch a recording back in the rendering client rather than playing it:
 and **R** are ignored while it runs, and the window stays open when the stream
 ends — so `--exit-after` is what ends an unattended playback.
 
-> **Not in the tree yet, and marked rather than left blank:** the repeatable
-> screenshot command. It is being built now, and this section gets it — with its
-> output path — when it lands.
+To photograph what is on screen, with the game running, from the repository
+root:
+
+```sh
+cargo build --release --target x86_64-pc-windows-gnu -p straf3-capture --bins
+./target/x86_64-pc-windows-gnu/release/straf3-capture.exe --out shot.png
+```
+
+It writes exactly where `--out` says, so put it where you want it. Useful
+options: `--wait-ms 20000` keeps looking while the client starts up,
+`--settle-ms` waits after finding the window so a frame is on screen (default
+300 ms), and `--list` shows every window that is open with the process behind
+it. `--help` has the rest.
+
+**It writes nothing at all rather than write the wrong picture**, and the exit
+code says which refusal you hit:
+
+| exit | what happened |
+|---|---|
+| 0 | captured, written, and checked not to be blank |
+| 3 | written, but blank — the reason is on stderr, and the file is kept so you can look at it |
+| 4 | no straf3 window found; **nothing written** |
+| 5 | the window is covered by something else; **nothing written** |
+
+Exit 4 is the one to expect if you run it before the game is up, or after it
+has closed. It tells you what it looked at, and it names any window that had a
+matching *title* but was not the straf3 process — an editor with a straf3 file
+open is titled `straf3 — something` and is not the game. That distinction is
+not cosmetic: capturing such a window produces a perfectly valid, perfectly
+non-blank picture of your document, and it happened here before the check
+existed.
 
 **When you want to show us something on screen, use that capture command — not
 your system's screenshot key.** It photographs the straf3 window and nothing
 else, so no part of the rest of your screen travels with it: no browser tabs, no
 taskbar, no whatever else you had open. Anything you send may end up in the
-repository's history, and history is hard to un-publish. Until the command
-exists, describe what you saw in words rather than sending a picture of your
-desktop.
+repository's history, and history is hard to un-publish.
 
 ---
 

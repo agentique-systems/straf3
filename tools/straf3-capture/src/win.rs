@@ -7,8 +7,11 @@
 
 use crate::Image;
 use std::ffi::c_void;
-use windows_sys::Win32::Foundation::{HWND, LPARAM, POINT, RECT};
+use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, HWND, LPARAM, POINT, RECT};
 use windows_sys::Win32::Graphics::Dwm::{DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute};
+use windows_sys::Win32::System::Threading::{
+    OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
+};
 use windows_sys::Win32::Graphics::Gdi::{
     BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BitBlt, CreateCompatibleBitmap, CreateCompatibleDC,
     DIB_RGB_COLORS, DeleteDC, DeleteObject, GetDC, GetDIBits, HDC, ReleaseDC, SRCCOPY,
@@ -16,7 +19,8 @@ use windows_sys::Win32::Graphics::Gdi::{
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     BringWindowToTop, EnumWindows, GA_ROOT, GetAncestor, GetSystemMetrics, GetWindowRect,
-    GetWindowTextW, HWND_NOTOPMOST, HWND_TOPMOST, IsIconic, IsWindowVisible, SM_CXVIRTUALSCREEN,
+    GetWindowTextW, GetWindowThreadProcessId, HWND_NOTOPMOST, HWND_TOPMOST, IsIconic,
+    IsWindowVisible, SM_CXVIRTUALSCREEN,
     SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SW_RESTORE, SWP_NOACTIVATE,
     SWP_NOMOVE, SWP_NOSIZE, SetForegroundWindow, SetProcessDPIAware, SetWindowPos, ShowWindow,
     WindowFromPoint,
@@ -40,6 +44,22 @@ impl Rect {
     pub fn height(self) -> i32 {
         self.bottom - self.top
     }
+    /// Shrink by `n` pixels on every side, unless that would leave nothing.
+    #[must_use]
+    pub fn inset(self, n: i32) -> Self {
+        let shrunk = Self {
+            left: self.left + n,
+            top: self.top + n,
+            right: self.right - n,
+            bottom: self.bottom - n,
+        };
+        if shrunk.width() > 0 && shrunk.height() > 0 {
+            shrunk
+        } else {
+            self
+        }
+    }
+
     #[must_use]
     fn intersect(self, other: Self) -> Self {
         Self {
@@ -77,6 +97,28 @@ impl From<RECT> for Rect {
     }
 }
 
+/// How far inside its own reported rectangle a window's pixels actually start.
+///
+/// A window's bounds and the pixels the compositor puts on screen do not agree
+/// exactly at the boundary. [`occlusion`] already says so — its hit-test grid
+/// "deliberately avoids the outermost edge, where DWM's extended frame bounds
+/// and the hit-test region disagree by a pixel or two" — but the capture used
+/// the rectangle verbatim, so the two disagreed about the same edge in
+/// opposite directions.
+///
+/// Measured on the straf3 window at 1282x752: with no inset, the top row and
+/// the bottom row of the PNG were foreign — 338 of 1282 pixels in row 0 and
+/// 1257 of 1282 in row 751 differed sharply from the row two inside them,
+/// while every other row near the edge was continuous with its neighbours.
+/// That is one pixel of whatever happened to be behind the window, in an image
+/// this repository's standing rule says shows nothing but the window.
+///
+/// One pixel of somebody's desktop is not a privacy incident on its own. It is
+/// still the wrong pixels, it is in a file that gets committed, and the fix is
+/// to stop one pixel short — which costs a border of the window nobody looks
+/// at.
+pub const EDGE_BLEED_PX: i32 = 1;
+
 /// A top-level window found by enumeration.
 #[derive(Debug, Clone)]
 pub struct Found {
@@ -87,6 +129,11 @@ pub struct Found {
     /// than `GetWindowRect`. The two differ by the invisible resize border
     /// Windows 10 and later put around a window; DWM's is what is on screen.
     pub from_dwm: bool,
+    /// Lower-cased file name of the executable that owns this window, e.g.
+    /// `straf3.exe`. `None` when the owning process would not answer — see
+    /// [`owner_exe`], and note that [`find_windows`] treats `None` as "not
+    /// proven to be the target" rather than as a pass.
+    pub process: Option<String>,
 }
 
 /// Tell Windows we speak in physical pixels.
@@ -145,8 +192,80 @@ unsafe extern "system" fn collect(hwnd: HWND, lparam: LPARAM) -> i32 {
         title,
         rect,
         from_dwm,
+        process: owner_exe(hwnd as isize),
     });
     1
+}
+
+/// The file name of the executable behind `hwnd`, lower-cased — `straf3.exe`.
+///
+/// # Why a window's title is not enough to identify it
+///
+/// This is not a refinement; it closes a hole that was open on this project's
+/// own host. `find_windows` matches a title substring, and the substring is
+/// `straf3` — which is also in the title of every editor, terminal and file
+/// manager that happens to have a straf3 file open. Measured here, not
+/// imagined: with the game not running at all, the first capture this tool
+/// took after the window-only rule landed came back as a clean, valid,
+/// non-blank PNG of a Notepad window called `straf3 - Notepad`, at 100 % of
+/// the occlusion hit test, exit 0.
+///
+/// Nothing else in the tool can catch that. [`crate::Image::verify`] sees a
+/// perfectly good picture; [`occlusion`] sees a window that is entirely
+/// unobstructed, because it *is* — it is simply the wrong window. And the
+/// failure lands exactly where the tool's whole point is to not land: an image
+/// of the operator's document, filed as evidence about straf3.
+///
+/// So identity is asked of the operating system instead of the title bar. A
+/// window belongs to straf3 when the process that owns it is the straf3
+/// executable, which no amount of naming a text file can forge.
+///
+/// `None` when the process will not answer — a protected or higher-integrity
+/// process refuses `OpenProcess` to a normal-privilege caller. Callers must
+/// read that as "could not prove it", never as "close enough".
+/// Takes the handle as `isize` rather than `HWND`, like [`title_of`] and
+/// [`occlusion`] do: a public safe function taking a raw pointer it
+/// dereferences is what `clippy::not_unsafe_ptr_arg_deref` exists to stop.
+#[must_use]
+pub fn owner_exe(hwnd_bits: isize) -> Option<String> {
+    let hwnd = hwnd_bits as HWND;
+    let mut pid: u32 = 0;
+    // Safety: `pid` is a live u32 for the duration of the call.
+    let thread = unsafe { GetWindowThreadProcessId(hwnd, &raw mut pid) };
+    if thread == 0 || pid == 0 {
+        return None;
+    }
+
+    // LIMITED_INFORMATION is the least that can name an image, and unlike
+    // PROCESS_QUERY_INFORMATION it is granted across integrity levels.
+    // Safety: a plain kernel32 call; a refused open returns null.
+    let process: HANDLE = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    if process.is_null() {
+        return None;
+    }
+
+    let mut buf = [0u16; 512];
+    let mut len: u32 = 512;
+    // Safety: `buf` is 512 u16s and `len` says so; both outlive the call, and
+    // `len` is updated in place to the characters actually written.
+    let ok = unsafe {
+        QueryFullProcessImageNameW(process, PROCESS_NAME_WIN32, buf.as_mut_ptr(), &raw mut len)
+    };
+    // Safety: `process` came from OpenProcess above and is not used after this.
+    unsafe { CloseHandle(process) };
+    if ok == 0 || len == 0 || len as usize > buf.len() {
+        return None;
+    }
+
+    let full = String::from_utf16_lossy(&buf[..len as usize]);
+    // Split on the separators by hand rather than through `Path`: the answer
+    // must be the same whichever host built this binary.
+    Some(
+        full.rsplit(['\\', '/'])
+            .next()
+            .unwrap_or(full.as_str())
+            .to_lowercase(),
+    )
 }
 
 /// The on-screen rectangle of a window, preferring DWM's view of it.
@@ -204,24 +323,41 @@ pub fn list_windows() -> Vec<Found> {
     state.found
 }
 
-/// Visible top-level windows whose title contains `needle`, case-insensitively,
-/// and which are actually somewhere on the desktop.
+/// Visible top-level windows that are on the desktop, whose title contains
+/// `needle` case-insensitively, and — when `exe` is `Some` — which are owned by
+/// a process with that executable file name.
 ///
 /// Substring rather than exact match so the window title can carry a version
-/// or a map name later without breaking every script that captures it.
+/// or a map name later without breaking every script that captures it. That
+/// looseness is exactly why `exe` exists: a substring of `straf3` matches the
+/// game, and it equally matches an editor holding a straf3 file, which this
+/// tool once captured and wrote out as evidence. [`owner_exe`] has the measured
+/// case. The title says what a window is called; the process says what it is.
 ///
-/// The on-screen filter is not a nicety. `IsWindowVisible` is true for a
+/// A window whose owner will not identify itself (`process: None`) is dropped
+/// whenever `exe` is `Some`. Failing closed is the point: an unidentifiable
+/// window is not evidence that the game is on screen, and the alternative is
+/// the wrong-window capture this filter exists to stop. `exe: None` — the
+/// `--any-process` escape hatch — restores the old title-only behaviour for a
+/// caller who knowingly wants it.
+///
+/// The on-screen filter is not a nicety either. `IsWindowVisible` is true for a
 /// minimised window — Windows parks it at roughly `(-32000, -32000)` rather
 /// than hiding it — so a minimised editor with `STRAF3_VISION.md` in its title
 /// out-matched the running game here, and the capture failed against a window
 /// that was never the target. Measured, not anticipated.
 #[must_use]
-pub fn find_windows(needle: &str) -> Vec<Found> {
+pub fn find_windows(needle: &str, exe: Option<&str>) -> Vec<Found> {
     let needle = needle.to_lowercase();
+    let exe = exe.map(str::to_lowercase);
     let screen = virtual_screen();
     let mut hits: Vec<Found> = list_windows()
         .into_iter()
         .filter(|w| w.title.to_lowercase().contains(&needle))
+        .filter(|w| match exe.as_deref() {
+            None => true,
+            Some(want) => w.process.as_deref() == Some(want),
+        })
         .filter(|w| {
             let on_screen = w.rect.intersect(screen);
             on_screen.width() > 0 && on_screen.height() > 0
