@@ -302,10 +302,12 @@ this document ahead of measuring it.
 Two halves. Both must pass.
 
 ***(a) Earned.*** *Decides it:* run a player who never exceeds `max_speed` —
-accelerating on the ground only, jumping and landing freely, indefinitely — and
-count how many times the mechanic becomes available.
+accelerating on the ground only, jumping and landing freely, indefinitely — **on
+flat open ground**, and count how many times the mechanic becomes available.
+Publish the same count for all seven contexts of §1.2 as the evidence; **flat
+ground is the cell that decides the gate.**
 
-*Fails if:* the count is not zero.
+*Fails if:* the count on flat ground is not zero.
 
 *Why this replaced the first draft's test.* The draft counted availability "for
 a player who never performs the arming event", which is vacuous: the candidate
@@ -316,6 +318,45 @@ already contains the right test**: `slide_entry_speed` is set to 400, above
 so a slide has to be entered out of a strafejump" (`profile.rs`). That is a
 mechanic whose availability has to be *bought* with speed the player earned,
 which is what distinguishes a technique from a rotation.
+
+**Why *flat ground*, and this is a design ruling rather than a detail — it
+decides one candidate on its own.** The replacement above substituted *speed*
+for *earned*, and in doing so silently narrowed "earned" to one of its two
+currencies. **Geometry is the other.** A mechanic conditioned on terrain the
+player has to find, reach and be touching has been paid for, even if it was paid
+for in route knowledge rather than in ups — and §7 says outright that mechanics
+cannot be evaluated independently of the spaces they are used in. A cooldown's
+defining property is not merely that it is cheap; it is that it is cheap
+**everywhere**, on a schedule, with no condition the world can withhold.
+
+Flat open ground is the context that imposes no geometric requirement at all. So
+availability there, to a player who has also not earned it in speed, means the
+mechanic was earned in neither currency — which is exactly what the gate is
+asking. A mechanic armed by "touch the floor" fails, because the floor is
+everywhere. A mechanic armed by "be against a wall" does not, because a wall is
+somewhere.
+
+*Disclosed with the same force as the dash disclosure below, because the honest
+version of this ruling is that I chose between two readings that give opposite
+verdicts.* `note_wall_contact` (`crates/straf3-sim/src/step.rs:1334`) gates wall
+contact on `wall_contact_window_ms`, `wall_jump_velocity` and the plane's normal
+— **and on nothing else. There is no speed precondition, so a player walking
+into a wall at 100 ups arms a wall jump.** Under the flat-ground reading the
+wall jump passes G5(a), because flat ground has no wall. Under a reading that
+ran the same player across all seven contexts it would be **rejected at a gate,
+with no weighing**, on `corner()`. Both readings were available, the document did
+not say which, and this is knowable from `step.rs` before any candidate number
+exists — so it is settled here rather than at verdict time, where a gate
+consequence discovered after the numbers looks exactly like a gate written after
+the numbers.
+
+I have ruled for the flat-ground reading on the two-currencies argument above,
+and against the seven-context reading because it would reject the wall jump for
+being *geometric*, which is the thing that makes it a technique rather than a
+rotation. **This is not a pass for the wall jump.** It still faces G5(b) — where
+"a wall is available, therefore press it" is precisely the shape G5(b) tests —
+and every weighed criterion. It is a ruling that the wall jump gets weighed
+rather than ended.
 
 *Disclosed here rather than in Part 2, so that nobody can say the gate was
 written after seeing a number:* this test is known, from reading
@@ -331,9 +372,17 @@ happened.
 ***(b) Not already optimal.*** *Decides it:* the point-naive policy — invoke at
 the first available command, aimed along the current heading — expressed as
 `naive outcome delta / best outcome delta`, per cell, and taken as the **median
-across contexts**.
+across contexts in which the best outcome delta is positive and material**.
 
 *Fails if:* that median is ≥ 0.95.
+
+*Why the positive-and-material restriction:* with both deltas negative the ratio
+inverts. A naive −10 over a best −2 is 5.0, comfortably ≥ 0.95, so a mechanic
+that only ever *harms* the player would fail G5(b) **as a cooldown** and be
+ended at a gate with no weighing. It is not a cooldown; it is bad, and W1 should
+reject it with its naive-harm number on the record where the next wave can read
+it. Restricting the median to cells where there is a real benefit to be near-
+optimal about is what makes the ratio mean what the gate says it means.
 
 *Why on deltas and on a median:* on absolute speeds this is a test of entry
 speed and nothing else — at 1000 ups entry, a naive 1020 against a best 1050 is
@@ -393,8 +442,21 @@ adjacent sweep points **that does not shrink when the grid is refined**.
 
 > Halve the grid around every step that exceeds the materiality threshold. A
 > continuous gradient's step halves with the grid; a genuine cliff does not.
-> Report the largest step that survives refinement down to a stated floor: 1° in
-> aim, 1 ms in timing, 1/16 unit in geometry.
+> Report the largest step that survives refinement down to a stated floor,
+> starting at 1° in aim, 1 ms in timing, 1/16 unit in geometry.
+
+**The floor is a parameter of the rule, not a constant.** If a step is still
+above threshold at the starting floor, refine further in that band and record
+the floor that was needed; the finding is *whether it halves*, and a floor that
+had to move is information rather than a failure. Canon's own vocabulary makes
+this concrete: `docs/movement-lab.md` §1 shows vq3/forward at 500 ups entry
+gaining 0.00 at 50° and 139.96 at 60°, because gain is pinned at zero until the
+wish-speed clamp opens — so the steepest 1° step in that band may well exceed
+16 ups. Theory says it should refine away, because that transition is a *kink*:
+a discontinuity in the derivative, not in the value, and a kink's step halves
+with the grid exactly as a smooth gradient's does. **If it does not halve, that
+is a real finding about canon's own technique and belongs in this document**,
+not a reason to weaken the test.
 
 *Fails if:* no rule predicts the measurement, or a step that survives refinement
 exceeds **16 ups** and does not coincide with a boundary the player can perceive
@@ -804,23 +866,44 @@ arrived with Quake.
 
 *Worked application, because this is where it bites.* The double jump's
 `double_jump_window_ms` 400 and `double_jump_boost` 100 carry no id-source
-citation and cannot be verified against CPMA, whose source is not public. They
-are nevertheless **citable at reconstruction grade**, by two independent and
-mutually consistent community reconstructions: freepromode's README documents
-`g_doublejump` as giving "a boost if a jump is done within 400 ms of the last
-one", and GPP-1-1's `bg_promode.c` carries `cpm_pm_jump_z = 0.5` with the
-in-source comment "CPM: 100/270 (normal jumpvel is 270, doublejump default
-100)". *(Both sources were read on the web by this session's reviewer, and the
-first was re-checked at source by its coordinator. The author of this document
-has no network access and has opened neither; Part 3 carries these citations
-with that chain of custody stated, because a document that demands citations
-owes one for its own claims.)* So the *behaviour* is inherited and reaches the
-exemption; the two
-*magnitudes* do not escape §1.8, which requires Part 3 to cite them at the grade
-they actually have or choose them deliberately. **Part 3 must not argue that
-these numbers were never inherited** — that claim is contradicted by a few
-minutes of searching, and this document's entire value is that it can be
-attacked.
+citation and cannot be verified against CPMA, whose source is not public. The
+*behaviour* is citable at reconstruction grade and so reaches the exemption. The
+two *magnitudes* do not escape §1.8 — and **they do not stand or fall together,
+which four rounds of this argument got wrong before anyone opened the files.**
+
+- **`double_jump_boost` 100.** GPP-1-1's `bg_promode.c` assigns
+  `cpm_pm_jump_z = 100/*/230*/; // enable double-jump //100` inside the pro-mode
+  branch of `CPM_UpdateSettings`. That is a port's own CPM configuration, not
+  merely a comment about another game. Two caveats that must travel with it: the
+  same file *declares* the same variable at file scope as `0.5`, with a comment
+  reading "CPM: 100/270 (normal jumpvel is 270, doublejump default 100) =
+  0.37037" — a declaration that disagrees with its own arithmetic and uses a
+  different unit from the assignment; and the file is a Tremulous gameplay
+  patch, so it is third-hand about CPMA.
+- **`double_jump_window_ms` 400.** **Not corroborated there at all.** There is no
+  millisecond window anywhere in that file's 372 lines. It rests on
+  freepromode's README alone. Xonotic's CPMA reconstruction, whose other values
+  match this tree's closely, sets `sv_doublejump 0`.
+
+*The structure is better attested than either number, and that is worth more to
+Part 3.* The same file's vq3 branch reads `cpm_pm_jump_z = 0; // turn off
+double-jump in vq3` — an independent port spelling "VQ3 is CPM with the
+extensions switched off" as a zero on the very field, which is the relationship
+`profile.rs` already encodes and defends.
+
+*(Chain of custody, because a document that demands citations owes one for its
+own claims. GPP-1-1's `bg_promode.c` and Xonotic's `physicsCPMA.cfg` were
+fetched raw and read line by line by the author of this document —
+`sha256 31bea076…` and `914892ff…`. Both had previously been read through a
+summarising fetch, and both were misread that way: `bg_promode.c` declares
+Tremulous-tuned values at file scope and overwrites them at runtime, so a
+summary surfaces the declarations and misses the function. freepromode's README
+has **not** been read from source by anyone on this run and the 400 ms rests on
+it, which is the weakest link in this paragraph and is stated as such.)*
+
+**Part 3 must not argue that these numbers were never inherited** — that claim
+is contradicted by the files. It must argue 400 and 100 separately, at the
+grades above.
 
 **What actually forces this exemption is a client limitation, and marking
 dissolves it.** G7 part 2 does not require the *absence* of a discontinuity. It
@@ -880,11 +963,24 @@ artefact that carries no competitive weight and no player's standing depends on.
 
 ### 1.7 Amendment record
 
-Part 1 was amended once, after an independent review by `movelead` and still
-before any candidate number existed. No verdict had been scored under the
-superseded text, so nothing required restating under the threshold-edit rule.
-Every change is listed; the six marked **blocking** would have invalidated a
-measurement had they landed after `lab` published.
+Part 1 has been amended twice, both times after independent review by
+`movelead` and both times still before any candidate number existed. No verdict
+had been scored under any superseded text, so nothing required restating under
+the threshold-edit rule.
+
+**Amendment 2** — five changes, one of them a gate ruling that decides a
+candidate:
+
+| # | Change | Effect |
+|---|---|---|
+| **18** | **G5(a) now names its geometry: flat open ground decides the gate**, with all seven contexts published as evidence | The test did not say where its player ran, and the two readings gave the wall jump **opposite verdicts** — pass on flat ground, rejected at a gate on `corner()`. Ruled for flat ground on the two-currencies argument: geometry is the second currency in which availability can be earned, and a cooldown is cheap *everywhere*. The wall-jump consequence is disclosed in G5(a) itself, at the same strength as the dash's |
+| **19** | G5(b) restricted to contexts where the best delta is **positive and material** | With both deltas negative the ratio inverts: naive −10 over best −2 is 5.0, so a mechanic that only ever harms would fail G5(b) *as a cooldown* and be ended at a gate. It is not a cooldown, it is bad, and W1 must reject it with its naive-harm number on the record |
+| **20** | G7's refinement floor restated as a **parameter of the rule**, with the kink argument written out | Lab §1's own vq3/forward curve at 500 ups has a band where gain is pinned at zero until the wish-speed clamp opens; the steepest 1° step there may exceed 16 ups and trip G7's self-test, blocking every G7 verdict. The floor may move; whether the step *halves* is the finding |
+| **21** | §1.6's double-jump citation rebuilt on bytes: "mutually consistent" removed, 400 and 100 separated, chain of custody updated | The two sources attest **disjoint** facts — one each, not two agreeing. Both had been misread through summarising fetches; `bg_promode.c` declares Tremulous values at file scope and overwrites them at runtime, so a summary surfaces the declarations and misses the function |
+| **22** | The structural corroboration promoted over the magnitudes in §1.6 | GPP-1-1's vq3 branch spells "VQ3 is CPM with the extensions switched off" as a zero on the very field `profile.rs` uses. That is worth more to Part 3 than either number |
+
+**Amendment 1** — seventeen changes. The six marked **blocking** would have
+invalidated a measurement had they landed after `lab` published.
 
 | # | Change | Effect |
 |---|---|---|
