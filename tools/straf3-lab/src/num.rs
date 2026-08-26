@@ -38,6 +38,18 @@ const TAN_PI_8: f64 = 0.414_213_562_373_095_1;
 /// The tail after that term is below `0.293²⁷/27 ≈ 1.4e-16`, i.e. under one
 /// `f64` ulp of the result, so extending it buys nothing. Horner form, because
 /// the order of operations is part of the answer.
+///
+/// # Why the formatter is told to keep its hands off
+///
+/// The nesting below is thirteen levels deep, and rustfmt does not reflow it in
+/// bounded time — a workspace `cargo fmt` sat burning a core on this one
+/// function for over ten minutes, and has done since this crate landed. That is
+/// reason enough on its own, but it is not the reason that matters: the explicit
+/// parenthesisation **is** the Horner evaluation order, and that order is part
+/// of the answer this crate promises to give identically on every target. A
+/// reflow that reassociated one multiplication would be a movement change
+/// wearing whitespace.
+#[rustfmt::skip]
 fn atan_series(u: f64) -> f64 {
     let u2 = u * u;
     // u - u³/3 + u⁵/5 - … + u²⁵/25

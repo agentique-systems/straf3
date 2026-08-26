@@ -369,12 +369,12 @@ pub(crate) fn measure(profiles: &[(&str, PhysicsProfile)]) -> Section {
 }
 
 /// What one fall produced.
-struct Landing {
+pub(crate) struct Landing {
     /// Downward speed arriving at the contact that produced the most upward
     /// velocity, as a positive number.
-    impact: Scalar,
+    pub(crate) impact: Scalar,
     /// The upward velocity that contact produced.
-    upward: Scalar,
+    pub(crate) upward: Scalar,
 }
 
 impl Landing {
@@ -451,7 +451,11 @@ fn follow<W: World>(world: &W, profile: &PhysicsProfile, mut st: SimState) -> La
 }
 
 /// Drop a motionless player from `height + offset` and follow them to rest.
-fn drop_onto<W: World>(
+///
+/// Visible to the crate because G7's self-test needs *this* fall, not a second
+/// implementation of it: the whole point of that test is that the instrument
+/// agrees with what section 4 already publishes.
+pub(crate) fn drop_onto<W: World>(
     world: &W,
     profile: &PhysicsProfile,
     height: Scalar,

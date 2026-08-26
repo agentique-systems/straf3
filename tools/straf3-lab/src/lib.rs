@@ -54,6 +54,7 @@ pub mod geometry;
 pub mod harness;
 pub mod measure;
 pub mod num;
+pub mod refine;
 pub mod report;
 
 pub use dataset::{Change, Dataset, Measurement, Section, Table, diff, summarise};
