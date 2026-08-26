@@ -35,4 +35,7 @@ windows-sys = { version = "0.61.2", features = [
     "Win32_Graphics_Gdi",
     "Win32_Graphics_Dwm",
     "Win32_UI_WindowsAndMessaging",
+    # Naming the process behind a window, so the target is identified by what
+    # it *is* and not only by what its title bar says. See `win::owner_exe`.
+    "Win32_System_Threading",
 ] }

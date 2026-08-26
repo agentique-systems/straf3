@@ -58,8 +58,11 @@ fn run(request: Request) -> ExitCode {
             println!("{} visible top-level window(s):", windows.len());
             for w in windows {
                 println!(
-                    "  hwnd 0x{:08x}  {:<48}  {}{}",
+                    "  hwnd 0x{:08x}  {:<24}  {:<48}  {}{}",
                     w.hwnd,
+                    // The process is what --process matches on, so it is shown
+                    // beside the title rather than left to be guessed at.
+                    w.process.as_deref().unwrap_or("<would not say>"),
                     truncate(&w.title, 48),
                     w.rect,
                     if w.from_dwm { "" } else { "  (GetWindowRect)" }
@@ -88,12 +91,13 @@ fn run(request: Request) -> ExitCode {
         }
         cli::Source::Window {
             title,
+            process,
             raise,
             min_visible_permille,
         } => {
             let deadline = Instant::now() + Duration::from_millis(options.wait_ms);
             let hits = loop {
-                let hits = win::find_windows(title);
+                let hits = win::find_windows(title, process.as_deref());
                 if !hits.is_empty() || Instant::now() >= deadline {
                     break hits;
                 }
@@ -128,7 +132,7 @@ fn run(request: Request) -> ExitCode {
                     // Re-read the rectangle: raising a window can move it, and
                     // a restored-from-minimised window's rect is entirely
                     // different from the parked one.
-                    let rect = win::find_windows(title)
+                    let rect = win::find_windows(title, process.as_deref())
                         .into_iter()
                         .find(|w| w.hwnd == best.hwnd)
                         .map_or(best.rect, |w| w.rect);
@@ -165,10 +169,14 @@ fn run(request: Request) -> ExitCode {
                     }
 
                     (
-                        rect,
+                        // Stop one pixel short of the reported edge: that row
+                        // belongs to whatever is behind the window, not to the
+                        // window. See win::EDGE_BLEED_PX.
+                        rect.inset(win::EDGE_BLEED_PX),
                         format!(
-                            "window {:?} (hwnd 0x{:08x}, rect from {})",
+                            "window {:?} of {} (hwnd 0x{:08x}, rect from {})",
                             best.title,
+                            best.process.as_deref().unwrap_or("<would not say>"),
                             best.hwnd,
                             if best.from_dwm {
                                 "DWM extended frame bounds"
@@ -187,20 +195,62 @@ fn run(request: Request) -> ExitCode {
                 // for the diagnostic deliberately, and it can only be written
                 // where git will not take it.
                 None => {
+                    let waited = if options.wait_ms > 0 {
+                        format!(" after waiting {} ms", options.wait_ms)
+                    } else {
+                        String::new()
+                    };
                     eprintln!(
-                        "straf3-capture: no visible on-screen window whose title contains \
-                         {title:?}{}.\n\
+                        "straf3-capture: no visible on-screen window{}{waited}.\n\
                          Nothing was written — this tool captures a window, never the \
-                         screen.\n\
-                         `straf3-capture --list` shows what is open. If you need to see \
-                         why the window is missing, `straf3-capture --desktop --out \
-                         target/diagnose.png` grabs the whole screen, but only under \
-                         target/ because it captures everything else too.",
-                        if options.wait_ms > 0 {
-                            format!(" after waiting {} ms", options.wait_ms)
-                        } else {
-                            String::new()
+                         screen.",
+                        match &process {
+                            Some(exe) =>
+                                format!(" whose title contains {title:?} and which belongs to {exe}"),
+                            None => format!(" whose title contains {title:?}"),
                         }
+                    );
+
+                    // The near-miss is the whole diagnostic. Saying only "not
+                    // found" when three windows matched the title and were
+                    // refused for their process reads as a broken tool, and
+                    // the operator's next move is to reach for a system
+                    // screenshot key — the one outcome this tool exists to
+                    // prevent. Name them instead.
+                    if let Some(exe) = &process {
+                        let by_title: Vec<_> = win::find_windows(title, None)
+                            .into_iter()
+                            .filter(|w| w.process.as_deref() != Some(exe.as_str()))
+                            .collect();
+                        if !by_title.is_empty() {
+                            eprintln!(
+                                "\n{} window(s) DID match the title and were refused because \
+                                 they are not {exe}: {}.\n\
+                                 A title is not an identity — an editor with a straf3 file \
+                                 open matches {title:?} too, and capturing it would have \
+                                 produced a valid, non-blank picture of somebody's document \
+                                 filed as evidence about straf3. If one of these really is \
+                                 the client, pass --process <exe> or --any-process.",
+                                by_title.len(),
+                                by_title
+                                    .iter()
+                                    .map(|w| format!(
+                                        "{:?} ({})",
+                                        truncate(&w.title, 32),
+                                        w.process.as_deref().unwrap_or("<would not say>")
+                                    ))
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            );
+                        }
+                    }
+
+                    eprintln!(
+                        "\n`straf3-capture --list` shows what is open, with the process \
+                         behind each window. If you need to see why the window is missing, \
+                         `straf3-capture --desktop --out target/diagnose.png` grabs the \
+                         whole screen, but only under target/ because it captures \
+                         everything else too."
                     );
                     return ExitCode::from(4);
                 }
