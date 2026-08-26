@@ -5,8 +5,15 @@
 | Part | What it is | State |
 |---|---|---|
 | 1 | The criteria a mechanic must meet to enter canon | **written; amended three times; still frozen against candidate evidence** |
-| 2 | The verdict on crouch slide, dash and wall jump | not yet written |
-| 3 | The frozen `PhysicsProfile::straf3()`, constant by constant | not yet written |
+| 2 | The verdict on crouch slide, dash and wall jump | not written — no candidate was measured before the wave ended |
+| 3 | The frozen `PhysicsProfile::straf3()`, constant by constant | not written — `straf3()` does not exist yet |
+
+**Nothing has been judged against these criteria.** The wave ended on a capacity
+limit before the lab published candidate numbers, so Part 1 stands complete and
+untested, which is the honest state and a usable one: the next wave inherits
+criteria that provably predate every number they will be applied to. Part 2's
+§2.0 and Part 3's opening record what is already established, so none of it has
+to be re-derived.
 
 That order is the whole point and it is worth stating before anything else.
 
@@ -1134,14 +1141,124 @@ comparable.
 
 ## Part 2 — The verdicts
 
-Not yet written. Will record, for each of crouch slide, dash and wall jump: the
-gates, the weighed scores with their measured numbers per context, the verdict —
-admitted, rejected, or unjudgeable on available evidence — any geometry
-dependency, and for a rejection the criterion, the number and what would change
-the answer. A rejection under G7 carries the two obligations §1.6 sets.
+**Not written, and deliberately not attempted.** The wave that produced Part 1
+ended on a capacity limit before `tools/straf3-lab` published candidate numbers.
+No candidate has been scored against these criteria by anyone.
+
+That is a better outcome than the alternative and it is worth saying plainly: a
+document whose whole discipline is that criteria precede numbers would have been
+worth nothing if it had ended by producing verdicts in a hurry to look finished.
+**Part 1's pre-publication immunity is intact** — every threshold here was fixed
+before any candidate measurement existed, and the next wave inherits that rather
+than having to re-establish it.
+
+Part 2 will record, for each of crouch slide, dash and wall jump: the gates, the
+weighed scores with their measured numbers per context, the verdict — admitted,
+rejected, or unjudgeable on available evidence — any geometry dependency, and
+for a rejection the criterion, the number and what would change the answer. A
+rejection under G7 carries the two obligations §1.6 sets.
+
+### 2.0 Known unmeasured questions, which a verdict must settle first
+
+Recorded here so the next wave does not have to rediscover them. Neither is
+measured; both are measurable on the harness that exists.
+
+**Crouch slide: does tap-and-stand-up dominate?** `PM_Friction` reads
+`slide_ms`, **not `p.crouched`**. So a player can tap crouch to arm the slide,
+stand straight back up on the next command, and keep one-sixth friction for the
+full 600 ms **at full wish speed** — because standing restores the wish speed
+that `duck_scale` 0.25 was suppressing. If that is available it is strictly
+better than sliding crouched, and it is the obvious thing a player will find.
+
+Why this may decide the mechanic rather than merely tune it:
+`PhysicsProfile::slide_duration_ms`'s own doc comment argues for a countdown
+over hold-to-slide because "a slide the player can extend at will is a friction
+toggle, and a toggle has nothing to master". That argument defends against
+**extension**. It does not reach this: the duration is still bounded, but the
+*posture cost* the mechanic was assumed to impose is not paid. If tap-and-stand
+dominates, crouch slide is a 600 ms friction toggle with a speed price of
+admission, and the anti-toggle case has to be made again on different ground.
+
+The instruments already exist and no criterion needs changing. **W6** asks
+whether the optimal play differs by context — if tap-and-stand is optimal
+everywhere, that is a W6 fail and the mechanic is a routine rather than a
+decision. **W1** asks whether the naive play harms. **G2**'s inertness is scoped
+on activation preconditions, so a *standing* player carrying slide friction is
+in scope for it. What is missing is only the measurement.
+
+**Wall jump and crouch slide have no geometry in any shipped map.**
+`assets/maps/coil.map` states in its own header that there are no ceilings
+anywhere, and its one dramatic non-walkable surface is the gully's near wall at
+normal z 0.5547 — above `wall_normal_max` 0.3 and below `min_walk_normal` 0.7,
+inside the dead band where it is neither wall nor walkable. Training-map stubs
+were brought into scope to close this. §1.5's geometry-dependency disclosure and
+the unjudgeable verdict both exist because of it.
 
 ## Part 3 — The frozen ruleset
 
-Not yet written. Will record `PhysicsProfile::straf3()` constant by constant,
-each with either a citation at the grade its source actually has, or the reason
-Straf3 chose the value.
+**Not written, and `PhysicsProfile::straf3()` does not exist.** The same
+capacity limit ended the wave before the freeze. `vq3()` and `cpm()` are
+unchanged, so no physics digest has moved and no artefact captured under either
+has been invalidated.
+
+Part 3 will record `PhysicsProfile::straf3()` constant by constant, each with
+either a citation at the grade its source actually has, or the reason Straf3
+chose the value. Four things are already established and should not be
+re-derived:
+
+1. **Admitting any or all three candidates adds no field to `PhysicsProfile`.**
+   All eight candidate constants already exist. An admission is a value change,
+   which is what the data doctrine in G8 is for. The one identified route to a
+   new field is a `dash_entry_speed` constant, if the dash's G5(a) exposure is
+   answered by the retune that mirrors `slide_entry_speed`.
+2. **`double_jump_window_ms` 400 must be chosen, not cited.** Its sole
+   attestation traces to the same `cpm1_dev_docs` upstream as everything else and
+   describes itself as a degraded copy of it. See §1.6.
+3. **`friction` 6 can now be justified rather than merely inherited.** Xonotic's
+   reconstruction states that `cpm1_dev_docs` used 8 "but friction is 6 in all
+   ~modern CPMA releases, and in DeFRaG CPM", which is why GPP-1-1's CPM branch
+   carries 8 and this tree correctly does not.
+4. **`jump_velocity` 270 is verified, and Straf3's jump is not Quake 3's.** The
+   constant is id's without qualification; the *integrator* is Straf3's
+   deliberate choice — `step.rs` integrates gravity at the average of start and
+   end vertical speeds, "what makes jump height nearly independent of the command
+   rate" — and the resulting *behaviour* is a consequence of both, belonging to
+   neither of r5's two clauses on its own. Quake 3 at 125 fps was measured by
+   Xonotic's authors at **48.528 units over 720 ms**; `coil.map`'s header states
+   Straf3's as **45.6 units over 0.675 s**, and the course was built to those.
+   **Both Straf3 figures are arithmetic, not measurement** — they are
+   `270²/(2·800)` and `2·270/800`, agreeing with a map comment. Nobody has
+   measured this tree's actual jump. Part 3 must replace them with a measured
+   figure or say it did not.
+
+### 3.0 One unexplored source, recorded rather than chased
+
+`rdntcntrl/ratoa_gamecode` (OpenArena Ratmod). freepromode's own README
+recommends it over freepromode — "The movement is more accurate" — making it the
+only reconstruction a CPM reimplementer has positively rated above their own
+work. **Nobody on this run has examined it.** It is the obvious next place to
+look before Part 3 argues `double_jump_window_ms` or `double_jump_boost`.
+
+---
+
+## On citations, because this cost the wave two corrections
+
+Every citation in this document was first gathered through a summarising web
+fetch, and **two of the three were wrong in ways the summary could not show**.
+
+- `bg_promode.c` declares Tremulous-tuned values at file scope and **overwrites
+  them at runtime** in `CPM_UpdateSettings`. A summary reports the declarations
+  and misses the function, producing a confident and false "`air_control` is 165
+  modulated by 0.8".
+- freepromode's README was cited for the one line matching this tree's 400 ms,
+  without the three disclaimers immediately below it — which are the most
+  important content in the file and change what the citation is worth.
+
+Neither error was visible in the summary. Both took under a minute to find by
+fetching the raw file and reading it. **The failure mode is not that summaries
+are vague; it is that they are confidently specific about the wrong part of the
+file**, which is indistinguishable from being right unless you open it.
+
+So: a constant in Part 3 may be cited only against a source someone has read
+from bytes, and the citation records who read it. All three sources behind §1.6
+now meet that bar.
