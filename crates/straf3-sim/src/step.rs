@@ -85,6 +85,59 @@ const CMD_AXIS_MAX: Scalar = s(127.0);
 /// Degrees to radians, as Q3's `AngleVectors` computes it (`M_PI * 2 / 360`).
 const DEG_TO_RAD: Scalar = s(core::f32::consts::PI * 2.0 / 360.0);
 
+/// The longest a single integration step may be, in whole milliseconds.
+///
+/// This is Q3's `Pmove` loop bound. `bg_pmove.c`'s `Pmove` — the *outer*
+/// function, the one that calls `PmoveSingle` — reads:
+///
+/// ```text
+/// // chop the move up if it is too long, to prevent framerate
+/// // dependent behavior
+/// while ( pmove->ps->commandTime != finalTime ) {
+///     int msec = finalTime - pmove->ps->commandTime;
+///     if ( pmove->pmove_fixed ) {
+///         if ( msec > pmove->pmove_msec ) { msec = pmove->pmove_msec; }
+///     } else {
+///         if ( msec > 66 ) { msec = 66; }
+///     }
+///     pmove->cmd.serverTime = pmove->ps->commandTime + msec;
+///     PmoveSingle( pmove );
+///     ...
+/// }
+/// ```
+///
+/// # Why 66 and not `pmove_msec`
+///
+/// id has two bounds, and they answer different questions. `pmove_msec`
+/// (8..=33, clamped in `ClientThink_real`) exists only when `pmove_fixed` is
+/// set, and `pmove_fixed`'s job is to make *client prediction* agree with the
+/// server by forcing both to integrate in identical chunks regardless of
+/// framerate. Straf3 has no prediction to reconcile: [`UserCmd::duration_ms`]
+/// is already a recorded, fixed-duration quantum (spec D2), so the tick rate
+/// itself does what `pmove_fixed` was invented to do. What is left is id's
+/// other bound, the unconditional one — the safety net that stops a single
+/// enormous frame from being integrated in one go.
+///
+/// So this is 66, id's number for that job, verbatim.
+///
+/// # Why it is a constant and not a [`PhysicsProfile`] field
+///
+/// For the same reason [`SLIDE_BUMPS`] and [`INTO_PLANE_EPSILON`] are: it is a
+/// property of *how* the solver is run, not a number that describes how the
+/// game moves. Every command this project actually produces is shorter than
+/// it — 8 ms at 125 Hz, 4 ms at 250 Hz, 13 ms at 76 Hz — so tuning it would
+/// change nothing a player can feel, while making a bound that must be the
+/// same on every target into a value a recording would have to carry.
+///
+/// # What the bound costs, stated honestly
+///
+/// A 66 ms sub-step is not fine. It is 8¼ commands' worth of integration at
+/// 125 Hz, and a command that long behaves nothing like eight 8 ms ones. The
+/// bound is not a claim that 66 ms is accurate; it is a claim that no duration
+/// is *unbounded*, which is what a sub-step loop can promise and a single step
+/// cannot. Callers that want fidelity ask for it by sending short commands.
+pub const PMOVE_SUBSTEP_MAX_MS: u16 = 66;
+
 /// Advance the simulation by exactly one command.
 ///
 /// # The contract this function exists to state
@@ -158,50 +211,144 @@ pub fn step_in_place<W>(
 where
     W: World + ?Sized,
 {
+    step_bounded(state, cmd, world, profile, PMOVE_SUBSTEP_MAX_MS)
+}
+
+/// [`step_in_place`] with the sub-step bound as an argument.
+///
+/// The bound is a parameter of exactly one private function, and there is
+/// exactly one caller that supplies anything but [`PMOVE_SUBSTEP_MAX_MS`]:
+/// this module's tests, which pass `u16::MAX` to integrate a command in a
+/// single step and so recover — through *this* code rather than through a copy
+/// of it — the behaviour sub-stepping replaced. That is what lets "nothing at
+/// or below the bound moved" be a measurement instead of an argument, and it
+/// cannot drift from the shipped path the way a duplicated integrator would.
+///
+/// It is not a knob. Nothing above this function can reach it, and a bound
+/// that varied between two runs of the same recording would be a determinism
+/// bug of exactly the kind [`SimState::checksum`] exists to catch.
+fn step_bounded<W>(
+    state: &mut SimState,
+    cmd: &UserCmd,
+    world: &W,
+    profile: &PhysicsProfile,
+    bound: u16,
+) -> TriggerSet
+where
+    W: World + ?Sized,
+{
     // A zero-length command advances nothing. Returning early rather than
     // integrating by zero keeps `tick` counting commands that did something.
     if cmd.duration_ms == 0 {
         return TriggerSet::NONE;
     }
 
-    // TODO(wave3): Q3's `PmoveSingle` splits a long command into several
-    // sub-steps (`pmove_msec`) so that a large duration cannot tunnel through
-    // geometry or skip a jump window. That split changes results, so it must
-    // land before any reference replay is recorded.
-    let ms = cmd.duration_ms;
-
-    // The one permitted integer-milliseconds-to-scalar conversion in the whole
-    // crate — spec rev 3, criterion 3. Mirrors Q3's
-    // `pml.frametime = pml.msec * 0.001`. Do not add a second one.
-    let dt = num::seconds_from_millis(u32::from(ms));
+    // A zero bound would not terminate. One millisecond is also `PmoveSingle`'s
+    // own floor — `if (pml.msec < 1) pml.msec = 1;` — so the smallest legal
+    // sub-step here is the smallest legal one there.
+    let bound = bound.max(1);
 
     // The view is player input, applied whole. Movement never rotates the
     // player: what you looked at is what the recording says you looked at.
+    // Applied once for the command, not once per sub-step, because it is the
+    // same value either way — the command carries one view.
     state.player.view = cmd.view;
 
-    let mut pm = Pmove::new(cmd, world, profile, dt);
-    let touched = pm.run(&mut state.player, ms);
+    // ── Q3's `Pmove` loop: chop the move up if it is too long ──────────────
+    //
+    // Everything below this line runs once *per sub-step*. That is the whole
+    // change: [`Pmove`] is Q3's `PmoveSingle`, and `PmoveSingle` is the thing
+    // id's loop calls repeatedly, so a sub-step gets its own `Pmove` — its own
+    // `dt`, its own ground probe, its own timer drop, its own solver. Nothing
+    // inside `Pmove` knows the loop exists, exactly as nothing in
+    // `PmoveSingle` knows about `Pmove`.
+    //
+    // The split is in integer milliseconds and the arithmetic is exact:
+    // `remaining` starts at the command's duration, each pass removes the
+    // sub-step it is about to integrate, and the loop ends when it reaches
+    // zero. There is no float accumulator and no remainder to drift, because
+    // the remainder is not a residue — it is simply the last, short sub-step,
+    // which is where Q3 puts it too (`msec = finalTime - commandTime` capped
+    // at the bound takes full sub-steps first, and the final pass consumes
+    // whatever is left as a sub-step of its own; id has no remainder branch
+    // and neither does this). A 100 ms command is 66 + 34, in that order; a
+    // 1000 ms command is fifteen 66s and a 10.
+    //
+    // `PmoveSingle`'s own `if (pml.msec < 1) pml.msec = 1;` floor is satisfied
+    // structurally rather than transcribed: a zero-duration command returned
+    // above, and every sub-step below is `min(remaining, bound)` with
+    // `remaining > 0`, so no sub-step of zero milliseconds can be constructed.
+    // Its `else if (pml.msec > 200)` ceiling is unreachable under a 66 ms
+    // bound, exactly as it is unreachable from id's own `Pmove`.
+    //
+    // **Q3's arrears clamp is deliberately not ported.** `Pmove` opens with
+    // `if (finalTime > commandTime + 1000) commandTime = finalTime - 1000;` —
+    // more than a second of backlog is thrown away rather than simulated. That
+    // is a decision about *wall-clock catch-up*: `commandTime` is arrears
+    // against a real clock, and a server that hitched for thirty seconds must
+    // not then simulate thirty seconds at once. Straf3 has no arrears here.
+    // `duration_ms` is a recorded input, not a debt against a clock, and this
+    // function is not allowed to know what time it is — deciding how much wall
+    // time becomes commands is the platform layer's job, above the seam, where
+    // the clock lives. Silently integrating less than a command says would
+    // make a replay disagree with the run it recorded. So every millisecond
+    // handed in is integrated, and the cost is bounded anyway: `u16::MAX` ms
+    // is 993 sub-steps.
+    let mut remaining = cmd.duration_ms;
+    let mut touched = TriggerSet::NONE;
 
+    while remaining > 0 {
+        let ms = remaining.min(bound);
+        remaining -= ms;
+
+        // The one permitted integer-milliseconds-to-scalar conversion in the
+        // whole crate — spec rev 3, criterion 3. Mirrors Q3's
+        // `pml.frametime = pml.msec * 0.001`. Do not add a second one. It is
+        // reached once per sub-step rather than once per command, which is the
+        // point: the truncation happens where Q3's did, at the granularity
+        // Q3's did.
+        let dt = num::seconds_from_millis(u32::from(ms));
+
+        let mut pm = Pmove::new(cmd, world, profile, dt);
+        let crossed = pm.run(&mut state.player, ms);
+
+        // The clock advances by the sub-step, in whole milliseconds. The sum
+        // over the loop is the command's duration exactly — integers do not
+        // drift — so `time_ms` at the command boundary is unchanged from what
+        // a single step produced, however many sub-steps ran.
+        state.time_ms += u32::from(ms);
+        touched = touched.with(crossed);
+
+        // The clock is read at the *sub-step* boundary, in whole milliseconds,
+        // from the integer sum of durations — never interpolated within the
+        // step that crossed the line. A sub-tick time would be a float, and a
+        // verifier would have to reproduce it bit-exactly for no benefit.
+        // This is ARCHITECTURE C4's rule unchanged and its predicted shape:
+        // sub-stepping makes the clock *finer* without making it float. A
+        // finish crossed 66 ms into a 200 ms command is timed at 66 ms into
+        // it, not at the end of it.
+        //
+        // The consequence, accepted deliberately (ARCHITECTURE C4): times
+        // quantise to the sub-step — which for every rate this project runs at
+        // is the command duration, multiples of 8 ms at 125 Hz.
+        //
+        // Start before finish, so a step that crosses both — a course whose
+        // lines touch, or a player teleported across the map — yields zero
+        // rather than a run that never started.
+        if crossed.contains(TriggerSet::START) {
+            state.run.start(state.time_ms);
+        }
+        if crossed.contains(TriggerSet::FINISH) {
+            state.run.finish(state.time_ms);
+        }
+    }
+
+    // Once per *command*, not once per sub-step: `tick` counts commands
+    // applied, and a caller comparing it against the length of a recorded
+    // command stream must keep getting the same answer. Sub-stepping is an
+    // integration detail, and a recording does not know how many sub-steps its
+    // commands were split into.
     state.tick += 1;
-    state.time_ms += u32::from(ms);
-
-    // The clock is read at the command boundary, in whole milliseconds, from
-    // the integer sum of command durations — never interpolated within the
-    // command that crossed the line. A sub-tick time would be a float, and a
-    // verifier would have to reproduce it bit-exactly for no benefit.
-    //
-    // The consequence, accepted deliberately (ARCHITECTURE C4): times quantise
-    // to the command duration — multiples of 8 ms at 125 Hz, 4 ms at 250 Hz.
-    //
-    // Start before finish, so a command that crosses both — a course whose
-    // lines touch, or a player teleported across the map — yields zero rather
-    // than a run that never started.
-    if touched.contains(TriggerSet::START) {
-        state.run.start(state.time_ms);
-    }
-    if touched.contains(TriggerSet::FINISH) {
-        state.run.finish(state.time_ms);
-    }
 
     touched
 }
@@ -256,18 +403,29 @@ impl MoveDir {
 }
 
 /// Quake's `pml_t`: everything the movement functions share for the duration of
-/// one command, and nothing that outlives it.
+/// one **sub-step**, and nothing that outlives it.
 ///
 /// It is a struct rather than a pile of arguments for the same reason Q3 used
 /// one — `PM_WalkMove` and `PM_SlideMove` need the same eight values — but
 /// unlike Q3's it is a local, not a global, so two simulations in one process
 /// cannot see each other's.
+///
+/// # Its lifetime is a sub-step, and that is load-bearing
+///
+/// Q3 `memset`s `pml` at the top of every `PmoveSingle`, so each pass of the
+/// `Pmove` loop starts from a clean one; [`step_in_place`] builds a fresh
+/// `Pmove` per sub-step for the same reason, and that is what keeps the loop
+/// from needing any state of its own. Everything that must survive a sub-step
+/// boundary already lives in [`PlayerState`] — `jump_held`, the timers, the
+/// ground state — which is precisely where a value that outlives one
+/// integration step belongs, because that is the struct a digest folds and a
+/// replay reproduces.
 struct Pmove<'a, W: World + ?Sized> {
     world: &'a W,
     profile: &'a PhysicsProfile,
-    /// Frame duration in seconds. Q3's `pml.frametime`.
+    /// Sub-step duration in seconds. Q3's `pml.frametime`.
     dt: Scalar,
-    /// The collision box for this command, standing or crouched.
+    /// The collision box for this sub-step, standing or crouched.
     hull: Hull,
 
     /// View basis vectors, Q3's `pml.forward` / `pml.right`.
@@ -294,6 +452,12 @@ struct Pmove<'a, W: World + ?Sized> {
     /// this for the same reason jumping is edge-triggered on
     /// [`PlayerState::jump_held`]: a technique you can hold down is a posture,
     /// and a posture has no timing to master.
+    ///
+    /// Sub-stepping does not multiply the edge, and needs no help not to: the
+    /// first sub-step of a crouch press sets [`PlayerState::crouched`], so
+    /// every later sub-step of the same command reads it as already crouched
+    /// and finds no edge. One press, one slide, whatever the command's
+    /// duration — the same structural answer as the jump's.
     crouch_edge: bool,
 
     /// Q3's `pml.groundPlane`: there is a plane underfoot.
@@ -303,14 +467,15 @@ struct Pmove<'a, W: World + ?Sized> {
     ground_normal: Vec3,
     ground_surface: SurfaceFlags,
 
-    /// Timing volumes the hull has passed through so far this command.
+    /// Timing volumes the hull has passed through so far this sub-step.
     ///
     /// Q3 has no equivalent; this is ARCHITECTURE C4's accumulator. It sits
     /// beside `ground_plane` and `walking` because it has the same lifetime —
-    /// one command — and is consumed by [`step_in_place`] at the end of
-    /// [`Pmove::run`]. When `pmove_msec` sub-stepping lands, that consumption
-    /// point makes the clock finer without making it a float and without
-    /// changing any rule here.
+    /// one sub-step — and is consumed by [`step_in_place`] at the end of
+    /// [`Pmove::run`]. That consumption point is what makes sub-stepping make
+    /// the clock finer without making it a float and without changing any rule
+    /// here: a start or finish is stamped at the sub-step boundary it was
+    /// crossed on, which is still an exact integer sum of durations.
     touched: TriggerSet,
 }
 
@@ -367,6 +532,54 @@ impl<'a, W: World + ?Sized> Pmove<'a, W> {
 
     /// Quake's `PmoveSingle`, in its order. Returns the timing volumes the
     /// player's hull passed through.
+    ///
+    /// `ms` is the **sub-step's** duration, not the command's, and every timer
+    /// below counts down on it — see the `PM_DropTimers` call for why that is
+    /// a movement decision rather than a detail.
+    ///
+    /// # Q3's `pmove->cmd.upmove = 20`, and why it is absent here
+    ///
+    /// After each `PmoveSingle`, id's `Pmove` loop writes:
+    ///
+    /// ```text
+    /// if ( pmove->ps->pm_flags & PMF_JUMP_HELD ) {
+    ///     pmove->cmd.upmove = 20;
+    /// }
+    /// ```
+    ///
+    /// That line is repair work for an aliasing bug, not a movement rule.
+    /// `PM_CheckJump` refuses a held jump by zeroing `pm->cmd.upmove` — and
+    /// `pm->cmd` is the *same* struct the loop reuses for the next sub-step,
+    /// so without the write-back the next `PmoveSingle` would see `upmove 0`,
+    /// read that as "the jump input was released", clear `PMF_JUMP_HELD` and
+    /// hand the player a free second jump inside one command. Twenty is simply
+    /// a number at or above `upmove >= 10`.
+    ///
+    /// Here there is nothing to repair. [`Self::up_move`] is a copy owned by
+    /// one `Pmove`, so [`Self::check_jump`]'s zeroing dies with the sub-step
+    /// that did it, and the next sub-step re-derives `jump_pressed` from the
+    /// unmodified [`UserCmd`]. Held-ness survives in
+    /// [`PlayerState::jump_held`], which is where it belongs and which the
+    /// digest already folds. One press still buys one jump, however long the
+    /// command — asserted by `a_held_jump_is_one_jump_however_long_the_command`
+    /// in this module's tests.
+    ///
+    /// The one visible difference from id: in a sub-step that follows a jump
+    /// within the same command, `PM_CmdScale` sees the command's own `upmove`
+    /// (127 for a jump) where Q3 would have substituted 20, so the airborne
+    /// wish-speed dip is the full one rather than a reduced one.
+    ///
+    /// **That difference goes the right way**, which is worth checking rather
+    /// than assuming, because the whole purpose of chopping is to make a long
+    /// command behave like the short ones it stands for. Q3 rebuilds `pm.cmd`
+    /// from the client's command on every `ClientThink_real`, so the *second
+    /// command* of a held jump delivered as two commands sees `upmove 127` —
+    /// while the *second sub-step* of the same play delivered as one chopped
+    /// command sees 20. Porting the write-back would therefore make a chopped
+    /// command disagree with the stream it is meant to be equivalent to, and
+    /// would break `a_command_is_exactly_the_sub_steps_it_is_chopped_into`.
+    /// It is also unreachable at every rate this project runs at, since a
+    /// command shorter than [`PMOVE_SUBSTEP_MAX_MS`] has no second sub-step.
     fn run(&mut self, p: &mut PlayerState, ms: u16) -> TriggerSet {
         // `PmoveSingle`: releasing the jump input re-arms the jump.
         if !self.jump_pressed {
@@ -375,7 +588,16 @@ impl<'a, W: World + ?Sized> Pmove<'a, W> {
 
         self.check_duck(p);
         self.ground_trace(p);
-        p.timers.advance(ms); // PM_DropTimers
+        // `PM_DropTimers`, and it lives inside `PmoveSingle` in id's source as
+        // it does inside this function — so a timer counts down once per
+        // sub-step, by the sub-step's own milliseconds. The total decrement
+        // across a command is the same integer either way; what changes is
+        // that the countdown is now *read* between sub-steps. That is exactly
+        // what stops a long command stepping over a jump window: a 400 ms
+        // double-jump window survives the first 66 ms of a 500 ms command and
+        // is still open when that sub-step reaches `check_jump`, where a
+        // single step would have subtracted all 500 ms before looking.
+        p.timers.advance(ms);
 
         if self.walking {
             self.walk_move(p);
@@ -1409,7 +1631,7 @@ fn clip_velocity(velocity: Vec3, normal: Vec3, profile: &PhysicsProfile) -> Vec3
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cmd::TickRate;
+    use crate::cmd::{TickRate, ViewAngles};
     use crate::world::{EmptyWorld, FlatGround};
 
     fn cmd(ms: u16) -> UserCmd {
@@ -1953,5 +2175,451 @@ mod tests {
             assert_eq!(end.player.timers.wall_contact_ms, 0);
             assert_eq!(end.player.wall_normal, num::ZERO);
         }
+    }
+
+    // ── sub-stepping: Q3's `Pmove` loop ────────────────────────────────────
+    //
+    // These pin the split rule, its bound, and the two places the split is
+    // visible in movement rather than in arithmetic: the jump window a long
+    // command used to step over, and the press it must still only spend once.
+    //
+    // The claim they do *not* make, because a unit test cannot: that canon at
+    // 125 Hz is unchanged. That is a statement about fourteen recorded runs
+    // and four build targets, and it belongs to `canon_frozen.rs` and
+    // `cargo xtask determinism`. What is asserted here is the mechanism those
+    // two rest on — that a command at or below the bound is one sub-step.
+
+    /// A command with the keys down and the view off-axis, so the trajectory
+    /// bends. An equality between two integrations of a straight line would
+    /// be nearly free; this one has friction, acceleration, a landing and a
+    /// turn in it.
+    fn busy(ms: u16, buttons: Buttons) -> UserCmd {
+        UserCmd {
+            duration_ms: ms,
+            forward_move: 127,
+            right_move: 127,
+            up_move: 0,
+            buttons,
+            view: ViewAngles::from_degrees(s(0.0), s(37.5), s(0.0)),
+        }
+    }
+
+    /// Everything a run is *except* `tick` — which counts commands, and so is
+    /// the one field that must differ between a chopped command and the
+    /// commands it was chopped into.
+    ///
+    /// A checksum rather than `PartialEq` so the comparison is on bits: `==`
+    /// on `f32` cannot tell `0.0` from `-0.0`, and a sub-step boundary is
+    /// exactly the sort of place a sign of zero changes.
+    fn digest_ignoring_tick(state: &SimState) -> u64 {
+        let mut state = *state;
+        state.tick = 0;
+        state.checksum()
+    }
+
+    /// Integrate one run of commands of the given durations, all carrying the
+    /// same input, from a player running along the ground.
+    ///
+    /// **On the ground on purpose**, and the first draft of these tests was
+    /// wrong to put the player in the air: airborne motion turns out to be
+    /// step-size invariant in this mover, so every inequality below passed
+    /// vacuously. See
+    /// `ballistic_motion_is_the_same_however_finely_it_is_stepped`, which now
+    /// pins that as the finding it is. Ground friction is the nearest regime
+    /// that genuinely depends on the step size, because it decays velocity
+    /// multiplicatively.
+    fn over_holding(buttons: Buttons, durations: &[u16]) -> SimState {
+        let mut start = sprinting(400.0);
+        start.player.origin = vec3(s(0.0), s(0.0), s(24.125));
+        let cmds: Vec<UserCmd> = durations.iter().map(|ms| busy(*ms, buttons)).collect();
+        run(
+            &start,
+            &cmds,
+            &FlatGround::at(s(0.0)),
+            &PhysicsProfile::cpm(),
+        )
+    }
+
+    fn over(durations: &[u16]) -> SimState {
+        over_holding(Buttons::NONE, durations)
+    }
+
+    #[test]
+    fn the_sub_step_bound_is_ids_and_no_rate_this_project_runs_at_reaches_it() {
+        // id's unconditional cap in `Pmove`, verbatim.
+        assert_eq!(PMOVE_SUBSTEP_MAX_MS, 66);
+
+        // Which is why canon does not move: every rate this project names is
+        // one sub-step, so the loop runs exactly once and integrates exactly
+        // what a single step integrated.
+        for rate in [TickRate::HZ_76, TickRate::HZ_125, TickRate::HZ_250] {
+            assert!(
+                rate.command_millis() <= PMOVE_SUBSTEP_MAX_MS,
+                "{} Hz commands are {} ms, past the bound",
+                rate.hz(),
+                rate.command_millis(),
+            );
+        }
+
+        // And the bound is not decorative: `TickRate` accepts rates whose
+        // commands are far longer than it, and a caller may hand `step` any
+        // `u16` at all.
+        let slowest = TickRate::from_hz(1).expect("1 Hz is in range");
+        assert!(slowest.command_millis() > PMOVE_SUBSTEP_MAX_MS);
+    }
+
+    #[test]
+    fn a_command_is_exactly_the_sub_steps_it_is_chopped_into() {
+        // The property the whole design turns on: chopping is not an
+        // approximation of the long command, it *is* the long command. Two
+        // sub-steps of the bound, and a bound plus a remainder.
+        assert_eq!(
+            digest_ignoring_tick(&over(&[132])),
+            digest_ignoring_tick(&over(&[66, 66])),
+        );
+        assert_eq!(
+            digest_ignoring_tick(&over(&[67])),
+            digest_ignoring_tick(&over(&[66, 1])),
+        );
+        assert_eq!(
+            digest_ignoring_tick(&over(&[100])),
+            digest_ignoring_tick(&over(&[66, 34])),
+        );
+
+        // A second of wall time in one command: fifteen full sub-steps and a
+        // ten. Spelled out rather than generated, because the point is the
+        // exact sequence.
+        let mut chopped = vec![PMOVE_SUBSTEP_MAX_MS; 15];
+        chopped.push(1000 - 15 * PMOVE_SUBSTEP_MAX_MS);
+        assert_eq!(chopped.iter().map(|ms| u32::from(*ms)).sum::<u32>(), 1000);
+        assert_eq!(
+            digest_ignoring_tick(&over(&[1000])),
+            digest_ignoring_tick(&over(&chopped)),
+        );
+
+        // `tick` is the exception, and deliberately so: a recording's command
+        // count must not depend on how the mover chose to integrate it.
+        assert_eq!(over(&[1000]).tick, 1);
+        assert_eq!(over(&chopped).tick, 16);
+        assert_eq!(over(&[1000]).time_ms, over(&chopped).time_ms);
+    }
+
+    /// The same claim with the jump input held down, which is the case id
+    /// patches by hand.
+    ///
+    /// `Pmove` writes `pmove->cmd.upmove = 20` back into the shared command
+    /// after any sub-step that leaves `PMF_JUMP_HELD` set. Transcribing that
+    /// literally would fail this test — see [`Pmove::run`] for why, and why
+    /// failing it would be the wrong answer rather than a tolerable one.
+    #[test]
+    fn a_chopped_command_with_jump_held_matches_the_same_play_in_short_commands() {
+        let jump = Buttons::JUMP;
+        assert_eq!(
+            digest_ignoring_tick(&over_holding(jump, &[132])),
+            digest_ignoring_tick(&over_holding(jump, &[66, 66])),
+        );
+        // Long enough to jump, rise and land, all inside one command.
+        let mut chopped = vec![PMOVE_SUBSTEP_MAX_MS; 12];
+        chopped.push(800 - 12 * PMOVE_SUBSTEP_MAX_MS);
+        assert_eq!(
+            digest_ignoring_tick(&over_holding(jump, &[800])),
+            digest_ignoring_tick(&over_holding(jump, &chopped)),
+        );
+    }
+
+    /// The pre-sub-stepping integration, kept alive as a measuring stick.
+    ///
+    /// This is byte for byte what [`step_in_place`] did before the `Pmove`
+    /// loop landed: one [`Pmove`] for the whole command, at the whole
+    /// command's `dt`. It exists so that "what did sub-stepping change" is a
+    /// measurement taken in this repository rather than a description of one,
+    /// and so the claim that nothing at or below the bound moved can be
+    /// *asserted* instead of argued.
+    fn single_step<W: World + ?Sized>(
+        state: &SimState,
+        cmd: &UserCmd,
+        world: &W,
+        profile: &PhysicsProfile,
+    ) -> SimState {
+        let mut next = *state;
+        // `u16::MAX` is at or above every representable `duration_ms`, so the
+        // loop takes the whole command in one pass — which is precisely the
+        // integration this crate shipped before the loop existed.
+        step_bounded(&mut next, cmd, world, profile, u16::MAX);
+        next
+    }
+
+    /// The four openings a command can be given, so a sweep over durations
+    /// covers walking, falling, jumping and crouching rather than one of them.
+    fn openings() -> [(&'static str, SimState, Buttons); 4] {
+        let mut grounded = sprinting(400.0);
+        grounded.player.origin = vec3(s(0.0), s(0.0), s(24.125));
+        let mut airborne = SimState::spawned_at(vec3(s(0.0), s(0.0), s(900.0)), s(0.0));
+        airborne.player.velocity = vec3(s(400.0), s(0.0), s(0.0));
+        [
+            ("running on flat ground", grounded, Buttons::NONE),
+            ("running and jumping", grounded, Buttons::JUMP),
+            ("running and crouching", grounded, Buttons::CROUCH),
+            ("falling at speed", airborne, Buttons::NONE),
+        ]
+    }
+
+    /// **The canon claim, asserted exhaustively rather than reasoned about.**
+    ///
+    /// Every command duration from 1 ms to the bound, from four different
+    /// openings, integrated both ways: the sub-stepping loop and the
+    /// single-step integration it replaced must produce the identical bits.
+    /// This is *why* `canon_frozen.rs` stays green and why the four-target
+    /// determinism digest is unchanged — the loop runs exactly once at every
+    /// rate this project can be played at, and one pass of it is the old code.
+    ///
+    /// It also fails loudly if the bound is ever lowered without the
+    /// consequences being faced: drop `PMOVE_SUBSTEP_MAX_MS` below 8 and this
+    /// goes red for the rate the game ships at.
+    #[test]
+    fn every_duration_at_or_below_the_bound_integrates_bit_for_bit_as_before() {
+        let profile = PhysicsProfile::cpm();
+        let ground = FlatGround::at(s(0.0));
+        for (name, start, buttons) in openings() {
+            for ms in 1..=PMOVE_SUBSTEP_MAX_MS {
+                let cmd = busy(ms, buttons);
+                assert_eq!(
+                    step(&start, &cmd, &ground, &profile).checksum(),
+                    single_step(&start, &cmd, &ground, &profile).checksum(),
+                    "{name}: a {ms} ms command changed under sub-stepping",
+                );
+            }
+        }
+    }
+
+    /// And past the bound it genuinely differs — otherwise the test above
+    /// would be passing because the loop does nothing.
+    #[test]
+    fn past_the_bound_the_two_integrations_part_company() {
+        let profile = PhysicsProfile::cpm();
+        let ground = FlatGround::at(s(0.0));
+        let (name, start, buttons) = openings()[0];
+        for ms in [PMOVE_SUBSTEP_MAX_MS + 1, 100, 200, 500, 1000] {
+            let cmd = busy(ms, buttons);
+            assert_ne!(
+                step(&start, &cmd, &ground, &profile).checksum(),
+                single_step(&start, &cmd, &ground, &profile).checksum(),
+                "{name}: a {ms} ms command integrated identically either way",
+            );
+        }
+    }
+
+    /// **Where the delta lives**, measured rather than assumed — the thing the
+    /// movement lab needs before it re-takes its numbers.
+    ///
+    /// Sub-stepping does not perturb the movement vocabulary evenly. In the
+    /// air there is almost nothing for it to change, for two reasons:
+    ///
+    /// - **Gravity is integrated at the average of the start and end vertical
+    ///   speeds** (`slide_move`), and the trapezoid rule is *exact* for
+    ///   constant acceleration — splitting the interval changes nothing that
+    ///   is not float rounding.
+    /// - **`PM_Accelerate` is either linear in `dt` or saturated.** Below the
+    ///   clamp it adds `accel · dt · wishspeed`, which sums the same over
+    ///   sub-steps; at the clamp it adds `wishspeed − dot(v, wishdir)`, which
+    ///   the first sub-step consumes and the rest find already spent.
+    ///
+    /// On the ground there is: `PM_Friction` decays velocity *multiplicatively*
+    /// per step, so eight small steps and one big one are different numbers,
+    /// not the same number computed differently.
+    ///
+    /// The caveat this fixture deliberately holds still: the view is diagonal,
+    /// which is what switches CPM's air control off. Air control renormalises a
+    /// vector per step and is the one airborne rule that is genuinely
+    /// step-size dependent, so an air-control-heavy route will show a larger
+    /// airborne delta than this measures.
+    #[test]
+    fn the_delta_is_on_the_ground_and_barely_in_the_air() {
+        let profile = PhysicsProfile::cpm();
+        let ground = FlatGround::at(s(0.0));
+        const MS: u16 = 200;
+
+        let gap = |start: &SimState, cmd: &UserCmd| {
+            let chopped = step(start, cmd, &ground, &profile);
+            let whole = single_step(start, cmd, &ground, &profile);
+            (chopped.player.velocity - whole.player.velocity).length()
+        };
+
+        // Falling at 400 ups with the keys down: the two integrations are the
+        // same numbers to within float rounding.
+        let mut falling = SimState::spawned_at(vec3(s(0.0), s(0.0), s(900.0)), s(0.0));
+        falling.player.velocity = vec3(s(400.0), s(0.0), s(0.0));
+        let air = gap(&falling, &busy(MS, Buttons::NONE));
+        assert!(
+            air < s(0.01),
+            "falling at speed, the two integrations differ by {air} ups — \
+             airborne motion was supposed to be step-size invariant bar rounding",
+        );
+
+        // Coasting at 800 ups on the floor with no keys, where friction is the
+        // only thing acting. One 200 ms step takes `800 · 6 · 0.2 = 960` ups
+        // off a player who only has 800, and stops them dead in a single
+        // command; four sub-steps decay them and leave them still running.
+        let mut coasting = sprinting(800.0);
+        coasting.player.origin = vec3(s(0.0), s(0.0), s(24.125));
+        let floor = gap(&coasting, &cmd(MS));
+        assert!(
+            floor > s(100.0),
+            "coasting on flat ground, the two integrations differ by only {floor} ups — \
+             ground friction was supposed to be where the whole delta lives",
+        );
+    }
+
+    #[test]
+    fn the_split_is_at_the_bound_and_the_remainder_goes_last() {
+        // At the bound: still one step. If this were split the numbers above
+        // would agree for the wrong reason.
+        assert_ne!(
+            digest_ignoring_tick(&over(&[66])),
+            digest_ignoring_tick(&over(&[33, 33])),
+            "a command at the bound was split",
+        );
+
+        // id takes full sub-steps first and leaves the short one at the end
+        // (`msec = finalTime - commandTime`, capped). The order matters —
+        // friction and acceleration are not linear in the step size — so it
+        // is asserted rather than assumed.
+        assert_ne!(
+            digest_ignoring_tick(&over(&[100])),
+            digest_ignoring_tick(&over(&[34, 66])),
+            "the remainder was integrated first",
+        );
+        assert_ne!(
+            digest_ignoring_tick(&over(&[100])),
+            digest_ignoring_tick(&over(&[50, 50])),
+            "the split was even rather than bounded",
+        );
+    }
+
+    #[test]
+    fn a_chopped_command_still_sums_to_exact_integer_time() {
+        // Ten commands of a second each, none of which is a whole number of
+        // sub-steps. Integers do not drift, so this is exact — the same
+        // guarantee `time_is_the_exact_sum_of_command_durations` makes for
+        // short commands, made again on the far side of the loop.
+        let end = over(&[1000; 10]);
+        assert_eq!(end.tick, 10);
+        assert_eq!(end.time_ms, 10_000);
+    }
+
+    /// **The behavioural headline.** A long command used to step over a jump
+    /// window; it no longer can.
+    ///
+    /// `PM_DropTimers` runs inside `PmoveSingle`, so under a single step the
+    /// whole command's duration came off the double-jump window *before*
+    /// `check_jump` ever looked at it. A command longer than the window
+    /// therefore always found it shut, however early in the command the player
+    /// pressed jump. Sub-stepping reads the countdown between sub-steps, so a
+    /// window that outlives the first sub-step is still open when that
+    /// sub-step jumps.
+    #[test]
+    fn a_long_command_no_longer_steps_over_the_double_jump_window() {
+        let profile = PhysicsProfile::cpm();
+        let ground = FlatGround::at(s(0.0));
+
+        const WINDOW_MS: u16 = 100;
+        const COMMAND_MS: u16 = 200;
+        // Both premises are known at compile time, so they are checked there:
+        // the window must outlive the first sub-step, and must not outlive the
+        // whole command.
+        const _: () = assert!(
+            WINDOW_MS > PMOVE_SUBSTEP_MAX_MS,
+            "the first sub-step would close the window on its own",
+        );
+        const _: () = assert!(
+            WINDOW_MS < COMMAND_MS,
+            "a single step would not have closed it before `check_jump`",
+        );
+
+        let mut armed = on_ground();
+        armed.player.timers.double_jump_ms = WINDOW_MS;
+        let shut = on_ground(); // the same player with the window already gone
+
+        let jump = UserCmd {
+            buttons: Buttons::JUMP,
+            ..cmd(COMMAND_MS)
+        };
+        let boosted = step(&armed, &jump, &ground, &profile);
+        let plain = step(&shut, &jump, &ground, &profile);
+
+        // Both jumped in the first sub-step and have fallen for the same time
+        // since, so every gravity subtraction cancels and the whole remaining
+        // difference between them is the boost.
+        let gained = boosted.player.velocity.z - plain.player.velocity.z;
+        assert!(
+            (gained - profile.double_jump_boost).abs() < s(0.01),
+            "the boosted jump gained {gained}, expected {}",
+            profile.double_jump_boost,
+        );
+        assert_eq!(
+            boosted.player.timers.double_jump_ms, 0,
+            "a window buys exactly one boosted jump and is spent either way",
+        );
+    }
+
+    /// The property id's `pmove->cmd.upmove = 20` protects, held here by
+    /// structure instead. See [`Pmove::run`]'s documentation.
+    ///
+    /// A command long enough to contain a whole jump arc must still contain
+    /// exactly one jump. If a sub-step ever read the held input as released,
+    /// the player would re-launch off the landing inside the same command —
+    /// a free double jump nobody pressed for.
+    #[test]
+    fn a_held_jump_is_one_jump_however_long_the_command() {
+        let profile = PhysicsProfile::vq3();
+        let ground = FlatGround::at(s(0.0));
+
+        // 270 ups against 800 units/s² is a 675 ms round trip, so 800 ms is a
+        // command with a full jump *and* its landing inside it.
+        const COMMAND_MS: u16 = 800;
+        let jump = UserCmd {
+            buttons: Buttons::JUMP,
+            ..cmd(COMMAND_MS)
+        };
+        let end = step(&on_ground(), &jump, &ground, &profile);
+
+        assert!(
+            end.player.ground.is_grounded(),
+            "the jump and its landing should both fit inside this command",
+        );
+        assert!(
+            end.player.jump_held,
+            "the input never went up, so the press is still spent",
+        );
+        // The one number that says *when* the jump was: `since_jumped_ms` is
+        // zeroed by `check_jump` and then counts up per sub-step. One jump, in
+        // the first sub-step, and no second one on the landing.
+        assert_eq!(
+            end.player.timers.since_jumped_ms,
+            COMMAND_MS - PMOVE_SUBSTEP_MAX_MS,
+            "the player jumped more than once inside one command",
+        );
+    }
+
+    /// The other edge-triggered technique, for the same reason.
+    ///
+    /// A slide armed once per *sub-step* would be a slide that never ends
+    /// while crouch is held on a long command — the exact "friction toggle"
+    /// failure mode `check_slide` is written to avoid.
+    #[test]
+    fn a_crouch_press_arms_one_slide_per_command_however_long() {
+        let p = PhysicsProfile::experimental();
+        let ground = FlatGround::at(s(0.0));
+
+        // 200 ms is 66 + 66 + 66 + 2. The first sub-step finds the edge and
+        // arms the full duration; the remaining 134 ms count *down* off it.
+        const COMMAND_MS: u16 = 200;
+        let end = step(&sprinting(500.0), &crouch(COMMAND_MS), &ground, &p);
+        assert_eq!(
+            end.player.timers.slide_ms,
+            p.slide_duration_ms - (COMMAND_MS - PMOVE_SUBSTEP_MAX_MS),
+            "a slide was re-armed inside one command",
+        );
+        assert!(end.player.crouched);
     }
 }

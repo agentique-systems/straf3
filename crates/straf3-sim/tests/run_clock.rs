@@ -555,6 +555,108 @@ fn a_command_stream_between_two_lines_is_a_time() {
     );
 }
 
+/// **Sub-stepping makes the clock finer, exactly as ARCHITECTURE C4 predicts.**
+///
+/// C4 says the accumulator is consumed at the end of each `Pmove::run`, so a
+/// start or finish is stamped at the *sub-step* boundary it was crossed on —
+/// still an exact integer sum of durations, still no interpolation, but no
+/// longer rounded out to the whole command.
+///
+/// The case that shows it is a run that begins and ends inside one command. A
+/// single step would OR both volumes into one `TriggerSet`, stamp both at the
+/// command's end and report a time of **zero** — a finish line crossed by a
+/// player who, by the clock, never started. Sub-stepped, the two crossings
+/// land on different boundaries and the time is a time.
+///
+/// # Why the player is airborne and fast
+///
+/// So that the horizontal speed is a constant and the geometry below is
+/// arithmetic rather than a guess: air friction only bites below 1 ups, and at
+/// 800 ups `PM_Accelerate`'s clamp grants nothing towards a 320 ups wish
+/// speed. 800 ups is 52.8 units per 66 ms sub-step. The volumes span z
+/// 0..512, so the fall does not enter into it.
+#[test]
+fn a_run_that_starts_and_finishes_inside_one_command_still_has_a_time() {
+    let profile = PhysicsProfile::cpm();
+    let world = TriggerBoxes::floor()
+        .trigger(TriggerSet::START, [-2.0, -64.0, 0.0], [2.0, 64.0, 512.0])
+        .trigger(
+            TriggerSet::FINISH,
+            [208.0, -64.0, 0.0],
+            [212.0, 64.0, 512.0],
+        );
+
+    /// Long enough to contain the whole run: seven sub-steps, 66×6 + 4.
+    const LONG_MS: u16 = 400;
+
+    let airborne_at_800 = || {
+        let mut st = SimState::spawned_at(vec3(s(-100.0), s(0.0), s(100.0)), s(0.0));
+        st.player.velocity = vec3(s(800.0), s(0.0), s(0.0));
+        st
+    };
+
+    // The whole route in one command.
+    let mut long = airborne_at_800();
+    let touched = step_in_place(
+        &mut long,
+        &UserCmd {
+            forward_move: 127,
+            ..UserCmd::still(LONG_MS)
+        },
+        &world,
+        &profile,
+    );
+    assert!(
+        touched.contains(TriggerSet::START) && touched.contains(TriggerSet::FINISH),
+        "the premise: one command that crosses both lines",
+    );
+
+    let RunState::Finished {
+        started_at_ms,
+        finished_at_ms,
+    } = long.run
+    else {
+        panic!("the run never finished: {:?}", long.run);
+    };
+    assert!(
+        finished_at_ms > started_at_ms,
+        "start and finish were stamped at the same instant: the run took \
+         {finished_at_ms} − {started_at_ms} = 0 ms, which is the single-step answer",
+    );
+    let bound = u32::from(straf3_sim::PMOVE_SUBSTEP_MAX_MS);
+    for stamp in [started_at_ms, finished_at_ms] {
+        assert_eq!(
+            stamp % bound,
+            0,
+            "a stamp landed off a sub-step boundary, so something interpolated",
+        );
+        assert!(stamp <= u32::from(LONG_MS));
+    }
+    let long_elapsed = finished_at_ms - started_at_ms;
+
+    // The same route at the rate the game is actually played at. This is the
+    // honest answer the long command's time is being measured against: 50
+    // commands of 8 ms cover the same ground and stamp on 8 ms boundaries.
+    let mut short = airborne_at_800();
+    let count = usize::from(LONG_MS / MS);
+    drive(&mut short, &world, &profile, &forward(), count);
+    let RunState::Finished {
+        started_at_ms: short_start,
+        finished_at_ms: short_finish,
+    } = short.run
+    else {
+        panic!("the 125 Hz run never finished: {:?}", short.run);
+    };
+    let short_elapsed = short_finish - short_start;
+
+    assert!(
+        long_elapsed.abs_diff(short_elapsed) <= bound,
+        "one 400 ms command timed the run at {long_elapsed} ms where fifty 8 ms \
+         commands over the same ground timed it at {short_elapsed} ms; the two \
+         should agree to within one sub-step",
+    );
+}
+
 /// The time depends on the command stream and on nothing else.
 ///
 /// The same commands replayed produce the same milliseconds; the same *route*
