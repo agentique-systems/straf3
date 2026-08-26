@@ -85,6 +85,60 @@ else, so no part of the rest of your screen travels with it: no browser tabs, no
 taskbar, no whatever else you had open. Anything you send may end up in the
 repository's history, and history is hard to un-publish.
 
+### If you are willing: the one run only you can produce
+
+The repository wants a single piece of evidence that the competitive loop
+works — a run under the canonical profile, saved as a personal best, then raced
+against its own ghost. **It has to be played by a person**, and that is not a
+preference. A recorded run carries its own profile, so replaying the course
+fixture cannot produce a canonical time no matter what flags it is given; the
+command line now refuses that combination rather than quietly producing a run
+labelled with a profile it was not made under. So this is the one item in the
+wave nobody else can do.
+
+It is two sessions and a screenshot. From the repository root, `<canon>` being
+the canonical profile named in `--help`:
+
+```sh
+# 1. Set the record. Play until the run finishes — a run that does not
+#    cross the finish line saves nothing.
+./target/x86_64-pc-windows-gnu/release/straf3.exe --profile <canon> \
+    --record playtest-canon.rec
+
+# 2. Race it. Same profile, same map.
+./target/x86_64-pc-windows-gnu/release/straf3.exe --profile <canon>
+
+# 3. While session 2 is up, from another shell:
+./target/x86_64-pc-windows-gnu/release/straf3-capture.exe \
+    --out canon-ghost.png --settle-ms 2000
+```
+
+**Watch the console, because this is the part that can look right and be
+wrong.** These lines appear by default — the log level is already `info`, so
+there is nothing to switch on:
+
+- Session 1, before you set it: `no personal best saved at runs/coil.<canon>.s3d
+  yet — this session sets it`
+- Session 2, when it works: `personal best 0:0X.XXX — racing it as a ghost over
+  N re-simulated states`
+
+**And one line whose absence is the thing to check:**
+
+```
+the personal best at runs/coil.<canon>.s3d cannot be raced here: ...
+```
+
+That is a **warning, not an error**, and the session carries on perfectly
+normally — with no ghost. It means the saved run was made under different
+physics and can no longer be replayed against this build. Nothing on screen
+looks broken. So "I played it and it seemed fine" does not tell us the loop
+worked: the line above it, naming a ghost and a number of re-simulated states,
+is what does. If you see the warning, say so and send the `.rec` anyway — that
+is a useful result, not a failed session.
+
+Send the two `.rec` files and the screenshot. We commit them; you do not need
+to.
+
 ---
 
 ## §2 — Recording, so the run comes back as data

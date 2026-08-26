@@ -59,6 +59,68 @@
 //! pattern. Adding a field to [`PhysicsProfile`] therefore fails to compile
 //! here, which is the only way to make "every constant is covered" a fact
 //! rather than an intention.
+//!
+//! # What that costs: this digest identifies the representation, not the behaviour
+//!
+//! The exhaustive fold has a consequence that is easy to miss and expensive
+//! when it bites. **Adding a field moves every profile's digest, including
+//! profiles whose movement did not change by a single unit** — even when the
+//! new field is added at a disabling value and no existing constant is
+//! touched. The digest tracks the shape of the struct, not what the struct
+//! makes the player do.
+//!
+//! This is measured rather than hypothetical, and the instance is worth
+//! naming because it cost this repository a committed artefact. Commit
+//! `a604820` added eight fields to [`PhysicsProfile`] — `slide_entry_speed`,
+//! `slide_friction`, `slide_duration_ms`, `dash_speed`, `dash_window_ms`,
+//! `wall_jump_velocity`, `wall_contact_window_ms`, `wall_normal_max` — for
+//! candidate mechanics that were gated off. It changed no existing constant:
+//! the only lines that commit removed from `profile.rs` were two lines of a
+//! doc comment. Nothing about how `vq3` or `cpm` move was different
+//! afterwards. Every `vq3` and `cpm` recording in existence stopped loading
+//! anyway, because the struct got wider.
+//!
+//! A personal best committed as `runs/coil.cpm.s3d` in `2c17bcb` was
+//! invalidated by `a604820` **the same day**, and nobody found out for nine
+//! days — not through inattention, but because nothing in the tree loaded a
+//! committed artefact, so there was no moment at which the breakage could
+//! announce itself.
+//!
+//! # Why it is still written this way
+//!
+//! Because the error is in the safe direction and the alternative's error is
+//! not. This digest over-invalidates: it refuses runs that would in fact have
+//! replayed identically. A digest that tracked *behaviour* would have to know
+//! which fields the movement code branches on, and the day that list is wrong
+//! is the day a real divergence replays silently and a leaderboard reports a
+//! time nobody achieved. Refusing a good run is a nuisance; accepting a bad
+//! one is the thing this module exists to prevent.
+//!
+//! # The better answer, which this tree already uses elsewhere
+//!
+//! Separation. `crates/straf3-collision/tests/canon_frozen.rs` hit exactly
+//! this problem from the other side and wrote the analysis out: folding every
+//! field of `PlayerState` into `SimState::checksum()` means that adding slide
+//! and dash timers changes the checksum "for `vq3` and `cpm` too, because the
+//! struct they fold grew a field. Canon movement would not have moved a
+//! millimetre and the literal gate would be red." Its answer was a *separate*
+//! movement digest, narrower than the state checksum and answering the
+//! question actually being asked.
+//!
+//! [`PhysicsId`] has no such separation, and giving it one — a behavioural
+//! digest for "would this replay the same?" alongside the exhaustive one for
+//! "is this the same build?" — is the known shape of the fix. It is
+//! deliberately **not** being done here. Re-cutting replay identity is a
+//! change competitive integrity rests on, and it is not a change to make
+//! alongside a movement freeze. This section exists so that whoever does it
+//! next starts from the analysis rather than rediscovering it from a broken
+//! artefact.
+//!
+//! Until then, the mitigation is to make the breakage *loud* rather than to
+//! make it rarer: a committed artefact is loaded by the ordinary test suite,
+//! so a widened struct fails a test at the moment it is incurred instead of
+//! being discovered nine days later by accident. When that test fires, read
+//! this section first — **the physics may not have changed at all.**
 
 use straf3_sim::PhysicsProfile;
 use straf3_sim::num::{Scalar, Vec3, to_bits};
