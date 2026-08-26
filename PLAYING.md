@@ -587,18 +587,33 @@ retire it.
   session, for the same reason and with the same caveat. This was previously
   listed here as out of scope; that is no longer true.
 
-- **No pacing or latency numbers from the real GPU.** `--pacing-log` now writes
-  a per-frame CSV, but no frame-time distribution, present-mode comparison or
-  input-to-simulation latency accounting has been published from it. A steady
-  165 fps was observed in a *debug* build, which is consistent with vsync on a
-  165 Hz panel and confirms nothing. *Retired by:* measured frame-time mean,
-  p50, p99 and max from the Windows build, vsynced and uncapped, with the panel
-  refresh stated — being measured in this wave. The vision's 240 Hz-class budget
-  stays **unvalidated**: there is no 240 Hz display here.
+- **Pacing measurements now exist. The 240 Hz claim still does not.** This entry
+  used to say no frame-time numbers had ever been taken from the real GPU. That
+  is no longer true: `probes/pacing/` holds sixteen CSVs from the RTX 3060 Ti at
+  1920×1080/165 Hz, across three workloads (static, `--play`, frame-latency) in
+  both present modes, with two contended runs quarantined in
+  `results/discarded/` rather than deleted. Each file's own header records the
+  present mode the surface **granted** — not merely the one requested, which is
+  all the client used to record, and which meant every uncapped number ever
+  taken from it asserted a mode nobody had confirmed.
 
-- **The experimental profile is experimental in name only.** The flag, the
-  separate personal-best namespace and the startup warning have landed;
-  `PhysicsProfile::experimental()` has not. *Retired by:* the startup line
-  quoted above ceasing to appear, which it does by itself.
+  What is *still* unproven here is narrower and worth keeping: **the vision's
+  240 Hz-class budget remains unvalidated, because there is no 240 Hz display on
+  this machine.** No number in `probes/pacing/` speaks to it, and none can.
+  *Retired by:* the same measurements taken on a 240 Hz panel.
+
+  One caveat that belongs with the numbers rather than beside them: the
+  host-contention verdict recorded in each run counts **build processes by
+  name**. A saturating process that is neither `cargo` nor `rustc` — a runaway
+  `rustfmt`, for instance, which happened during this wave — is not counted. The
+  load average recorded alongside it is the complete instrument; the named check
+  is not. Read the two together.
+
+- **Regenerating a committed run artefact costs a GPU session.** A `.s3d` can
+  also be produced headlessly by the test harness, and that is the cheapest way
+  to make a staleness check go green — but doing so silently converts *evidence
+  of a run on real hardware* into *a fixture made by a test harness*, while this
+  document goes on describing it as the former. If you regenerate headlessly,
+  change the claim in the same commit.
 
 - **No sound, weapons, menus or live multiplayer.** Out of scope for this wave.
