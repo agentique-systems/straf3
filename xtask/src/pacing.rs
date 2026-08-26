@@ -593,20 +593,76 @@ pub const DEFAULT_TICK_MS: u16 = 8;
 
 /// `FixedStep::DEFAULT_MAX_TICKS_PER_FRAME`, so a stalled frame is modelled the
 /// way the client actually behaves rather than as an unbounded catch-up.
+///
+/// Hand-copied from `straf3-game`, like [`straf3_pacing_magic`], and pinned by
+/// `the_accumulator_replay_still_describes_the_client`.
 const MAX_TICKS_PER_FRAME: u64 = 250;
 
 /// How finely arrival times are sampled when building the wait distribution.
 /// 50 µs is far below any interval being measured and costs a few hundred
 /// thousand comparisons over a twelve-second run.
+///
+/// **This constant is the one modelled element of the entire input-to-
+/// simulation accounting.** Sweeping arrivals uniformly in time is a prior
+/// about when a player presses a key; it is not a measurement of one, and no
+/// input event is timestamped anywhere in straf3. Everything else below is
+/// either an interval this run recorded or arithmetic the client itself
+/// performs. [`latency_report`] therefore prints this number rather than
+/// leaving it in a source comment, because a reader who cannot see the
+/// assumption cannot weigh the result.
 const ARRIVAL_STEP_NS: u64 = 50_000;
 
-/// How long an input waits between reaching `InputState` and being carried by a
-/// simulated command.
+/// Four numbers about one wait.
+///
+/// A component of the chain is published as a distribution rather than as an
+/// average, so each one carries its own tail. The mean and the p99 of an input
+/// wait answer different questions and the second is the one a player notices.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Spread {
+    pub mean_ns: u64,
+    pub p50_ns: u64,
+    pub p99_ns: u64,
+    pub max_ns: u64,
+}
+
+impl Spread {
+    /// Reduce `samples`, sorting them in place.
+    fn of(samples: &mut [u64]) -> Self {
+        if samples.is_empty() {
+            return Self::default();
+        }
+        samples.sort_unstable();
+        // `u128` because a stalled run's samples are hundreds of milliseconds
+        // each and there are a few hundred thousand of them.
+        let total: u128 = samples.iter().copied().map(u128::from).sum();
+        Self {
+            mean_ns: u64::try_from(total / samples.len() as u128).unwrap_or(u64::MAX),
+            p50_ns: percentile(samples, 50),
+            p99_ns: percentile(samples, 99),
+            max_ns: samples[samples.len() - 1],
+        }
+    }
+
+    /// `mean … p50 … p99 … max …`, in milliseconds.
+    fn row(self) -> String {
+        format!(
+            "mean {}  p50 {}  p99 {}  max {}",
+            ms(self.mean_ns),
+            ms(self.p50_ns),
+            ms(self.p99_ns),
+            ms(self.max_ns)
+        )
+    }
+}
+
+/// How long an input waits between the raw event becoming available to the
+/// process and the simulated command that carries it running.
 ///
 /// This is a *derivation from measured frame times*, not a model with invented
 /// numbers in it: the client's own integer accumulator is replayed over the
 /// frame intervals that were actually recorded, and the answer is the wait
-/// until the next frame that ran a tick.
+/// until the next frame that ran a tick. The single assumption is
+/// [`ARRIVAL_STEP_NS`]'s uniform arrival prior.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LatencyStats {
     pub tick_ms: u16,
@@ -618,16 +674,30 @@ pub struct LatencyStats {
     pub ticks: u64,
     /// Arrival times sampled.
     pub arrivals: usize,
-    pub mean_ns: u64,
-    pub p50_ns: u64,
-    pub p99_ns: u64,
-    pub max_ns: u64,
+    /// The prior's sampling interval, carried in the data so the report can
+    /// print the assumption instead of burying it.
+    pub arrival_step_ns: u64,
+    /// **Stage B.** From the event being available to the process, to the frame
+    /// boundary at which winit dispatches it into `InputState`.
+    pub queue: Spread,
+    /// **Stage C.** From that boundary, to the first boundary that runs a
+    /// command. Zero whenever the dispatching frame runs one itself, which at
+    /// 165 fps and 8 ms commands is most of them.
+    pub carry: Spread,
+    /// **B + C, arrival by arrival** — not the sum of the two rows above.
+    ///
+    /// Because it is accumulated per arrival, its p99 is the p99 of the sum
+    /// rather than the sum of two p99s, and no independence has to be assumed
+    /// between the two stages (they are strongly anti-correlated: the longer an
+    /// input waits in the queue, the closer it lands to a boundary that runs a
+    /// command).
+    pub total: Spread,
 }
 
 /// Replay the client's fixed-step accumulator over measured frame intervals and
 /// report how long an input waits for the command that carries it.
 ///
-/// # What is modelled, exactly
+/// # The loop this replays
 ///
 /// `straf3-game` reads the clock once per frame, converts it to whole
 /// milliseconds, and spends whole ticks out of a carried remainder
@@ -636,21 +706,40 @@ pub struct LatencyStats {
 /// carried by the first command of the next frame that runs any — and a frame
 /// that runs none does not carry it at all.
 ///
-/// So the wait is: from the input landing in `InputState`, to the next frame
-/// boundary at which the accumulator had a whole tick to spend.
-///
 /// The truncation matters and is reproduced: `Clock` truncates the *absolute*
 /// reading and subtracts, so a 6.0606 ms frame alternates between 6 ms and
 /// 7 ms of simulated credit rather than losing 0.0606 ms every frame.
 ///
-/// # What is NOT modelled
+/// # Why stages B and C come out of one sweep
 ///
-/// Everything before `InputState`: the device's own polling interval, the
-/// driver, and the wait in the thread's message queue until winit dispatches.
-/// The first two are not observable from inside the process at all. The third
-/// is bounded by one frame interval, since the loop pumps events once per
-/// frame — so the measured frame-time distribution is its bound, and the two
-/// have to be added to get an end-to-end figure.
+/// An earlier version of this function reported a single number and
+/// [`latency_report`] presented it as stage C alone — the wait *after*
+/// `InputState` — then added a whole frame interval on top of it for the queue
+/// wait. That double-counted the queue, and the two rows it added were never
+/// independent.
+///
+/// The order of events in one iteration of the loop is what makes it one wait
+/// rather than two. `about_to_wait` requests a redraw, so the next iteration
+/// has both queued input and a pending paint; Win32 `GetMessage` returns input
+/// messages ahead of `WM_PAINT`, so winit dispatches every pending input event
+/// into `InputState` and *then* delivers `RedrawRequested`, which is where the
+/// clock is read and the commands run. The boundary that dispatches an input is
+/// therefore the first frame boundary after that input arrived, and the first
+/// command-running boundary at or after the dispatch is the same boundary you
+/// reach by counting from the arrival itself.
+///
+/// So: sweep arrivals, and for each one record where it was dispatched
+/// (stage B), how long from there to the command (stage C), and the whole wait.
+/// The three are consistent by construction — `queue + carry == total` for
+/// every sampled arrival — which is what makes the total's p99 the p99 of the
+/// sum rather than an upper bound on it.
+///
+/// # What is NOT derived here
+///
+/// Everything before the event is available to the process: the device's own
+/// polling interval and the driver. Neither is observable from inside the
+/// process, and neither is recorded anywhere in this repository. And everything
+/// after the simulation — see [`display_report`].
 #[must_use]
 pub fn input_to_sim(deltas_ns: &[u64], tick_ms: u16, warmup: usize) -> Option<LatencyStats> {
     if tick_ms == 0 {
@@ -666,7 +755,10 @@ pub fn input_to_sim(deltas_ns: &[u64], tick_ms: u16, warmup: usize) -> Option<La
     let mut previous_ms = 0u64;
     let mut carried = 0u64;
     let mut ticks_total = 0u64;
-    let mut tick_boundaries: Vec<u64> = Vec::with_capacity(kept.len());
+    let mut boundaries: Vec<u64> = Vec::with_capacity(kept.len());
+    let mut ran_command: Vec<bool> = Vec::with_capacity(kept.len());
+    let mut tick_frames = 0usize;
+    let mut last_command_boundary: Option<u64> = None;
 
     for delta in kept {
         boundary_ns += delta;
@@ -680,50 +772,78 @@ pub fn input_to_sim(deltas_ns: &[u64], tick_ms: u16, warmup: usize) -> Option<La
         let wanted = available / u64::from(tick_ms);
         carried = available % u64::from(tick_ms);
         let ticks = wanted.min(MAX_TICKS_PER_FRAME);
+        ticks_total += ticks;
+        boundaries.push(boundary_ns);
+        ran_command.push(ticks > 0);
         if ticks > 0 {
-            ticks_total += ticks;
-            tick_boundaries.push(boundary_ns);
+            tick_frames += 1;
+            last_command_boundary = Some(boundary_ns);
         }
     }
 
-    if tick_boundaries.is_empty() {
-        return None;
+    // A run in which no frame ever accumulated a whole command has no wait to
+    // report, which is a different answer from a wait of zero.
+    let last = last_command_boundary?;
+
+    // For each boundary, the first boundary at or after it that ran a command.
+    // One backwards pass, so the sweep below stays linear.
+    let mut command_after: Vec<u64> = vec![0; boundaries.len()];
+    let mut seen = u64::MAX;
+    for i in (0..boundaries.len()).rev() {
+        if ran_command[i] {
+            seen = boundaries[i];
+        }
+        command_after[i] = seen;
     }
 
-    // An input arriving at `a` waits for the first tick-executing boundary at
-    // or after `a`. Arrivals are swept uniformly, which is the right prior for
-    // "a player pressed a key at some moment".
-    let last = *tick_boundaries.last()?;
-    let mut waits: Vec<u64> = Vec::with_capacity((last / ARRIVAL_STEP_NS) as usize + 1);
+    // Arrivals are swept uniformly — the prior for "a player pressed a key at
+    // some moment", and the one assumption in here (see `ARRIVAL_STEP_NS`).
+    let capacity = (last / ARRIVAL_STEP_NS) as usize + 1;
+    let mut queue: Vec<u64> = Vec::with_capacity(capacity);
+    let mut carry: Vec<u64> = Vec::with_capacity(capacity);
+    let mut total: Vec<u64> = Vec::with_capacity(capacity);
     let mut next = 0usize;
     let mut arrival = 0u64;
     while arrival <= last {
-        while tick_boundaries[next] < arrival {
+        while boundaries[next] < arrival {
             next += 1;
         }
-        waits.push(tick_boundaries[next] - arrival);
+        // `arrival <= last` guarantees a command-running boundary at or after
+        // `boundaries[next]`, so `command_after` is a real time and not the
+        // sentinel.
+        let dispatch = boundaries[next];
+        let command = command_after[next];
+        queue.push(dispatch - arrival);
+        carry.push(command - dispatch);
+        total.push(command - arrival);
         arrival += ARRIVAL_STEP_NS;
     }
-
-    let mut sorted = waits;
-    sorted.sort_unstable();
-    let n = sorted.len() as u64;
-    let total: u64 = sorted.iter().sum();
 
     Some(LatencyStats {
         tick_ms,
         frames: kept.len(),
-        tick_frames: tick_boundaries.len(),
+        tick_frames,
         ticks: ticks_total,
-        arrivals: sorted.len(),
-        mean_ns: total / n,
-        p50_ns: percentile(&sorted, 50),
-        p99_ns: percentile(&sorted, 99),
-        max_ns: sorted[sorted.len() - 1],
+        arrivals: total.len(),
+        arrival_step_ns: ARRIVAL_STEP_NS,
+        queue: Spread::of(&mut queue),
+        carry: Spread::of(&mut carry),
+        total: Spread::of(&mut total),
     })
 }
 
-/// The latency accounting, written out with its stages and its limits.
+/// The latency accounting, written out with its stages, how each was obtained,
+/// and its limits.
+///
+/// Every row says how it was arrived at, in three words that are used
+/// consistently across this whole report and are not interchangeable:
+///
+/// - **MEASURED** — an interval this run actually recorded.
+/// - **DERIVED** — computed from those intervals by arithmetic the client
+///   itself performs, with no constant invented on the way.
+/// - **MODELLED** — an assumption. There is no measurement behind it anywhere
+///   in this repository, and it is somebody's judgement about typical hardware
+///   or typical players.
 #[must_use]
 pub fn latency_report(frame: &Stats, latency: &LatencyStats) -> String {
     let mut out = String::new();
@@ -735,41 +855,262 @@ pub fn latency_report(frame: &Stats, latency: &LatencyStats) -> String {
     );
     let _ = writeln!(
         out,
-        "    {} of {} frames ran a command ({} commands over the run)",
-        latency.tick_frames, latency.frames, latency.ticks
+        "    {} of {} frames ran a command ({} commands over the run), \
+         {} arrivals sampled",
+        latency.tick_frames, latency.frames, latency.ticks, latency.arrivals
     );
     let _ = writeln!(
         out,
-        "    stage A  device -> Windows raw input        NOT MEASURABLE in-process",
+        "    MEASURED = an interval this run recorded.  DERIVED = the client's own\n\
+         \x20   arithmetic over those intervals.  MODELLED = an assumption, with no\n\
+         \x20   measurement behind it anywhere in this repository.",
     );
     let _ = writeln!(
         out,
-        "    stage B  queued until winit dispatches      <= one frame: p50 {} ms, p99 {} ms, max {} ms",
-        ms(frame.p50_ns),
-        ms(frame.p99_ns),
+        "    A    device -> the event reaches this process   MODELLED  see below",
+    );
+    let _ = writeln!(
+        out,
+        "    B    available -> winit dispatches it           DERIVED   {}",
+        latency.queue.row(),
+    );
+    let _ = writeln!(
+        out,
+        "    C    dispatched -> the command runs             DERIVED   {}",
+        latency.carry.row(),
+    );
+    let _ = writeln!(
+        out,
+        "    B+C  available -> the command runs              DERIVED   {}",
+        latency.total.row(),
+    );
+    let _ = writeln!(
+        out,
+        "    B+C is accumulated arrival by arrival, so B + C = B+C holds for every\n\
+         \x20   sample and its p99 is the p99 of the sum — not the sum of two p99s.\n\
+         \x20   Do NOT add rows B and C: the two stages are strongly anti-correlated\n\
+         \x20   (the longer an input sits in the queue, the closer it lands to a\n\
+         \x20   boundary that runs a command), and adding them counts the queue twice.",
+    );
+    let _ = writeln!(
+        out,
+        "    METHOD (B, C, B+C): straf3_game::tick::plan_ticks replayed over the frame\n\
+         \x20   intervals THIS run measured, reproducing straf3_platform::Clock's\n\
+         \x20   truncation of the absolute reading and the {MAX_TICKS_PER_FRAME}-tick\n\
+         \x20   per-frame cap. Nothing in those three rows is a guess about hardware.",
+    );
+    let _ = writeln!(
+        out,
+        "    MODELLED WITHIN THEM: the arrival prior. Arrivals are swept uniformly in\n\
+         \x20   time, every {} ms, as the prior for \"a player pressed a key at some\n\
+         \x20   moment\". No input event is timestamped anywhere in straf3, so this\n\
+         \x20   prior — not a measurement — is what turns frame intervals into a\n\
+         \x20   latency distribution. A player whose keypresses correlate with what is\n\
+         \x20   on screen would not be uniform, and nothing here would notice.",
+        ms(latency.arrival_step_ns),
+    );
+    let _ = writeln!(
+        out,
+        "    STAGE A is not measured and is not measurable in-process: it is the USB\n\
+         \x20   polling interval a device's rate means (~1 ms at 1000 Hz, up to 8 ms at\n\
+         \x20   125 Hz) plus the driver's own path. This repository does not record\n\
+         \x20   which devices were attached, so even those figures describe a class of\n\
+         \x20   hardware rather than this machine. Measuring it needs an instrumented\n\
+         \x20   mouse or external capture hardware.",
+    );
+    // A consistency check a reader can apply without re-running anything: the
+    // queue wait is bounded by the frame it lands in, so its maximum cannot
+    // exceed the longest frame. If it does, the two halves of this report were
+    // computed from different data.
+    let _ = writeln!(
+        out,
+        "    cross-check: B max {} ms vs longest frame {} ms — B cannot exceed the\n\
+         \x20   frame it lands in, and both come from the same intervals.",
+        ms(latency.queue.max_ns),
         ms(frame.max_ns),
     );
     let _ = writeln!(
         out,
-        "    stage C  InputState -> the command runs     mean {} ms, p50 {} ms, p99 {} ms, max {} ms",
-        ms(latency.mean_ns),
-        ms(latency.p50_ns),
-        ms(latency.p99_ns),
-        ms(latency.max_ns),
+        "    THE FLOOR IS THE COMMAND PERIOD, not the frame rate. At {} ms commands an\n\
+         \x20   input waits about half a command on average however fast the frames\n\
+         \x20   are; a higher frame rate buys the tail, not the median.",
+        latency.tick_ms,
     );
+    out
+}
+
+// ── simulation to display ───────────────────────────────────────────────────
+
+/// The three facts about presentation that the other half of the chain needs,
+/// read from the run's own log header rather than transcribed by a reader.
+///
+/// They live here, next to the accounting that consumes them, rather than in
+/// [`Log`]'s main block, because that is where a reader looking for the
+/// provenance of a published display number will start.
+impl Log {
+    /// `desired_maximum_frame_latency` as the client configured it.
+    ///
+    /// The only lever in the whole input-to-photon chain that belongs to this
+    /// project rather than to the hardware, and the only **configured** number
+    /// in the simulation-to-display accounting.
+    #[must_use]
+    pub fn frame_latency(&self) -> Option<u32> {
+        self.header("frame_latency").and_then(|v| v.parse().ok())
+    }
+
+    /// The panel's refresh rate in millihertz, as the window's monitor reported
+    /// it.
+    ///
+    /// Measured, not stated: it comes from winit's monitor handle at the time
+    /// of the run. A log without this header was written before the client
+    /// recorded it, and the scanout accounting then has no basis at all — which
+    /// is reported as a gap rather than filled in with 165.
+    #[must_use]
+    pub fn refresh_mhz(&self) -> Option<u64> {
+        self.header("refresh_mhz").and_then(|v| v.parse().ok())
+    }
+}
+
+/// The simulation-to-display half of the chain, component by component.
+///
+/// # Why this is a much weaker document than the input half
+///
+/// The input half is derived end to end from intervals this run recorded. This
+/// half is not, and pretending otherwise would be the exact failure r17 exists
+/// to prevent. Of its four components, one is configured, one is arithmetic
+/// over a measured refresh rate, one is bounded but not measured, and one
+/// cannot be obtained on this machine at all. Each says which it is.
+///
+/// Nothing here is added into a single "input-to-photon" number, because a
+/// total whose largest term is unmeasurable is a number that would be quoted
+/// without its caveat within a week.
+#[must_use]
+pub fn display_report(log: &Log, frame: &Stats) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "  simulation-to-display:");
+
+    let mode = log.configured_mode();
+    let refresh_hz = log.refresh_mhz().map(|mhz| mhz as f64 / 1000.0);
+    let present_interval_ns = refresh_hz
+        .filter(|hz| *hz > 0.0)
+        .map(|hz| (1e9 / hz) as u64);
+
+    // D — the frame the command belongs to is submitted. Same frame, so it is
+    // bounded by that frame's interval, but nothing times it.
     let _ = writeln!(
         out,
-        "    B+C upper bound                            p99 {} ms, worst {} ms",
-        ms(frame.p99_ns + latency.p99_ns),
-        ms(frame.max_ns + latency.max_ns),
+        "    D  the command runs -> the frame is submitted   NOT MEASURED\n\
+         \x20      No timestamp exists between the last command of a frame and the\n\
+         \x20      present call; the pacing log records frame boundaries, not the work\n\
+         \x20      between them. It is bounded above by the frame it belongs to:\n\
+         \x20      p50 {} ms, p99 {} ms, max {} ms — a bound, not a value.",
+        ms(frame.p50_ns),
+        ms(frame.p99_ns),
+        ms(frame.max_ns),
     );
+
+    // E — the queue depth. Ours, configured, and reported by the client.
+    match log.frame_latency() {
+        Some(n) => {
+            let _ = writeln!(
+                out,
+                "    E  submitted -> the GPU presents it             CONFIGURED depth {n}\n\
+                 \x20      `desired_maximum_frame_latency={n}`, as this run configured it and\n\
+                 \x20      wrote into its own header. This is the one component of the chain\n\
+                 \x20      that is ours rather than the hardware's: it is how many frames the\n\
+                 \x20      CPU may queue ahead of the display.",
+            );
+            match (mode, present_interval_ns) {
+                (Some(m @ ("fifo" | "fifo_relaxed")), Some(interval)) => {
+                    let _ = writeln!(
+                        out,
+                        "\x20      In {m} on this panel, a queued frame waits a present interval\n\
+                         \x20      per frame ahead of it, so the depth costs up to {} ms of the\n\
+                         \x20      {} ms it takes to display one. DERIVED from the depth above and\n\
+                         \x20      the measured refresh below.",
+                        ms(interval.saturating_mul(u64::from(n))),
+                        ms(interval),
+                    );
+                }
+                (Some(m @ ("fifo" | "fifo_relaxed")), None) => {
+                    let _ = writeln!(
+                        out,
+                        "\x20      In {m} the queue is paced by the display, so the depth costs up\n\
+                         \x20      to {n} present intervals — but this log does not record the\n\
+                         \x20      refresh, so that is a count of intervals and not a duration.",
+                    );
+                }
+                (Some(m), _) => {
+                    let _ = writeln!(
+                        out,
+                        "\x20      In {m} the queue is not paced by the display, so the depth\n\
+                         \x20      bounds how far ahead the CPU may run rather than adding a fixed\n\
+                         \x20      wait. Its cost here is NOT DERIVED — it depends on where the\n\
+                         \x20      GPU's own work sits relative to the panel's scanout, which this\n\
+                         \x20      run does not observe.",
+                    );
+                }
+                (None, _) => {}
+            }
+        }
+        None => {
+            let _ = writeln!(
+                out,
+                "    E  submitted -> the GPU presents it             NOT RECORDED\n\
+                 \x20      This log carries no `frame_latency=` header, so the swapchain queue\n\
+                 \x20      depth this run used is unknown. It is not assumed to be the\n\
+                 \x20      renderer's default: a run whose depth is unknown cannot have this\n\
+                 \x20      component of its latency accounted for at all.",
+            );
+        }
+    }
+
+    // F — scanout, arithmetic over the measured refresh.
+    match (refresh_hz, present_interval_ns) {
+        (Some(hz), Some(interval)) => {
+            let _ = writeln!(
+                out,
+                "    F  presented -> the pixel is scanned out        DERIVED\n\
+                 \x20      The panel reported {hz:.3} Hz through winit's monitor handle for this\n\
+                 \x20      run — measured, not stated — so a whole frame takes {} ms to scan\n\
+                 \x20      out. A given pixel is lit between 0 and that, depending only on\n\
+                 \x20      where it sits on the screen: mean {} ms, worst {} ms. This is\n\
+                 \x20      arithmetic over a measured refresh and nothing else.",
+                ms(interval),
+                ms(interval / 2),
+                ms(interval),
+            );
+        }
+        _ => {
+            let _ = writeln!(
+                out,
+                "    F  presented -> the pixel is scanned out        NOT RECORDED\n\
+                 \x20      This log carries no `refresh_mhz=` header. The panel's refresh is a\n\
+                 \x20      property of the display, not of the loop, and no number in this\n\
+                 \x20      report can supply it — a scanout figure computed from an assumed\n\
+                 \x20      165 Hz would be a model wearing a measurement's clothes.",
+            );
+        }
+    }
+
+    // G — the panel. Nobody in this process can see it.
     let _ = writeln!(
         out,
-        "    (B and C are not independent, so adding their percentiles is an upper\n\
-         \x20    bound, not the p99 of the sum. Stage A is a hardware property — a\n\
-         \x20    1000 Hz mouse adds ~1 ms, a 125 Hz keyboard up to 8 ms — and\n\
-         \x20    input-to-PHOTON adds display scanout on top of all of it and cannot\n\
-         \x20    be measured here at all without external capture hardware.)"
+        "    G  scanned out -> the pixel has changed         NOT MEASURABLE HERE\n\
+         \x20      Panel pixel response and any panel-internal processing. No number is\n\
+         \x20      offered: this repository does not record the monitor's model, and\n\
+         \x20      even if it did, a spec-sheet response time is a vendor's claim about\n\
+         \x20      a transition, not this transition. Measuring it needs a high-speed\n\
+         \x20      camera or an LDAT-class instrument photographing the panel, which is\n\
+         \x20      external capture hardware nobody in this session has.",
+    );
+
+    let _ = writeln!(
+        out,
+        "    NO INPUT-TO-PHOTON TOTAL IS PRINTED. A + D + E + G are not measured on\n\
+         \x20   this machine, and a sum whose largest term is a guess would be quoted\n\
+         \x20   without its caveat within a week. What can be stated end to end is\n\
+         \x20   B+C above, plus F, plus the four gaps named by letter.",
     );
     out
 }
@@ -840,6 +1181,7 @@ pub fn run(argv: &[String]) -> Result<bool, String> {
                     if let Some(l) = input_to_sim(&log.deltas_ns, tick_ms, warmup) {
                         print!("{}", latency_report(&s, &l));
                     }
+                    print!("{}", display_report(&log, &s));
                     runs.push((
                         log.configured_mode()
                             .map(str::to_owned)
@@ -942,6 +1284,7 @@ pub fn run(argv: &[String]) -> Result<bool, String> {
                     if let Some(l) = input_to_sim(&log.deltas_ns, tick_ms, warmup) {
                         print!("{}", latency_report(&s, &l));
                     }
+                    print!("{}", display_report(&log, &s));
                     runs.push((log.configured_mode().unwrap_or(mode.as_str()).to_owned(), s));
                 }
                 None => {
@@ -1257,14 +1600,55 @@ frame,delta_ns
         let u = input_to_sim(&uncapped, 8, 0).unwrap();
 
         // Both means sit near half a command period.
-        assert!((3_500_000..5_000_000).contains(&v.mean_ns), "{v:?}");
-        assert!((3_500_000..4_500_000).contains(&u.mean_ns), "{u:?}");
-        assert!(v.mean_ns > u.mean_ns, "vsync cannot be the faster one");
-        assert!(v.mean_ns - u.mean_ns < 1_000_000, "{v:?} vs {u:?}");
+        assert!((3_500_000..5_000_000).contains(&v.total.mean_ns), "{v:?}");
+        assert!((3_500_000..4_500_000).contains(&u.total.mean_ns), "{u:?}");
+        assert!(
+            v.total.mean_ns > u.total.mean_ns,
+            "vsync cannot be the faster one"
+        );
+        assert!(
+            v.total.mean_ns - u.total.mean_ns < 1_000_000,
+            "{v:?} vs {u:?}"
+        );
 
         // The worst case does not: a vsynced frame that runs no command makes
         // the next one wait two frames.
-        assert!(v.max_ns > u.max_ns + 3_000_000, "{v:?} vs {u:?}");
+        assert!(v.total.max_ns > u.total.max_ns + 3_000_000, "{v:?} vs {u:?}");
+    }
+
+    #[test]
+    fn the_two_stages_are_one_wait_and_add_up_to_it() {
+        // The property that makes B+C publishable as a p99 rather than as an
+        // upper bound: it is accumulated per arrival, so the decomposition is
+        // exact at the sample level. The percentiles are NOT additive and this
+        // pins that too — the whole point of the earlier report's mistake was
+        // treating them as if they were.
+        let frames: Vec<u64> = (0..2000).map(|_| 6_060_606).collect();
+        let l = input_to_sim(&frames, 8, 0).unwrap();
+
+        // The queue wait cannot exceed the frame it lands in.
+        assert!(l.queue.max_ns <= 6_100_000, "{l:?}");
+        // The carry is zero for the median input, because most 6.06 ms frames
+        // at 8 ms commands do run one.
+        assert_eq!(l.carry.p50_ns, 0, "{l:?}");
+        // And the total is bounded by the two together, never more.
+        assert!(l.total.max_ns <= l.queue.max_ns + l.carry.max_ns, "{l:?}");
+        // …but strictly less than that sum, which is exactly why adding the
+        // two rows would overstate the worst case.
+        assert!(l.total.max_ns < l.queue.max_ns + l.carry.max_ns, "{l:?}");
+    }
+
+    #[test]
+    fn a_frame_rate_at_the_command_rate_puts_the_whole_wait_in_the_queue() {
+        // Every frame runs a command, so stage C is identically zero and the
+        // entire wait is the queue. This is the case that shows the old report
+        // was mislabelling: it printed this 4 ms as "stage C, InputState -> the
+        // command runs", when stage C here is zero and the 4 ms is stage B.
+        let frames: Vec<u64> = (0..1000).map(|_| 8_000_000).collect();
+        let l = input_to_sim(&frames, 8, 0).unwrap();
+        assert_eq!(l.carry.max_ns, 0, "{l:?}");
+        assert_eq!(l.queue.mean_ns, l.total.mean_ns, "{l:?}");
+        assert!((3_900_000..4_100_000).contains(&l.total.mean_ns), "{l:?}");
     }
 
     #[test]
@@ -1273,8 +1657,13 @@ frame,delta_ns
         // wait still cannot exceed one command.
         let frames: Vec<u64> = (0..100_000).map(|_| 100_000).collect();
         let l = input_to_sim(&frames, 8, 0).unwrap();
-        assert!(l.max_ns <= 8_200_000, "{l:?}");
-        assert!((3_800_000..4_200_000).contains(&l.mean_ns), "{l:?}");
+        assert!(l.total.max_ns <= 8_200_000, "{l:?}");
+        assert!((3_800_000..4_200_000).contains(&l.total.mean_ns), "{l:?}");
+        // At 0.1 ms frames the queue is negligible and the wait is all carry —
+        // the mirror image of the 8 ms case above, and the reason the two
+        // stages have to be reported separately.
+        assert!(l.queue.mean_ns < 100_000, "{l:?}");
+        assert!((3_800_000..4_200_000).contains(&l.carry.mean_ns), "{l:?}");
         // One command per 8 ms of the ten seconds of frames, not one per frame.
         assert_eq!(l.frames, 100_000);
         assert!(l.tick_frames < 1_300, "{l:?}");
@@ -1286,7 +1675,7 @@ frame,delta_ns
         let l = input_to_sim(&frames, 8, 0).unwrap();
         assert_eq!(l.tick_frames, l.frames);
         assert_eq!(l.ticks, l.frames as u64);
-        assert!(l.max_ns <= 8_100_000, "{l:?}");
+        assert!(l.total.max_ns <= 8_100_000, "{l:?}");
     }
 
     #[test]
@@ -1297,10 +1686,17 @@ frame,delta_ns
         let mut frames: Vec<u64> = (0..200).map(|_| 6_060_606).collect();
         frames.insert(100, 250_000_000);
         let l = input_to_sim(&frames, 8, 0).unwrap();
-        assert!(l.max_ns > 240_000_000, "{l:?}");
+        assert!(l.total.max_ns > 240_000_000, "{l:?}");
         // …while the median is untouched, which is exactly why a mean or a
         // median alone is not an honest latency report.
-        assert!(l.p50_ns < 6_000_000, "{l:?}");
+        assert!(l.total.p50_ns < 6_000_000, "{l:?}");
+        // The stall belongs to the QUEUE, not to the carry: an input arriving
+        // during the hitch is not dispatched until the frame that ends it, and
+        // that frame then spends all 31 commands' worth of credit at once. The
+        // old report added a whole frame on top of a number that already
+        // contained the stall, so a 250 ms hitch was published as ~500 ms.
+        assert!(l.queue.max_ns > 240_000_000, "{l:?}");
+        assert!(l.carry.max_ns < 10_000_000, "{l:?}");
     }
 
     #[test]
@@ -1341,6 +1737,165 @@ frame,delta_ns
             wslenv_including("STRAF3_PRESENT_MODE"),
             "STRAF3_PRESENT_MODE"
         );
+    }
+
+    #[test]
+    fn the_display_chain_reads_its_configured_and_measured_facts_from_the_log() {
+        // 165 Hz exactly, and the renderer's default queue depth.
+        let text = SAMPLE.replace(
+            "# source=test",
+            "# frame_latency=2  refresh_mhz=165000  source=test",
+        );
+        let log = parse_str(Path::new("sample.csv"), &text).unwrap();
+        assert_eq!(log.frame_latency(), Some(2));
+        assert_eq!(log.refresh_mhz(), Some(165_000));
+
+        let out = display_report(&log, &stats(&log.deltas_ns, 0).unwrap());
+        // The depth is labelled configured, and its cost is derived from the
+        // measured refresh: 2 frames of 6.061 ms.
+        assert!(out.contains("CONFIGURED depth 2"), "{out}");
+        assert!(out.contains("12.121"), "{out}");
+        // Scanout is arithmetic over the refresh the panel reported.
+        assert!(out.contains("165.000 Hz"), "{out}");
+        assert!(out.contains("6.060") || out.contains("6.061"), "{out}");
+        // And the two components nobody can see are named as such rather than
+        // filled in.
+        assert!(out.contains("NOT MEASURABLE HERE"), "{out}");
+        assert!(out.contains("NOT MEASURED"), "{out}");
+        assert!(!out.contains("input-to-photon total"), "{out}");
+    }
+
+    #[test]
+    fn a_log_without_the_display_headers_reports_gaps_rather_than_defaults() {
+        // The failure this guards: assuming `frame_latency=2` because that is
+        // the renderer's default, or 165 Hz because that is this machine's
+        // panel. Both would be a model presented as a measurement, which is the
+        // one outcome r17 forbids.
+        let log = parse_str(Path::new("sample.csv"), SAMPLE).unwrap();
+        assert_eq!(log.frame_latency(), None);
+        assert_eq!(log.refresh_mhz(), None);
+
+        let out = display_report(&log, &stats(&log.deltas_ns, 0).unwrap());
+        assert!(out.contains("NOT RECORDED"), "{out}");
+        assert!(!out.contains("depth 2"), "{out}");
+        assert!(!out.contains("165"), "{out}");
+    }
+
+    /// The workspace root, from the manifest rather than the process cwd —
+    /// `cargo test -p xtask` runs with its cwd at `xtask/`.
+    fn workspace_root() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("xtask/ has a parent")
+            .to_path_buf()
+    }
+
+    #[test]
+    fn the_accumulator_replay_still_describes_the_client() {
+        // `input_to_sim` is a hand copy of the client's pacing arithmetic:
+        // `straf3_game::tick::plan_ticks`, its per-frame cap, and
+        // `straf3_platform::Clock`'s truncation of the *absolute* reading.
+        // `xtask` has no dependencies by design, so it cannot import the real
+        // thing and call it — the same situation `MAGIC` was in.
+        //
+        // Without this test the drift is silent and expensive: if the client's
+        // accumulator changes, the replay keeps reporting the old client's
+        // behaviour, and every published latency number describes a game that
+        // no longer exists while every test in this file stays green.
+        //
+        // Whitespace is collapsed before matching, so a reformat is not a false
+        // alarm. What this pins is the arithmetic, not the layout.
+        //
+        // KNOWN LIMIT, stated rather than glossed: this reads source text. It
+        // catches the arithmetic being edited, which is how such a change would
+        // actually arrive. It does NOT catch the arithmetic staying put while
+        // something else changes around it — `advance` ceasing to call
+        // `plan_ticks`, or the loop stepping the simulation somewhere else. A
+        // behavioural pin would need a crate that can import both sides, and no
+        // such crate exists today.
+        fn squeeze(text: &str) -> String {
+            text.split_whitespace().collect::<Vec<_>>().join(" ")
+        }
+
+        let root = workspace_root();
+        let required: [(&str, &[&str]); 3] = [
+            (
+                "crates/straf3-game/src/tick.rs",
+                &[
+                    // The three lines `input_to_sim`'s inner loop mirrors.
+                    "let available = carried_ms as u64 + elapsed_ms;",
+                    "let wanted = available / tick;",
+                    "let remainder_ms = (available % tick) as u32;",
+                    // The cap, and that it truncates rather than dropping the
+                    // remainder — `MAX_TICKS_PER_FRAME` here is its copy.
+                    "pub const DEFAULT_MAX_TICKS_PER_FRAME: u32 = 250;",
+                    "if wanted > max_ticks as u64 { return TickPlan { ticks: max_ticks,",
+                    // The rate `DEFAULT_TICK_MS` is a copy of.
+                    "pub const DEFAULT_RATE: TickRate = TickRate::HZ_125;",
+                ],
+            ),
+            (
+                "crates/straf3-sim/src/cmd.rs",
+                &[
+                    "pub const HZ_125: Self = Self { hz: 125 };",
+                    "pub const fn command_millis(self) -> u16 { (1000 / self.hz) as u16 }",
+                ],
+            ),
+            (
+                "crates/straf3-platform/src/clock.rs",
+                &[
+                    // The truncation of the absolute reading, and the delta as
+                    // a difference of two truncated readings. Reproducing this
+                    // is what makes a 6.0606 ms frame alternate 6/7 ms of
+                    // credit instead of losing 0.0606 ms every frame.
+                    "u64::try_from(self.start.elapsed().as_millis()).unwrap_or(u64::MAX)",
+                    "let delta_ms = elapsed_ms.saturating_sub(self.last_ms);",
+                ],
+            ),
+        ];
+
+        for (relative, fragments) in required {
+            let source = squeeze(
+                &std::fs::read_to_string(root.join(relative))
+                    .unwrap_or_else(|e| panic!("read {relative}: {e}")),
+            );
+            for fragment in fragments {
+                assert!(
+                    source.contains(&squeeze(fragment)),
+                    "{relative} no longer contains:\n  {fragment}\n\n\
+                     `xtask::pacing::input_to_sim` replays the client's accumulator by \
+                     hand and can no longer be assumed to describe it. Re-derive the \
+                     replay against the client's current arithmetic before publishing \
+                     another latency number, then update this pin.",
+                );
+            }
+        }
+
+        // And the constants themselves, so a reader does not have to trust the
+        // text match to believe the two numbers agree.
+        assert_eq!(DEFAULT_TICK_MS, 1000 / 125);
+        assert_eq!(MAX_TICKS_PER_FRAME, 250);
+    }
+
+    #[test]
+    fn the_replay_places_commands_where_the_client_does() {
+        // A known-answer companion to the source pin above, transcribed from
+        // `straf3-game`'s own `the_carry_is_what_makes_a_60hz_frame_rate_average_out`:
+        // 16, 17, 16, 17 … is what a 60 Hz display delivers in whole
+        // milliseconds, and the client spends two ticks then three, alternating.
+        //
+        // Fed here as exact nanosecond boundaries so the absolute-reading
+        // truncation lands on the same milliseconds the client sees.
+        let deltas: Vec<u64> = [16, 17, 16, 17, 16, 17]
+            .iter()
+            .map(|ms| ms * 1_000_000)
+            .collect();
+        let l = input_to_sim(&deltas, 8, 0).unwrap();
+        // 99 ms of wall time at 8 ms a command is 12 commands with 3 ms carried.
+        assert_eq!(l.ticks, 12, "{l:?}");
+        assert_eq!(l.frames, 6, "{l:?}");
+        // Every one of those frames buys at least one command at 60 Hz.
+        assert_eq!(l.tick_frames, 6, "{l:?}");
     }
 
     #[test]
