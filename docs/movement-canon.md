@@ -4,7 +4,7 @@
 
 | Part | What it is | State |
 |---|---|---|
-| 1 | The criteria a mechanic must meet to enter canon | **written; amended once; still frozen against candidate evidence** |
+| 1 | The criteria a mechanic must meet to enter canon | **written; amended three times; still frozen against candidate evidence** |
 | 2 | The verdict on crouch slide, dash and wall jump | not yet written |
 | 3 | The frozen `PhysicsProfile::straf3()`, constant by constant | not yet written |
 
@@ -29,8 +29,8 @@ scored under the old number must be restated under the new one in Part 2, in
 public, naming the change — not silently re-scored. The criteria are revisable;
 the record of what they used to say is not.
 
-**Part 1 has been amended once**, after an independent review and still before
-any candidate number existed. §1.7 records every change and what it moves. No
+**Part 1 has been amended three times**, each after independent review and each
+still before any candidate number existed. §1.7 records every change and what it moves. No
 verdict has been scored under the superseded text, so nothing needed restating —
 which is the entire benefit of writing the criteria first, and it expires the
 moment the first candidate number is published.
@@ -558,7 +558,36 @@ is where "usually helps" stops being an honest description.
 - The **naive-to-optimal gap**, per cell:
   `(best outcome delta − naive outcome delta) / best outcome delta`, with the
   naive outcome as defined in §1.1. Scored on the **median across the contexts
-  in which the mechanic is applicable at all**.
+  in which the best outcome delta is positive and material** — the same
+  restriction G5(b) carries, for the same reason.
+
+  **The raw `best` and `naive` deltas in ups must be published beside every
+  ratio**, and a cell that does not qualify is marked as not meaningful rather
+  than printed as a number. A ratio whose denominator is two ups is not a
+  measurement of anything.
+
+  *Why this restriction, stated because it was missed once.* `best − naive` is
+  never negative, since `best` is a maximum over the same set. So the sign of
+  the gap is the sign of the denominator: in a context where the mechanic only
+  ever harms, the gap is negative, and in one where it barely helps, the gap is
+  an arbitrarily large number divided by an arbitrarily small one. Neither is a
+  statement about how much there is to master — the first is a statement that
+  the mechanic is bad, which is **W1's** job to report with its naive-harm
+  number on the record, and the second is noise. This is the identical
+  pathology amendment 2 fixed in G5(b), and W2 has the identical denominator; it
+  should have been fixed in the same edit and was not.
+
+  **The consequence for thin candidates, which is a real tightening and is
+  disclosed rather than left to be discovered.** The qualifying test here is the
+  same one W4 counts, so a mechanic material in three or more contexts has three
+  or more cells in this median, and one material in two has two. A median over
+  one or two cells reintroduces exactly what the median was added to prevent —
+  a single cell carrying a *required* criterion. **So: where fewer than three
+  contexts qualify, W2 cannot score better than *weak*.** Since admission
+  requires W2 at pass, that makes "material in at least three contexts"
+  effectively necessary for admission, which is what W4 already says in its own
+  voice. A candidate ended this way must be told that W2 and W4 agreed rather
+  than that two independent criteria condemned it.
 - The **execution window**: the width, in milliseconds, of the set of invocation
   timings yielding ≥ 95% of the best outcome delta.
 
@@ -963,10 +992,17 @@ artefact that carries no competitive weight and no player's standing depends on.
 
 ### 1.7 Amendment record
 
-Part 1 has been amended twice, both times after independent review by
-`movelead` and both times still before any candidate number existed. No verdict
+Part 1 has been amended three times, each after independent review by
+`movelead` and each still before any candidate number existed. No verdict
 had been scored under any superseded text, so nothing required restating under
 the threshold-edit rule.
+
+**Amendment 3** — one change, ruled minutes before `lab` published and therefore
+still under the pre-publication immunity:
+
+| # | Change | Effect |
+|---|---|---|
+| **23** | **W2's gap takes G5(b)'s restriction**: median over contexts where the best delta is **positive and material**, raw deltas in ups published beside every ratio, non-qualifying cells marked rather than printed. And **where fewer than three contexts qualify, W2 cannot score better than weak** | `best − naive` is never negative, so the gap's sign is the denominator's: a context where the mechanic only harms yields a negative gap, and one where it barely helps yields noise. Amendment 2 fixed this in G5(b) and missed the identical denominator in W2 — which matters more here, because W2 is *required* and has been carried almost entirely by its gap half since amendment 1 re-anchored the window. The three-context floor exists because a median over one or two cells is the single-cell pathology the median was introduced to prevent |
 
 **Amendment 2** — five changes, one of them a gate ruling that decides a
 candidate:
