@@ -1061,8 +1061,24 @@ pub fn slide_styles(
     let mech = Mechanic::CrouchSlide;
     let anchor = anchor(mech, ctx, entry, aim)?;
     Some((
-        walk_pair(mech, ctx, &anchor.state, aim, Some(invoke_at), commands, false),
-        walk_pair(mech, ctx, &anchor.state, aim, Some(invoke_at), commands, true),
+        walk_pair(
+            mech,
+            ctx,
+            &anchor.state,
+            aim,
+            Some(invoke_at),
+            commands,
+            false,
+        ),
+        walk_pair(
+            mech,
+            ctx,
+            &anchor.state,
+            aim,
+            Some(invoke_at),
+            commands,
+            true,
+        ),
     ))
 }
 

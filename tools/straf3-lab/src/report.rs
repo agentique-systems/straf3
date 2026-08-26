@@ -81,7 +81,12 @@ impl Provenance {
 
 /// Render the whole document.
 #[must_use]
-pub fn render(sections: &[Section], data: &Dataset, provenance: &Provenance, mirrored: bool) -> String {
+pub fn render(
+    sections: &[Section],
+    data: &Dataset,
+    provenance: &Provenance,
+    mirrored: bool,
+) -> String {
     let mut out = String::new();
 
     let _ = writeln!(

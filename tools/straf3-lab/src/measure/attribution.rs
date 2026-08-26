@@ -30,6 +30,14 @@
 //! self-test against a second implementation of the fall would prove that the
 //! refinement rule can find a cliff in *that* function, which is not the claim.
 
+// Everything below is reachable from the `#[test]` at the foot of this file,
+// which is what makes the self-test run on every `cargo test`. It is not yet
+// reachable from `super::all`, because the candidate section that would publish
+// it is not written. That is a deliberate state, not an oversight: the
+// instrument is landed, tested and unpublished, and the next wave starts from a
+// self-test that has been seen to work rather than from nothing.
+#![allow(dead_code)]
+
 use straf3_sim::PhysicsProfile;
 use straf3_sim::num::{Scalar, s};
 use straf3_sim::world::EmptyWorld;
@@ -165,9 +173,7 @@ pub(crate) fn overbounce_cliff() -> Found {
         MATERIAL,
     );
     Found {
-        what: format!(
-            "overbounce, drop height {DROP_MIN:.0}–{DROP_MAX:.0} units, vq3"
-        ),
+        what: format!("overbounce, drop height {DROP_MIN:.0}–{DROP_MAX:.0} units, vq3"),
         step,
         floor: GEOMETRY_FLOOR,
     }
@@ -318,7 +324,10 @@ pub(crate) fn report(section: &mut Section, test: &SelfTest) {
     ));
 
     if let Some(step) = test.overbounce.step {
-        section.record(Measurement::units("g7.selftest.overbounce.at_units", step.at));
+        section.record(Measurement::units(
+            "g7.selftest.overbounce.at_units",
+            step.at,
+        ));
         section.say(format!(
             "The cliff the instrument found in overbounce sits at a drop height \
              of {:.3} units and is worth {:.2} ups across {:.4} of a unit — a \
@@ -327,9 +336,7 @@ pub(crate) fn report(section: &mut Section, test: &SelfTest) {
              candidate. §1.8 of `docs/movement-canon.md` says outright that \
              overbounce would fail G7 if it were proposed today, and is exempt \
              only because it is inherited.",
-            step.at,
-            step.refined,
-            step.width,
+            step.at, step.refined, step.width,
         ));
     }
     section.say(if test.passed() {
@@ -355,7 +362,13 @@ pub(crate) fn report(section: &mut Section, test: &SelfTest) {
 /// candidate's outcome as a function of one player-controlled parameter, with
 /// everything else held.
 #[allow(dead_code)]
-pub(crate) fn cliff_in<F>(f: F, from: Scalar, to: Scalar, coarse: Scalar, floor: Scalar) -> Option<Step>
+pub(crate) fn cliff_in<F>(
+    f: F,
+    from: Scalar,
+    to: Scalar,
+    coarse: Scalar,
+    floor: Scalar,
+) -> Option<Step>
 where
     F: FnMut(Scalar) -> Scalar,
 {

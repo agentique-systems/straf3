@@ -238,7 +238,11 @@ mod tests {
             "the surviving step is measured across exactly one floor, got {}",
             step.width
         );
-        assert!(step.at >= s(16.0) && step.at <= s(16.5), "found at {}", step.at);
+        assert!(
+            step.at >= s(16.0) && step.at <= s(16.5),
+            "found at {}",
+            step.at
+        );
         assert!(step.survives(s(16.0)));
     }
 
@@ -248,7 +252,13 @@ mod tests {
     #[test]
     fn a_kink_is_a_gradient() {
         let step = largest_step(
-            |x| if x < s(50.0) { s(0.0) } else { (x - s(50.0)) * s(14.0) },
+            |x| {
+                if x < s(50.0) {
+                    s(0.0)
+                } else {
+                    (x - s(50.0)) * s(14.0)
+                }
+            },
             s(40.0),
             s(60.0),
             s(5.0),

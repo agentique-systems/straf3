@@ -109,8 +109,8 @@ fn the_measurements_are_the_ones_that_were_pinned() {
             report::COMMAND
         )
     });
-    let pinned = Dataset::from_tsv(&text)
-        .unwrap_or_else(|e| panic!("{} is malformed: {e}", path.display()));
+    let pinned =
+        Dataset::from_tsv(&text).unwrap_or_else(|e| panic!("{} is malformed: {e}", path.display()));
     let now = measured();
 
     let changes = dataset::diff(&pinned, &now);
