@@ -888,7 +888,7 @@ pub fn latency_report(frame: &Stats, latency: &LatencyStats) -> String {
         out,
         "    MEASURED = an interval this run recorded.  DERIVED = the client's own\n\
          \x20   arithmetic over those intervals.  MODELLED = an assumption, with no\n\
-         \x20   measurement behind it anywhere in this repository.",
+         \x20   measurement behind it anywhere in this repository. Figures are ms.",
     );
     let _ = writeln!(
         out,
@@ -1061,10 +1061,10 @@ pub fn display_report(log: &Log, frame: &Stats) -> String {
                 (Some(m @ ("fifo" | "fifo_relaxed")), Some(interval)) => {
                     let _ = writeln!(
                         out,
-                        "\x20      In {m} on this panel, a queued frame waits a present interval\n\
-                         \x20      per frame ahead of it, so the depth costs up to {} ms of the\n\
-                         \x20      {} ms it takes to display one. DERIVED from the depth above and\n\
-                         \x20      the measured refresh below.",
+                        "\x20      In {m} on this panel, a queued frame waits one present interval\n\
+                         \x20      for every frame already ahead of it, so the depth costs up to\n\
+                         \x20      {} ms — on top of the {} ms a frame then takes to scan out.\n\
+                         \x20      DERIVED from the depth above and the measured refresh below.",
                         ms(interval.saturating_mul(u64::from(n))),
                         ms(interval),
                     );
@@ -1671,9 +1671,10 @@ frame,delta_ns
     fn the_two_stages_are_one_wait_and_add_up_to_it() {
         // The property that makes B+C publishable as a p99 rather than as an
         // upper bound: it is accumulated per arrival, so the decomposition is
-        // exact at the sample level. The percentiles are NOT additive and this
-        // pins that too — the whole point of the earlier report's mistake was
-        // treating them as if they were.
+        // exact at the sample level. Which statistic shows that, and which does
+        // not, is the substance of this test — the mean is additive, the
+        // percentiles are not, and the maximum is additive only because there
+        // is an arrival that suffers both worst cases at once.
         let frames: Vec<u64> = (0..2000).map(|_| 6_060_606).collect();
         let l = input_to_sim(&frames, 8, 0).unwrap();
 
@@ -1848,8 +1849,13 @@ frame,delta_ns
 
         let out = display_report(&log, &stats(&log.deltas_ns, 0).unwrap());
         assert!(out.contains("NOT RECORDED"), "{out}");
-        assert!(!out.contains("depth 2"), "{out}");
-        assert!(!out.contains("165"), "{out}");
+        // No configured depth is claimed for this run, and no refresh is
+        // invented. (The prose below the table names depth 1 and depth 2 as an
+        // illustration, which is why this looks for the row's own marker rather
+        // than for the digits.)
+        assert!(!out.contains("CONFIGURED depth"), "{out}");
+        assert!(!out.contains("swapchain image count"), "{out}");
+        assert!(!out.contains("Hz through winit"), "{out}");
     }
 
     /// The workspace root, from the manifest rather than the process cwd —
