@@ -26,6 +26,7 @@ use straf3_sim::PhysicsProfile;
 
 use crate::dataset::Section;
 
+pub mod attribution;
 pub mod crossvalidate;
 pub mod overbounce;
 pub mod ramps;

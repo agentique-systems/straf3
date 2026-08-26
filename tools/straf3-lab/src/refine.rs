@@ -43,7 +43,7 @@
 //! quantum, a geometric offset below what a map can express. A result quoted
 //! without its floor is not a result.
 
-use straf3_sim::num::Scalar;
+use straf3_sim::num::{Scalar, s};
 
 /// One step in a swept curve, and what refinement did to it.
 #[derive(Debug, Clone, Copy)]
@@ -153,7 +153,7 @@ where
 {
     let (from, to) = (a, b);
     while b - a > floor {
-        let m = (a + b) * Scalar::from(0.5);
+        let m = (a + b) * s(0.5);
         // A midpoint that does not land strictly inside the interval means the
         // floor has gone below what the parameter's own representation can
         // express. Stopping is the honest answer; going round again would spin.
@@ -170,8 +170,8 @@ where
         }
     }
 
-    let centre = (a + b) * Scalar::from(0.5);
-    let half = floor * Scalar::from(0.5);
+    let centre = (a + b) * s(0.5);
+    let half = floor * s(0.5);
     // Kept inside the swept range: a window that ran off the end would be asking
     // the curve about parameter values the sweep never claimed to cover.
     let low = (centre - half).max(limit_low);
@@ -189,7 +189,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use straf3_sim::num::s;
 
     /// A straight line is a gradient however steep, and refinement must say so:
     /// the surviving step is the slope times the floor, not the slope times the

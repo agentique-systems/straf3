@@ -30,9 +30,9 @@
 //! self-test against a second implementation of the fall would prove that the
 //! refinement rule can find a cliff in *that* function, which is not the claim.
 
+use straf3_sim::PhysicsProfile;
 use straf3_sim::num::{Scalar, s};
 use straf3_sim::world::EmptyWorld;
-use straf3_sim::{PhysicsProfile, step};
 
 use crate::dataset::{Measurement, Section, Table};
 use crate::geometry;
@@ -221,6 +221,11 @@ pub(crate) fn self_test() -> SelfTest {
 }
 
 /// The self-test, as a published table.
+///
+/// Not called until the candidate section is wired into [`super::all`]; the
+/// self-test itself runs as a `#[test]` from the moment it exists, because an
+/// instrument that only checks itself when it is being used is checked once.
+#[allow(dead_code)]
 pub(crate) fn report(section: &mut Section, test: &SelfTest) {
     section.say(
         "**G7 asks whether a mechanic hides a cliff the player cannot see \
@@ -349,19 +354,12 @@ pub(crate) fn report(section: &mut Section, test: &SelfTest) {
 /// Separate from the self-test because it takes the curve as a closure: the
 /// candidate's outcome as a function of one player-controlled parameter, with
 /// everything else held.
+#[allow(dead_code)]
 pub(crate) fn cliff_in<F>(f: F, from: Scalar, to: Scalar, coarse: Scalar, floor: Scalar) -> Option<Step>
 where
     F: FnMut(Scalar) -> Scalar,
 {
     refine::largest_step(f, from, to, coarse, floor, MATERIAL)
-}
-
-/// Silence the unused-import warning for `step`, which the candidate G7 sweep
-/// uses once wired.
-#[allow(dead_code)]
-fn _uses(profile: &PhysicsProfile) {
-    let _ = step;
-    let _ = profile;
 }
 
 #[cfg(test)]
@@ -375,6 +373,28 @@ mod tests {
     #[test]
     fn the_instrument_tells_a_canonical_gradient_from_a_canonical_cliff() {
         let test = self_test();
+        // Printed, not only asserted: the two numbers are the licence for every
+        // G7 verdict this crate publishes, and `--nocapture` is how a reader
+        // sees what floor the licence was granted at.
+        for found in [
+            Some(&test.strafejump),
+            test.strafejump_fine.as_ref(),
+            Some(&test.overbounce),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            println!(
+                "{:<44} coarse {:>8.2}  floor {:>7.4}  refined {:>8.2}  survives {}  at {:.4}",
+                found.what,
+                found.coarse(),
+                found.floor,
+                found.refined(),
+                found.survived(),
+                found.step.map_or(f32::NAN, |s| s.at),
+            );
+        }
+        println!("passed: {}", test.passed());
         assert!(
             !test
                 .strafejump_fine

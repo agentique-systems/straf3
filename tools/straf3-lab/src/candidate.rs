@@ -85,6 +85,23 @@ pub const ENTRY_SPEEDS: &[f32] = &[320.0, 400.0, 500.0, 640.0, 800.0, 1000.0];
 /// closes".
 pub const HORIZON: usize = HZ;
 
+/// Materiality: **16 ups**, one threshold used everywhere.
+///
+/// 5% of the 320 ups ground cap, and the smallest change legible on the speed
+/// overlay at a glance. Where a criterion states a percentage, the percentage
+/// and this floor both apply and the larger governs — which matters most in the
+/// ceiling context, where the control may be stopped outright and a percentage
+/// of near-zero turns noise into a finding.
+pub const MATERIAL: Scalar = s(16.0);
+
+/// How far off the current heading an aim may be and still count as what a
+/// player who is not aiming carefully would do. See [`Cell::naive_neighbourhood`].
+pub const NAIVE_HALF_WIDTH: Scalar = s(30.0);
+
+/// The fraction of the best outcome a point must reach to be in the decision
+/// set W2's execution window and W6's comparison are both read off.
+pub const TOP_FRACTION: Scalar = s(0.95);
+
 /// How long a prefix may run looking for a mechanic's arming event before the
 /// cell is declared unreachable.
 ///
@@ -469,8 +486,15 @@ fn command(st: &SimState, aim: Scalar, jump: bool, crouch: bool) -> UserCmd {
 ///
 /// This is the whole script, in one place, so that the candidate and the control
 /// cannot be given different ones by accident.
-fn presses(mech: Mechanic, ctx: &Context, i: usize, invoke_at: Option<usize>) -> (bool, bool) {
+fn presses(
+    mech: Mechanic,
+    ctx: &Context,
+    i: usize,
+    invoke_at: Option<usize>,
+    hold: bool,
+) -> (bool, bool) {
     let invoking = invoke_at == Some(i);
+    let held = hold && invoke_at.is_some_and(|t| i >= t);
     match mech {
         // Crouch is a *tap*: pressed on the invoking command and released on the
         // next. Held, it would cap wish speed at `max_speed * duck_scale` for the
@@ -479,7 +503,14 @@ fn presses(mech: Mechanic, ctx: &Context, i: usize, invoke_at: Option<usize>) ->
         // the edge the slide arms on therefore lands on command 0 whatever
         // `invoke_at` says, which is what makes that context's availability one
         // command wide.
-        Mechanic::CrouchSlide => (false, if ctx.crouch_only { true } else { invoking }),
+        Mechanic::CrouchSlide => (
+            false,
+            if ctx.crouch_only {
+                true
+            } else {
+                invoking || held
+            },
+        ),
         // The command after the landing carries the ordinary jump that gets the
         // player airborne again — the bunnyhop rhythm the dash is spent out of —
         // and the invoking command carries the second press, which is why
@@ -498,6 +529,7 @@ fn walk_pair(
     aim: Scalar,
     invoke_at: Option<usize>,
     commands: usize,
+    hold: bool,
 ) -> Paired {
     let candidate_profile = mech.profile();
     let control_profile = Mechanic::control();
@@ -507,7 +539,7 @@ fn walk_pair(
         diverged_at: None,
     };
     for i in 0..commands {
-        let (jump, crouch) = presses(mech, ctx, i, invoke_at);
+        let (jump, crouch) = presses(mech, ctx, i, invoke_at, hold);
         let a = command(&out.candidate, aim, jump, crouch);
         let b = command(&out.control, aim, jump, crouch);
         out.candidate = step(&out.candidate, &a, &ctx.world, &candidate_profile);
@@ -727,19 +759,94 @@ impl Cell {
         best
     }
 
-    /// The naive play §1.2 W1 and §1.1 G5(b) are scored on: invoke at the first
-    /// command it is available, aimed along the current heading.
+    /// Every `(timing, aim)` in the **naive neighbourhood**: the whole
+    /// availability window, crossed with every aim within
+    /// [`NAIVE_HALF_WIDTH`] of the player's current heading.
+    ///
+    /// # Why a neighbourhood and not one perfect press
+    ///
+    /// `docs/movement-lab.md`'s Limits §5 is the reason, and it is the lab's own
+    /// standing caveat about itself: "every technique here is held exactly. A
+    /// player holds it imperfectly, so these are ceilings, not expectations."
+    /// W1 is the one criterion that is *about* the imperfect player — whether a
+    /// beginner pressing the button at roughly the obvious moment, aimed roughly
+    /// where they are already going, is building a habit that helps them. A
+    /// single exactly-aimed press at the single first available command is a
+    /// measurement of a robot, and scoring "learnable" on it would answer a
+    /// question nobody asked.
+    ///
+    /// Timings before [`Mechanic::earliest`] are excluded because no press is
+    /// made on them at all; a timing where the press is made and nothing happens
+    /// **is** included, with whatever delta it produced, because that is a real
+    /// thing a naive player experiences.
     #[must_use]
-    pub fn naive(&self) -> Option<(usize, Scalar)> {
-        for t in 0..self.fired.len() {
-            if self.fired[t][0] {
-                return Some((t, self.candidate[t][0] - self.control[t][0]));
+    pub fn naive_neighbourhood(&self, mech: Mechanic) -> Vec<(usize, usize)> {
+        let mut out = Vec::new();
+        for t in mech.earliest()..self.fired.len() {
+            for a in 0..AIMS {
+                let degrees = s(a as f32 * AIM_STEP);
+                let off = if degrees > s(180.0) {
+                    s(360.0) - degrees
+                } else {
+                    degrees
+                };
+                if off <= NAIVE_HALF_WIDTH {
+                    out.push((t, a));
+                }
             }
         }
-        None
+        out
     }
 
-    /// The best absolute outcome the *control* reached anywhere in the sweep:
+    /// The outcome delta at one point of the sweep: §1.1's one definition of
+    /// outcome, in ups.
+    #[must_use]
+    pub fn delta(&self, t: usize, a: usize) -> Scalar {
+        self.candidate[t][a] - self.control[t][a]
+    }
+
+    /// The candidate run's horizontal speed at the horizon: §1.1's **absolute
+    /// exit speed**, which only W3's sensitivity and levelling tests use.
+    #[must_use]
+    pub fn absolute(&self, t: usize, a: usize) -> Scalar {
+        self.candidate[t][a]
+    }
+
+    /// The naive outcome: the mean outcome delta over the naive neighbourhood,
+    /// and how many points that was taken over.
+    ///
+    /// The count travels with the number because the neighbourhood is finite and
+    /// a bare percentage over it is false precision.
+    #[must_use]
+    pub fn naive(&self, mech: Mechanic) -> Option<(Scalar, usize)> {
+        let points = self.naive_neighbourhood(mech);
+        if points.is_empty() {
+            return None;
+        }
+        let mut total = s(0.0);
+        for (t, a) in &points {
+            total += self.delta(*t, *a);
+        }
+        Some((total / s(points.len() as f32), points.len()))
+    }
+
+    /// W1's naive-harm count: points of the naive neighbourhood whose outcome
+    /// delta is negative **by more than [`MATERIAL`]**, and the size of the
+    /// neighbourhood.
+    ///
+    /// The materiality floor is what stops a mechanic being marked harmful for
+    /// costing the player a tenth of a unit per second.
+    #[must_use]
+    pub fn naive_harm(&self, mech: Mechanic) -> (usize, usize) {
+        let points = self.naive_neighbourhood(mech);
+        let harmed = points
+            .iter()
+            .filter(|(t, a)| self.delta(*t, *a) < -MATERIAL)
+            .count();
+        (harmed, points.len())
+    }
+
+    /// The best absolute exit speed the *control* reached anywhere in the sweep:
     /// the existing vocabulary given the same freedom of aim and timing.
     #[must_use]
     pub fn control_best(&self) -> Scalar {
@@ -754,16 +861,16 @@ impl Cell {
         best
     }
 
-    /// The best absolute outcome the candidate reached where it fired.
+    /// The absolute exit speed at the sweep's best cell.
     #[must_use]
     pub fn candidate_best(&self) -> Option<Scalar> {
         let (t, a, _) = self.best()?;
         Some(self.candidate[t][a])
     }
 
-    /// The best gain available without changing aim from the current heading:
-    /// the mechanic used *instead of* the existing technique, for W3's chain
-    /// gain.
+    /// The best absolute exit speed reachable without turning off the current
+    /// heading: the mechanic used **instead of** the existing technique, which
+    /// is one of the three quantities W3's chain gain compares.
     #[must_use]
     pub fn best_without_strafing(&self) -> Option<Scalar> {
         let mut best: Option<Scalar> = None;
@@ -776,6 +883,65 @@ impl Cell {
             }
         }
         best
+    }
+
+    /// The best delta reachable at each timing, over every aim.
+    ///
+    /// The row W2's execution window and W6's decision set are both read off.
+    #[must_use]
+    pub fn best_by_timing(&self) -> Vec<Option<Scalar>> {
+        (0..self.fired.len())
+            .map(|t| {
+                let mut best: Option<Scalar> = None;
+                for a in 0..AIMS {
+                    if self.fired[t][a] {
+                        let d = self.delta(t, a);
+                        if best.is_none_or(|b| d > b) {
+                            best = Some(d);
+                        }
+                    }
+                }
+                best
+            })
+            .collect()
+    }
+
+    /// The timings and aims that reach at least 95% of the best delta.
+    ///
+    /// W2 reads the timing set's width; W6 reads both sets. **Not the point
+    /// argmax:** on a plateau the argmax is arbitrary and jumps the full width of
+    /// the sweep, and a plateau is exactly W2's failure mode — so a mechanic bad
+    /// by W2 would have scored well on a W6 written against the argmax.
+    #[must_use]
+    pub fn top_set(&self) -> (Vec<usize>, Vec<usize>) {
+        let Some((_, _, best)) = self.best() else {
+            return (Vec::new(), Vec::new());
+        };
+        // A negative best means the mechanic never helps here; "95% of best" is
+        // then a lower bar than best, which is not what the criterion means.
+        // Nothing qualifies, and the empty set is the honest answer.
+        if best <= s(0.0) {
+            return (Vec::new(), Vec::new());
+        }
+        let bar = best * TOP_FRACTION;
+        let mut timings = Vec::new();
+        let mut aims = Vec::new();
+        for t in 0..self.fired.len() {
+            let mut any = false;
+            for a in 0..AIMS {
+                if self.fired[t][a] && self.delta(t, a) >= bar {
+                    any = true;
+                    if !aims.contains(&a) {
+                        aims.push(a);
+                    }
+                }
+            }
+            if any {
+                timings.push(t);
+            }
+        }
+        aims.sort_unstable();
+        (timings, aims)
     }
 }
 
@@ -829,6 +995,7 @@ pub fn sweep(mech: Mechanic, ctx: &Context, entry: Scalar) -> Cell {
                 s(a as f32 * AIM_STEP),
                 invoke_at,
                 total,
+                false,
             );
             let fired = run.diverged_at.is_some();
             if let (Some(at), Some(d)) = (invoke_at, run.diverged_at) {
@@ -859,7 +1026,44 @@ pub fn never_invoking(mech: Mechanic, ctx: &Context, entry: Scalar, commands: us
         s(0.0),
         None,
         commands,
+        false,
     )
+}
+
+/// The crouch slide entered two ways, for the question
+/// `PhysicsProfile::slide_duration_ms`'s own doc comment raises and does not
+/// answer.
+///
+/// # Why this is measured apart from the sweep
+///
+/// That comment argues the slide is a *technique* rather than "a friction
+/// toggle, and a toggle has nothing to master", because it is a countdown rather
+/// than something you hold. But `PM_Friction` reads `timers.slide_ms`, **not**
+/// `p.crouched`. So a player can tap crouch to arm the slide, stand straight
+/// back up on the next command, and keep one-sixth friction for the whole 600 ms
+/// *at full wish speed* — standing restores the `duck_scale` 0.25 that crouching
+/// was costing them.
+///
+/// If that dominates holding crouch, the anti-toggle argument does not hold and
+/// the mechanic is a 600 ms toggle with a speed price of admission. It is one
+/// comparison on the harness the sweep already uses, so there is no reason not
+/// to know.
+///
+/// Returns `(tap, hold)`, each a paired run at the same timing and aim.
+#[must_use]
+pub fn slide_styles(
+    ctx: &Context,
+    entry: Scalar,
+    aim: Scalar,
+    invoke_at: usize,
+    commands: usize,
+) -> Option<(Paired, Paired)> {
+    let mech = Mechanic::CrouchSlide;
+    let anchor = anchor(mech, ctx, entry, aim)?;
+    Some((
+        walk_pair(mech, ctx, &anchor.state, aim, Some(invoke_at), commands, false),
+        walk_pair(mech, ctx, &anchor.state, aim, Some(invoke_at), commands, true),
+    ))
 }
 
 #[cfg(test)]
