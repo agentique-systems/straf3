@@ -459,6 +459,11 @@ recording that spanned one could not be replayed.
         let mut record_to = None;
         let mut replay_from = None;
         let mut play_from = None;
+        // Whether the command line actually said these, as opposed to taking
+        // the default. A file-driven run reads both from the file, so the only
+        // way to refuse a misleading one is to know it was typed.
+        let mut profile_given = false;
+        let mut rate_given = false;
         let mut replay = ReplayOptions::default();
 
         let mut args = args;
@@ -478,8 +483,10 @@ recording that spanned one could not be replayed.
                         format!("unknown profile `{name}` ({})", straf3_game::profile::NAMES)
                     })?;
                     session.profile_name = name;
+                    profile_given = true;
                 }
                 "--rate" => {
+                    rate_given = true;
                     let hz = value()?;
                     let hz: u32 = hz
                         .parse()
@@ -534,6 +541,34 @@ recording that spanned one could not be replayed.
             ] {
                 if set {
                     return Err(format!("`{flag}` only means something with `--replay`"));
+                }
+            }
+        }
+
+        // A file-driven run takes its rate and profile from the file, so these
+        // do not do what typing them says they do — they do nothing at all.
+        //
+        // Refused rather than ignored, for the reason `--trace` and friends are
+        // refused above, and with a worse payload. The committed course fixture
+        // declares `profile cpm`, so `--play coil-run.txt --profile straf3`
+        // opens a window, plays a session that looks exactly like a straf3 one,
+        // and saves the personal best as `runs/coil.cpm.s3d` — an artefact
+        // labelled with a profile the run was not made under. That file then
+        // travels as evidence. The command is one a careful person would type
+        // precisely *because* they were trying to record under a named profile.
+        if replay_from.is_some() || play_from.is_some() {
+            let driver = if replay_from.is_some() {
+                "--replay"
+            } else {
+                "--play"
+            };
+            for (flag, given) in [("--profile", profile_given), ("--rate", rate_given)] {
+                if given {
+                    return Err(format!(
+                        "`{flag}` does nothing with `{driver}`: a recorded file carries its own \
+                         rate and profile, and they are what the run uses. Drop `{flag}`, or \
+                         play live under it and record the result."
+                    ));
                 }
             }
         }
@@ -634,6 +669,27 @@ recording that spanned one could not be replayed.
             assert!(parse_args(&["--csv"]).is_err());
             assert!(parse_args(&["--frame-ms", "8"]).is_err());
             assert!(parse_args(&["--replay", "r.txt", "--trace", "--csv"]).is_ok());
+        }
+
+        #[test]
+        fn the_profile_and_rate_of_a_file_driven_run_come_from_the_file_not_the_flags() {
+            // The hazard is not that the flag is useless; it is that it looks
+            // like it worked. `probes/coil-course/results/coil-run.txt` says
+            // `profile cpm`, so this command would have opened a window, played
+            // what looked like a straf3 session, and written the personal best
+            // to `runs/coil.cpm.s3d`. A committed artefact whose profile is not
+            // the one the person asked for is exactly the object this
+            // repository has already had to delete once.
+            assert!(parse_args(&["--play", "run.txt", "--profile", "cpm"]).is_err());
+            assert!(parse_args(&["--replay", "run.txt", "--profile", "cpm"]).is_err());
+            assert!(parse_args(&["--play", "run.txt", "--rate", "125"]).is_err());
+            assert!(parse_args(&["--replay", "run.txt", "--rate", "125"]).is_err());
+
+            // Live play is where they mean something, so they stay accepted.
+            assert!(parse_args(&["--profile", "cpm", "--rate", "125"]).is_ok());
+            // And a file-driven run without them is the normal case.
+            assert!(parse_args(&["--play", "run.txt"]).is_ok());
+            assert!(parse_args(&["--replay", "run.txt"]).is_ok());
         }
 
         #[test]
