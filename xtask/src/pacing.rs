@@ -720,19 +720,44 @@ pub struct LatencyStats {
 ///
 /// The order of events in one iteration of the loop is what makes it one wait
 /// rather than two. `about_to_wait` requests a redraw, so the next iteration
-/// has both queued input and a pending paint; Win32 `GetMessage` returns input
-/// messages ahead of `WM_PAINT`, so winit dispatches every pending input event
-/// into `InputState` and *then* delivers `RedrawRequested`, which is where the
-/// clock is read and the commands run. The boundary that dispatches an input is
-/// therefore the first frame boundary after that input arrived, and the first
-/// command-running boundary at or after the dispatch is the same boundary you
-/// reach by counting from the arrival itself.
+/// has both queued input and a pending paint — and Win32 resolves that in
+/// input's favour, by documented design:
+///
+/// > With the exception of the `WM_PAINT` message, the `WM_TIMER` message, and
+/// > the `WM_QUIT` message, the system always posts messages at the end of a
+/// > message queue. […] The `WM_PAINT` message, the `WM_TIMER` message, and the
+/// > `WM_QUIT` message, however, are kept in the queue and are forwarded to the
+/// > window procedure **only when the queue contains no other messages**.
+///
+/// — Microsoft, *About Messages and Message Queues*
+/// (`learn.microsoft.com/en-us/windows/win32/winmsg/about-messages-and-message-queues`).
+///
+/// Keyboard and mouse messages are ordinary queued messages posted at the tail,
+/// so winit dispatches every pending input event into `InputState` and *then*
+/// delivers `RedrawRequested`, which is where the clock is read and the
+/// commands run. The boundary that dispatches an input is therefore the first
+/// frame boundary after that input arrived, and the first command-running
+/// boundary at or after the dispatch is the same boundary you reach by counting
+/// from the arrival itself.
 ///
 /// So: sweep arrivals, and for each one record where it was dispatched
 /// (stage B), how long from there to the command (stage C), and the whole wait.
 /// The three are consistent by construction — `queue + carry == total` for
 /// every sampled arrival — which is what makes the total's p99 the p99 of the
 /// sum rather than an upper bound on it.
+///
+/// The B/C boundary is placed at the frame timestamp, and the real dispatch
+/// happens a few microseconds *before* it — the input messages are drained,
+/// then `WM_PAINT` is retrieved, then the timestamp is taken. So B is
+/// overstated and C understated by that same microsecond-scale amount, on a
+/// scale where the numbers being reported are milliseconds. **The total is
+/// unaffected**, because the error cancels between the two.
+///
+/// If the ordering were the other way round — the paint delivered before the
+/// pending input — this function would *under*-count by one frame interval
+/// rather than the old report over-counting by one. Either way the two rows
+/// were never addable; the documentation quoted above is what settles which of
+/// the two it is.
 ///
 /// # What is NOT derived here
 ///
@@ -888,9 +913,16 @@ pub fn latency_report(frame: &Stats, latency: &LatencyStats) -> String {
         out,
         "    B+C is accumulated arrival by arrival, so B + C = B+C holds for every\n\
          \x20   sample and its p99 is the p99 of the sum — not the sum of two p99s.\n\
-         \x20   Do NOT add rows B and C: the two stages are strongly anti-correlated\n\
-         \x20   (the longer an input sits in the queue, the closer it lands to a\n\
-         \x20   boundary that runs a command), and adding them counts the queue twice.",
+         \x20   Do NOT add rows B and C: the B+C row already IS their sum. Adding the\n\
+         \x20   percentile columns instead gives a slightly larger number, because the\n\
+         \x20   two stages are anti-correlated (the longer an input sits in the queue,\n\
+         \x20   the closer it lands to a boundary that runs a command). And adding a\n\
+         \x20   whole frame interval on top of the B+C row — which is what this report\n\
+         \x20   did until this wave — counts the queue twice outright.\n\
+         \x20   That B and C are one wait rests on Win32 delivering WM_PAINT only when\n\
+         \x20   the queue holds no other message, so pending input reaches InputState\n\
+         \x20   before the frame that then runs the commands (Microsoft, \"About\n\
+         \x20   Messages and Message Queues\").",
     );
     let _ = writeln!(
         out,
@@ -941,34 +973,30 @@ pub fn latency_report(frame: &Stats, latency: &LatencyStats) -> String {
 
 // ── simulation to display ───────────────────────────────────────────────────
 
-/// The three facts about presentation that the other half of the chain needs,
-/// read from the run's own log header rather than transcribed by a reader.
+/// `desired_maximum_frame_latency` as the client configured it, from the run's
+/// own header.
 ///
-/// They live here, next to the accounting that consumes them, rather than in
-/// [`Log`]'s main block, because that is where a reader looking for the
-/// provenance of a published display number will start.
-impl Log {
-    /// `desired_maximum_frame_latency` as the client configured it.
-    ///
-    /// The only lever in the whole input-to-photon chain that belongs to this
-    /// project rather than to the hardware, and the only **configured** number
-    /// in the simulation-to-display accounting.
-    #[must_use]
-    pub fn frame_latency(&self) -> Option<u32> {
-        self.header("frame_latency").and_then(|v| v.parse().ok())
-    }
+/// The only lever in the whole input-to-photon chain that belongs to this
+/// project rather than to the hardware, and the only **configured** number in
+/// the simulation-to-display accounting.
+///
+/// A free function reading [`Log::header`] rather than a method on [`Log`]:
+/// this file is being edited by two seats at once this wave, and the header
+/// accessors belong to whoever owns the log *format*. Adding a method here
+/// would collide on merge with an identical one; reading the header the way any
+/// other consumer would cannot.
+fn configured_frame_latency(log: &Log) -> Option<u32> {
+    log.header("frame_latency").and_then(|v| v.parse().ok())
+}
 
-    /// The panel's refresh rate in millihertz, as the window's monitor reported
-    /// it.
-    ///
-    /// Measured, not stated: it comes from winit's monitor handle at the time
-    /// of the run. A log without this header was written before the client
-    /// recorded it, and the scanout accounting then has no basis at all — which
-    /// is reported as a gap rather than filled in with 165.
-    #[must_use]
-    pub fn refresh_mhz(&self) -> Option<u64> {
-        self.header("refresh_mhz").and_then(|v| v.parse().ok())
-    }
+/// The panel's refresh rate in millihertz, as the window's monitor reported it.
+///
+/// Measured, not stated: it comes from winit's monitor handle at the time of
+/// the run. A log without this header was written before the client recorded
+/// it, and the scanout accounting then has no basis at all — which is reported
+/// as a gap rather than filled in with 165.
+fn measured_refresh_mhz(log: &Log) -> Option<u64> {
+    log.header("refresh_mhz").and_then(|v| v.parse().ok())
 }
 
 /// The simulation-to-display half of the chain, component by component.
@@ -990,7 +1018,7 @@ pub fn display_report(log: &Log, frame: &Stats) -> String {
     let _ = writeln!(out, "  simulation-to-display:");
 
     let mode = log.configured_mode();
-    let refresh_hz = log.refresh_mhz().map(|mhz| mhz as f64 / 1000.0);
+    let refresh_hz = measured_refresh_mhz(log).map(|mhz| mhz as f64 / 1000.0);
     let present_interval_ns = refresh_hz
         .filter(|hz| *hz > 0.0)
         .map(|hz| (1e9 / hz) as u64);
@@ -1010,15 +1038,24 @@ pub fn display_report(log: &Log, frame: &Stats) -> String {
     );
 
     // E — the queue depth. Ours, configured, and reported by the client.
-    match log.frame_latency() {
+    match configured_frame_latency(log) {
         Some(n) => {
             let _ = writeln!(
                 out,
                 "    E  submitted -> the GPU presents it             CONFIGURED depth {n}\n\
                  \x20      `desired_maximum_frame_latency={n}`, as this run configured it and\n\
-                 \x20      wrote into its own header. This is the one component of the chain\n\
-                 \x20      that is ours rather than the hardware's: it is how many frames the\n\
-                 \x20      CPU may queue ahead of the display.",
+                 \x20      wrote into its own header. wgpu defines it as the desired maximum\n\
+                 \x20      number of MONITOR REFRESHES between acquiring a texture and that\n\
+                 \x20      texture being presented — \"frames in flight\". On the Vulkan backend\n\
+                 \x20      this client runs on, it becomes a swapchain image count of {}\n\
+                 \x20      (wgpu-hal vulkan/swapchain/native.rs: min_image_count = latency + 1).\n\
+                 \x20      This is the one component of the chain that is ours rather than the\n\
+                 \x20      hardware's.\n\
+                 \x20      CAVEAT, and it is wgpu's own word: the value is a HINT, \"always\n\
+                 \x20      clamped to the supported range\". The client does not read back what\n\
+                 \x20      the driver granted, so {n} is what was asked for, in a way the\n\
+                 \x20      present MODE is not — that one is read back and reported.",
+                n + 1,
             );
             match (mode, present_interval_ns) {
                 (Some(m @ ("fifo" | "fifo_relaxed")), Some(interval)) => {
@@ -1088,7 +1125,7 @@ pub fn display_report(log: &Log, frame: &Stats) -> String {
                  \x20      This log carries no `refresh_mhz=` header. The panel's refresh is a\n\
                  \x20      property of the display, not of the loop, and no number in this\n\
                  \x20      report can supply it — a scanout figure computed from an assumed\n\
-                 \x20      165 Hz would be a model wearing a measurement's clothes.",
+                 \x20      refresh would be a model wearing a measurement's clothes.",
             );
         }
     }
@@ -1105,12 +1142,26 @@ pub fn display_report(log: &Log, frame: &Stats) -> String {
          \x20      external capture hardware nobody in this session has.",
     );
 
+    // The finding that makes E awkward, and it is worth stating in the report
+    // rather than only in a review: the one knob we own is invisible to the one
+    // instrument we have.
     let _ = writeln!(
         out,
-        "    NO INPUT-TO-PHOTON TOTAL IS PRINTED. A + D + E + G are not measured on\n\
-         \x20   this machine, and a sum whose largest term is a guess would be quoted\n\
+        "    E IS NOT VISIBLE TO THIS INSTRUMENT. Queue depth changes when a frame is\n\
+         \x20   displayed, not how often frames are displayed: in FIFO every frame still\n\
+         \x20   lands on a vblank whatever the depth, so a run at depth 1 and a run at\n\
+         \x20   depth 2 can produce the same frame-time distribution while differing by\n\
+         \x20   a refresh interval of latency. Nothing in a pacing log can separate\n\
+         \x20   them. Settling what the depth costs needs external capture hardware, or\n\
+         \x20   a player who can feel the difference — it is a playtest question, not a\n\
+         \x20   measurement this tooling can answer.",
+    );
+    let _ = writeln!(
+        out,
+        "    NO INPUT-TO-PHOTON TOTAL IS PRINTED. A, D, G and E's cost are not measured\n\
+         \x20   on this machine, and a sum whose largest term is a guess would be quoted\n\
          \x20   without its caveat within a week. What can be stated end to end is\n\
-         \x20   B+C above, plus F, plus the four gaps named by letter.",
+         \x20   B+C above, plus F, plus the gaps named by letter.",
     );
     out
 }
@@ -1631,11 +1682,27 @@ frame,delta_ns
         // The carry is zero for the median input, because most 6.06 ms frames
         // at 8 ms commands do run one.
         assert_eq!(l.carry.p50_ns, 0, "{l:?}");
-        // And the total is bounded by the two together, never more.
+
+        // The decomposition is exact per arrival, and the *mean* is the
+        // statistic that demonstrates it: means are linear, so B + C = B+C
+        // holds to within integer division. Percentiles are not linear, which
+        // is the whole reason the two rows must not be added.
+        assert!(
+            l.total
+                .mean_ns
+                .abs_diff(l.queue.mean_ns + l.carry.mean_ns)
+                <= 2,
+            "{l:?}"
+        );
+        // Adding the two tails instead overstates, because the stages are
+        // anti-correlated: the p99 of the sum sits below the sum of the p99s.
+        assert!(l.total.p99_ns < l.queue.p99_ns + l.carry.p99_ns, "{l:?}");
+        // The maximum is where that relation is tight rather than loose — one
+        // arrival really does wait a whole frame to be dispatched and then a
+        // whole frame to be carried — so it is subadditive, not strict. Worth
+        // pinning: an earlier draft of this test asserted strict inequality
+        // here and was simply wrong about the arithmetic.
         assert!(l.total.max_ns <= l.queue.max_ns + l.carry.max_ns, "{l:?}");
-        // …but strictly less than that sum, which is exactly why adding the
-        // two rows would overstate the worst case.
-        assert!(l.total.max_ns < l.queue.max_ns + l.carry.max_ns, "{l:?}");
     }
 
     #[test]
@@ -1747,8 +1814,8 @@ frame,delta_ns
             "# frame_latency=2  refresh_mhz=165000  source=test",
         );
         let log = parse_str(Path::new("sample.csv"), &text).unwrap();
-        assert_eq!(log.frame_latency(), Some(2));
-        assert_eq!(log.refresh_mhz(), Some(165_000));
+        assert_eq!(configured_frame_latency(&log), Some(2));
+        assert_eq!(measured_refresh_mhz(&log), Some(165_000));
 
         let out = display_report(&log, &stats(&log.deltas_ns, 0).unwrap());
         // The depth is labelled configured, and its cost is derived from the
@@ -1762,7 +1829,11 @@ frame,delta_ns
         // filled in.
         assert!(out.contains("NOT MEASURABLE HERE"), "{out}");
         assert!(out.contains("NOT MEASURED"), "{out}");
-        assert!(!out.contains("input-to-photon total"), "{out}");
+        // The Vulkan mapping, so a reader knows what the depth became.
+        assert!(out.contains("swapchain image count of 3"), "{out}");
+        // And no end-to-end number is offered, because four of the terms in it
+        // are not measured on this machine.
+        assert!(out.contains("NO INPUT-TO-PHOTON TOTAL IS PRINTED"), "{out}");
     }
 
     #[test]
@@ -1772,8 +1843,8 @@ frame,delta_ns
         // panel. Both would be a model presented as a measurement, which is the
         // one outcome r17 forbids.
         let log = parse_str(Path::new("sample.csv"), SAMPLE).unwrap();
-        assert_eq!(log.frame_latency(), None);
-        assert_eq!(log.refresh_mhz(), None);
+        assert_eq!(configured_frame_latency(&log), None);
+        assert_eq!(measured_refresh_mhz(&log), None);
 
         let out = display_report(&log, &stats(&log.deltas_ns, 0).unwrap());
         assert!(out.contains("NOT RECORDED"), "{out}");
