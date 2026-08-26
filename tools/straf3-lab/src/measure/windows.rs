@@ -25,7 +25,7 @@ use crate::geometry;
 use crate::harness::{
     Axis, HZ, MS, holding, jump, running_at, settle_on, still, strafe_for, strafe_once, yaw_for,
 };
-use crate::measure::{pad, profiles};
+use crate::measure::pad;
 use crate::num::horizontal_speed;
 
 /// Speeds the ground-friction window is measured at.
@@ -37,7 +37,7 @@ const LOSS_FRACTIONS: &[(u32, f32)] = &[(1, 0.01), (5, 0.05), (10, 0.10)];
 /// The most commands a search will wait before declaring a window closed.
 const SEARCH_CAP: usize = 400;
 
-pub(crate) fn measure() -> Section {
+pub(crate) fn measure(profiles: &[(&str, PhysicsProfile)]) -> Section {
     let mut section = Section::new("2. Technique timing windows");
     let world = geometry::floor();
 
@@ -85,7 +85,8 @@ pub(crate) fn measure() -> Section {
         ],
     );
 
-    for (name, profile) in profiles() {
+    for (name, profile) in profiles {
+        let profile = *profile;
         // ── the double jump ───────────────────────────────────────────────
         let landed = land_from_jump(&world, &profile);
         let armed = landed.player.timers.double_jump_ms;
@@ -119,7 +120,10 @@ pub(crate) fn measure() -> Section {
             format!("{key}.constant_ms"),
             u32::from(profile.double_jump_window_ms),
         ));
-        section.record(Measurement::ms(format!("{key}.armed_on_landing_ms"), u32::from(armed)));
+        section.record(Measurement::ms(
+            format!("{key}.armed_on_landing_ms"),
+            u32::from(armed),
+        ));
         section.record(Measurement::flag(format!("{key}.available"), available));
         section.record(Measurement::ms(format!("{key}.usable_delay_ms"), usable_ms));
         section.record(Measurement::ups(
@@ -202,8 +206,14 @@ pub(crate) fn measure() -> Section {
                 format!("{key}.ground_terminal_ups"),
                 cj.ground_terminal,
             ));
-            section.record(Measurement::ms(format!("{key}.windup_90pct_ms"), cj.windup_90));
-            section.record(Measurement::ms(format!("{key}.windup_99pct_ms"), cj.windup_99));
+            section.record(Measurement::ms(
+                format!("{key}.windup_90pct_ms"),
+                cj.windup_90,
+            ));
+            section.record(Measurement::ms(
+                format!("{key}.windup_99pct_ms"),
+                cj.windup_99,
+            ));
             section.record(Measurement::ups(format!("{key}.exit_ups"), cj.exit));
             section.record(Measurement::ups(
                 format!("{key}.gain_over_straight_ups"),

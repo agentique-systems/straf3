@@ -15,12 +15,13 @@
 //! curve that merely rises would be produced by several wrong implementations
 //! and by one right one.
 
+use straf3_sim::PhysicsProfile;
 use straf3_sim::num::{Scalar, s};
 use straf3_sim::world::EmptyWorld;
 
 use crate::dataset::{Measurement, Section, Table};
 use crate::harness::{Axis, HZ, flying_at, gain_per_second, optimal_angle, strafe_for};
-use crate::measure::{pad, profiles};
+use crate::measure::pad;
 use crate::num::{cos_degrees, horizontal_speed};
 
 /// Entry speeds swept, in units per second.
@@ -49,7 +50,7 @@ const SHOWN: &[f32] = &[10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 75.0, 85.0];
 /// How long a terminal-speed search runs before it is called unbounded.
 const TERMINAL_SECONDS: usize = 120;
 
-pub(crate) fn measure() -> Section {
+pub(crate) fn measure(profiles: &[(&str, PhysicsProfile)]) -> Section {
     let mut section = Section::new("1. Strafe speed-gain curve against entry speed");
     section.say(
         "Every run below starts an airborne player at the stated entry speed in \
@@ -67,7 +68,8 @@ pub(crate) fn measure() -> Section {
 
     let world = EmptyWorld;
 
-    for (name, profile) in profiles() {
+    for (name, profile) in profiles {
+        let profile = *profile;
         for axis in [Axis::Forward, Axis::Strafe] {
             let mut gains = Table::with_headers(
                 format!(
@@ -97,12 +99,12 @@ pub(crate) fn measure() -> Section {
 
             for &entry in ENTRY_SPEEDS {
                 let start = flying_at(s(entry));
-                let entry_key = format!("{name}.strafe.{}.entry{}", axis.key(), pad(entry as u32, 4));
+                let entry_key =
+                    format!("{name}.strafe.{}.entry{}", axis.key(), pad(entry as u32, 4));
 
                 let mut row = vec![format!("{entry:.0}")];
                 for &angle in ANGLES {
-                    let gain =
-                        gain_per_second(&world, &profile, &start, s(angle), axis);
+                    let gain = gain_per_second(&world, &profile, &start, s(angle), axis);
                     section.record(Measurement::ups(
                         format!("{entry_key}.angle{}.gain_per_s", pad(angle as u32, 2)),
                         gain,
@@ -127,8 +129,7 @@ pub(crate) fn measure() -> Section {
                 // stops moving. Deliberately not the ceiling over all angles: a
                 // player holds one angle, and the number they can use is what
                 // holding it is worth.
-                let (terminal, seconds) =
-                    settle(&world, &profile, &start, best_angle, axis);
+                let (terminal, seconds) = settle(&world, &profile, &start, best_angle, axis);
                 section.record(Measurement::ups(
                     format!("{entry_key}.terminal_ups"),
                     terminal,

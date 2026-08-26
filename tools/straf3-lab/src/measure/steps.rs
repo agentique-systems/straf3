@@ -31,7 +31,7 @@ use straf3_sim::{PhysicsProfile, SimState, step};
 use crate::dataset::{Measurement, Section, Table};
 use crate::geometry;
 use crate::harness::{Axis, HZ, holding, settle_on, still};
-use crate::measure::{pad, profiles};
+use crate::measure::pad;
 use crate::num::horizontal_speed;
 
 /// Step heights swept, in units. Dense either side of `STEPSIZE` = 18.
@@ -70,7 +70,7 @@ const CLIP_DROPS: &[f32] = &[32.0, 64.0, 128.0];
 /// Speeds it runs off them at.
 const CLIP_SPEEDS: &[f32] = &[200.0, 400.0, 600.0, 900.0];
 
-pub(crate) fn measure() -> Section {
+pub(crate) fn measure(profiles: &[(&str, PhysicsProfile)]) -> Section {
     let mut section = Section::new("5. Edge clip and step-up");
     section.say(format!(
         "A player is placed {RUN_UP:.0} units back from the riser at the stated \
@@ -117,7 +117,8 @@ pub(crate) fn measure() -> Section {
         ],
     );
 
-    for (name, profile) in profiles() {
+    for (name, profile) in profiles {
+        let profile = *profile;
         let flat = geometry::floor();
 
         for &speed in APPROACH_SPEEDS {
@@ -133,7 +134,10 @@ pub(crate) fn measure() -> Section {
                     pad(height as u32, 2)
                 );
                 section.record(Measurement::flag(format!("{key}.climbed"), run.climbed));
-                section.record(Measurement::ups(format!("{key}.at_riser_ups"), at_that_moment));
+                section.record(Measurement::ups(
+                    format!("{key}.at_riser_ups"),
+                    at_that_moment,
+                ));
                 section.record(Measurement::ups(format!("{key}.worst_deficit_ups"), worst));
                 section.record(Measurement::ups(
                     format!("{key}.end_deficit_ups"),
@@ -387,10 +391,8 @@ fn ledge_release_x(profile: &PhysicsProfile) -> Scalar {
     let mut last_supported = geometry::LEDGE_EDGE_X;
     for sixty_fourths in 0..=(64 * 24) {
         let x = geometry::LEDGE_EDGE_X + s(sixty_fourths as f32 / 64.0);
-        let mut st = SimState::spawned_at(
-            vec3(x, s(0.0), geometry::resting_origin_z(s(0.0))),
-            s(0.0),
-        );
+        let mut st =
+            SimState::spawned_at(vec3(x, s(0.0), geometry::resting_origin_z(s(0.0))), s(0.0));
         st.player.ground = straf3_sim::GroundState::Airborne;
         let after = step(&st, &still(), &world, profile);
         if after.player.ground.is_grounded() && after.player.origin.z > s(0.0) {
@@ -411,11 +413,7 @@ fn ledge_release_x(profile: &PhysicsProfile) -> Scalar {
 /// with them, the player leaves the edge and nothing touches them until they
 /// land. Only the airborne part of the run is examined, because a landing
 /// legitimately changes the speed and that is section 4's subject.
-fn worst_command_loss_off_a_ledge(
-    profile: &PhysicsProfile,
-    drop: Scalar,
-    speed: Scalar,
-) -> Scalar {
+fn worst_command_loss_off_a_ledge(profile: &PhysicsProfile, drop: Scalar, speed: Scalar) -> Scalar {
     let world = geometry::ledge(drop);
     let mut st = settle_on(
         &world,

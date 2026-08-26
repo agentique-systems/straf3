@@ -29,7 +29,7 @@ use straf3_sim::{Buttons, PhysicsProfile, SimState, UserCmd, step};
 use crate::dataset::{Measurement, Section, Table};
 use crate::geometry;
 use crate::harness::{Axis, HZ, flying_at, holding, settle_on, strafe_once, yaw_for};
-use crate::measure::{pad, profiles};
+use crate::measure::pad;
 use crate::num::{heading_degrees, horizontal_speed};
 
 /// Seconds a technique is run for before it is declared unsettled.
@@ -72,7 +72,7 @@ const TECHNIQUES: &[(&str, &str)] = &[
     ),
 ];
 
-pub(crate) fn measure() -> Section {
+pub(crate) fn measure(profiles: &[(&str, PhysicsProfile)]) -> Section {
     let mut section = Section::new("6. Per-technique terminal speed");
     section.say(format!(
         "Each technique is run at each held angle until its horizontal speed \
@@ -90,7 +90,8 @@ pub(crate) fn measure() -> Section {
         },
     );
 
-    for (name, profile) in profiles() {
+    for (name, profile) in profiles {
+        let profile = *profile;
         let floor = geometry::floor();
 
         for (technique, _) in TECHNIQUES {
