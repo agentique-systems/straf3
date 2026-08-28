@@ -66,6 +66,7 @@ fn main() -> ExitCode {
     let result = match args.first().map(String::as_str) {
         Some("resim") => resim(&args[1..]),
         Some("from-text") => from_text(&args[1..]),
+        Some("physics") => physics(),
         Some("--help" | "-h") | None => {
             println!("{USAGE}");
             return ExitCode::SUCCESS;
@@ -94,7 +95,44 @@ webcheck — re-simulate a .s3d natively and compare the rolling digest.
         Convert a text recording into a .s3d, carrying the checksum trace.
         --name defaults to the .map file's stem.
 
+    webcheck physics
+        Print PhysicsProfile::digest() for every named profile in this tree.
+        For r12: run it before and after and diff, rather than trusting a
+        number pasted into a document.
+
 Exit status is 0 only when every comparison agreed.";
+
+// ── physics: the r12 digests, derived rather than quoted ────────────────────
+
+/// Every named profile's digest, printed by running the code that defines it.
+///
+/// r12 asks that the physics digest has not moved. A number transcribed into a
+/// document cannot answer that — it can only be compared against, and whoever
+/// compares has to trust the transcription. So this prints the digests fresh,
+/// and the check is `diff` between two runs of one command.
+///
+/// The list is written out by name and not derived, because there is no
+/// registry of profiles to iterate: a profile added to `straf3-sim` without a
+/// line here would go unnoticed, which is the one failure worth guarding, and
+/// `crates/straf3-sim/src/profile.rs` is the file to check against.
+fn physics() -> Result<(), String> {
+    println!("PhysicsProfile::digest(), derived from this tree");
+    for (name, profile) in [
+        ("cpm", PhysicsProfile::cpm()),
+        ("vq3", PhysicsProfile::vq3()),
+        ("experimental", PhysicsProfile::experimental()),
+        ("default", PhysicsProfile::default()),
+    ] {
+        println!("  {name:<16}{:#018x}", physics_digest(&profile));
+    }
+    println!();
+    println!(
+        "The digest folds the bits of every field of PhysicsProfile with no `..`,\n\
+         so a new movement constant is a new input to it. If any line above moved\n\
+         during a wave that did not intend to change physics, that is the finding."
+    );
+    Ok(())
+}
 
 // ── resim: the r6 check ─────────────────────────────────────────────────────
 
