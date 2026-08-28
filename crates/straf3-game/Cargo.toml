@@ -81,7 +81,27 @@ js-sys.workspace = true
 web-sys = { workspace = true, features = ["Document", "Element", "Window", "Response"] }
 
 [features]
-default = ["render"]
-# Draw the arena. Also selects the arena as the collision world, so what is
-# drawn and what is collided with are the same geometry by construction.
-render = ["dep:straf3-render", "dep:straf3-devtools", "dep:wgpu"]
+default = ["render", "devtools"]
+# Draw the world. Nothing else: this is the renderer and the wgpu name it needs
+# to pick a backend, and it must stay free of anything a browser would not
+# choose to download.
+render = ["dep:straf3-render", "dep:wgpu"]
+# The on-screen telemetry overlay, which is egui.
+#
+# # Why this is not part of `render`
+#
+# It used to be, and that was measured to cost the browser build a factor of
+# fifteen: 2.6 MB gzipped against `probes/wasm-render` stage D's 171 KB, with
+# `egui`, `epaint`, `ecolor` and `emath` all in the shipped wasm. The overlay
+# is a *development* affordance — a speed readout, a run clock, a split — and a
+# visitor on a `/play/<map>` link never asked for it.
+#
+# `docs/web/ARCHITECTURE.md` §0 item 7 had already decided this and named it:
+# the web bundle is "WebGPU only, no compiled-in WebGL2 fallback, no `egui`".
+# Bundling the overlay with the renderer made honouring that impossible without
+# also giving up drawing the map, which is why the fix is a second feature
+# rather than a `cfg` at the use site.
+#
+# It implies `render` because there is no frame to draw an overlay into
+# without one.
+devtools = ["render", "dep:straf3-devtools"]

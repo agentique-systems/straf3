@@ -448,7 +448,7 @@ pub fn straf3_debug_state() -> JsValue {
     DEBUG_STATE.with(|slot| {
         slot.borrow().map_or(JsValue::NULL, |state| {
             let object = Object::new();
-            let mut set = |key: &str, value: JsValue| {
+            let set = |key: &str, value: JsValue| {
                 let _ = Reflect::set(&object, &JsValue::from_str(key), &value);
             };
             let number = |v: f64| JsValue::from_f64(v);

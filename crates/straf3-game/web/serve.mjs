@@ -10,6 +10,16 @@
 //
 //   node crates/straf3-game/web/serve.mjs [port]
 //
+// The default port is 8790 and it must stay off 8787 and 8788: the wave's
+// contract reserves 8787 for the one origin (`web/dev/serve.mjs`) and 8788 for
+// the records service, and a static file server squatting on either answers
+// `/v1` with a 404 that reads exactly like the records service being broken.
+//
+// Prefer the real origin when the site is up — `node web/dev/serve.mjs --port
+// 8787 --client-dir crates/straf3-game/web/pkg` serves this bundle at
+// `/client/*` on the origin the game actually ships on, which is a truer test
+// than this file. This exists for when it is not up.
+//
 // On a software-only machine Chrome needs `--enable-unsafe-webgpu
 // --use-angle=swiftshader` before it will offer a WebGPU adapter at all.
 
@@ -20,7 +30,7 @@ import { fileURLToPath } from "node:url";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const repo = join(here, "..", "..", "..");
-const port = Number(process.argv[2] || 8788);
+const port = Number(process.argv[2] || 8790);
 
 // The two mounts the wave contract reserves as first URL segments (URLS.md §6).
 // `/assets/maps` is READ ONLY here — another session owns that directory.

@@ -60,15 +60,30 @@ async function evaluate(expression) {
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+/// Fold an angle difference into (-180, 180], so "turn to 90 from 350" is a
+/// 100-degree turn and not a 260-degree one.
+const wrap180 = (d) => (((d + 180) % 360) + 360) % 360 - 180;
 
 /// Poll an expression until it is truthy. Used instead of a fixed sleep
 /// wherever there is something real to wait for — the whole point of a
 /// software rasteriser is that you cannot guess how long anything takes.
 async function waitFor(expression, timeoutMs = 30000) {
   const deadline = Date.now() + timeoutMs;
+  let last = "";
   for (;;) {
-    if (await evaluate(expression)) return true;
-    if (Date.now() > deadline) throw new Error(`timed out waiting for: ${expression}`);
+    // A throw is "not yet", not a failure. `Page.navigate` resolves before the
+    // new document exists, so the first few polls run against the old one — or
+    // against no document at all — and reading an element that is not there
+    // yet raises rather than returning false.
+    try {
+      if (await evaluate(expression)) return true;
+    } catch (e) {
+      last = e.message;
+    }
+    if (Date.now() > deadline) {
+      throw new Error(`timed out waiting for: ${expression}${last ? ` (last: ${last})` : ""}`);
+    }
     await sleep(200);
   }
 }
@@ -138,6 +153,27 @@ async function mouseMove(from, dx, dy, steps = 20, delayMs = 8) {
 
 let cursor = [640, 360];
 
+/// The box a dispatched pointer position must stay inside. Inset from the
+/// 1280×720 window so a sweep cannot land exactly on the edge.
+const BOUNDS = { x0: 60, x1: 1220, y0: 60, y1: 660 };
+
+/// Put the virtual cursor back at `(x, y)` without turning the view.
+///
+/// Mouse motion only turns the view while the pointer is grabbed, so the walk
+/// back is free as long as it happens with the lock released. Escape releases
+/// it; Chrome then refuses a fresh `requestPointerLock` for about a second
+/// after a user-initiated exit, which is what the wait is for.
+async function reanchor(x, y) {
+  await keyEvent("keyDown", "Escape");
+  await keyEvent("keyUp", "Escape");
+  await sleep(1400);
+  await send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y, buttons: 0 });
+  cursor = [x, y];
+  await send("Page.bringToFront");
+  await click(x, y);
+  await sleep(300);
+}
+
 async function step(s) {
   switch (s.do) {
     case "navigate":
@@ -168,18 +204,79 @@ async function step(s) {
     // a mouse movement happening *together*, and a driver that could only do
     // them in sequence could not produce one.
     case "hold": {
-      for (const code of s.keys ?? []) await keyEvent("keyDown", code);
       const until = Date.now() + s.ms;
+      const samples = [];
+      let nextSample = 0;
       while (Date.now() < until) {
-        if (s.mouse) cursor = await mouseMove(cursor, s.mouse[0], s.mouse[1], 10, 10);
-        else await sleep(50);
+        // Re-pressed rather than pressed once. Losing window focus makes the
+        // client let go of every held key — deliberately, so that a player who
+        // alt-tabs mid-strafe does not come back still strafing — and this box
+        // blurs a busy page on its own. Without re-pressing, a run would
+        // silently stop moving part-way through and look like a physics bug.
+        // winit ignores OS key repeats, and these are not repeats.
+        for (const code of s.keys ?? []) await keyEvent("keyDown", code);
+        if (s.mouse) cursor = await mouseMove(cursor, s.mouse[0], s.mouse[1], 4, 10);
+        else await sleep(60);
+        if (s.sample_ms && Date.now() >= nextSample) {
+          nextSample = Date.now() + s.sample_ms;
+          const state = await evaluate("globalThis.__straf3_module?.straf3_debug_state?.() ?? null");
+          if (state) {
+            samples.push(
+              `t${state.time_ms} (${state.x.toFixed(0)},${state.y.toFixed(0)},${state.z.toFixed(0)}) ` +
+              `yaw${state.yaw.toFixed(0)} ${state.speed.toFixed(0)}ups ` +
+              `${state.grounded ? "gnd" : "air"} run${state.run}:${state.run_ms}`
+            );
+          }
+        }
       }
       for (const code of s.keys ?? []) await keyEvent("keyUp", code);
-      return { held: s.keys ?? [], ms: s.ms };
+      return { held: s.keys ?? [], ms: s.ms, ...(samples.length ? { samples } : {}) };
     }
     case "mouse":
       cursor = await mouseMove(cursor, s.dx ?? 0, s.dy ?? 0, s.steps ?? 20, s.delay_ms ?? 8);
       return { moved: [s.dx ?? 0, s.dy ?? 0] };
+    // Aim at an absolute view angle, by measuring rather than by dead
+    // reckoning. Two things make open-loop aiming wrong: entering pointer lock
+    // emits one warped delta of its own (measured: -16 counts of pitch), and a
+    // sweep long enough to turn 90 degrees runs the cursor off the viewport,
+    // where the deltas stop. So this reads the angle the client actually has,
+    // moves by the remaining error in viewport-sized chunks, and looks again.
+    case "look_to": {
+      const perCount = 0.022 * 5; // Quake's m_yaw/m_pitch times cl_sensitivity
+      const attempts = [];
+      let reached = null;
+      for (let attempt = 0; attempt < 8; attempt++) {
+        const state = await evaluate("__straf3_module.straf3_debug_state()");
+        reached = { yaw: +state.yaw.toFixed(2), pitch: +state.pitch.toFixed(2) };
+        const yawError = s.yaw === undefined ? 0 : wrap180(s.yaw - state.yaw);
+        const pitchError = s.pitch === undefined ? 0 : s.pitch - state.pitch;
+        if (Math.abs(yawError) < 0.4 && Math.abs(pitchError) < 0.4) break;
+
+        // Turning left is a negative delta, so the yaw error's sign flips.
+        const wantX = -yawError / perCount;
+        const wantY = pitchError / perCount;
+        // Never leave the viewport. Measured: once a dispatched coordinate
+        // goes outside it, the deltas stop being the ones sent — 80 events of
+        // -20 came back as 108 events summing to -4277, with ±475 spikes in
+        // them, because the real cursor starts being warped. Inside the
+        // viewport every delta arrives exactly as sent.
+        const dx = clamp(wantX, BOUNDS.x0 - cursor[0], BOUNDS.x1 - cursor[0]);
+        const dy = clamp(wantY, BOUNDS.y0 - cursor[1], BOUNDS.y1 - cursor[1]);
+        attempts.push(`err(${yawError.toFixed(1)},${pitchError.toFixed(1)}) move(${dx.toFixed(0)},${dy.toFixed(0)})`);
+
+        if (Math.abs(dx) < 1 && Math.abs(dy) < 1) {
+          // Hard against an edge with turning still to do. Drop the lock, walk
+          // the cursor back across the viewport — which the client ignores,
+          // because motion only turns the view while the pointer is
+          // grabbed — and take it again.
+          await reanchor(wantX < 0 ? BOUNDS.x1 : BOUNDS.x0, wantY < 0 ? BOUNDS.y1 : BOUNDS.y0);
+          continue;
+        }
+        cursor = await mouseMove(cursor, dx, dy, Math.max(4, Math.round(Math.abs(dx + dy) / 20)), 6);
+        await sleep(150);
+      }
+      return { look_to: { yaw: s.yaw, pitch: s.pitch }, reached, attempts };
+    }
     case "screenshot": {
       // `fromSurface` decides which of two different things is captured, and
       // on a software-only headless host they do not agree: true asks the

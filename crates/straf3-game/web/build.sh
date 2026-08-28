@@ -30,13 +30,24 @@ profile="web-release"
 target_dir="${CARGO_TARGET_DIR:-$repo/target}"
 out="$here/pkg"
 
-echo "==> cargo build (${profile}, wasm32-unknown-unknown)"
+# `--no-default-features --features render`, and the omission is the point:
+# the default set adds `devtools`, which is the egui overlay.
+# `docs/web/ARCHITECTURE.md` §0 item 7 decided the browser bundle is "WebGPU
+# only, no compiled-in WebGL2 fallback, no `egui`", and building the default
+# feature set here silently broke that — measured at 2.6 MB gzipped against
+# probes/wasm-render stage D's 171 KB, with egui, epaint, ecolor and emath all
+# in the shipped wasm. A player on a `/play/<map>` link never asked for a
+# speedometer, and paying fifteen times the download for one is not a trade
+# anybody made deliberately.
+features=(--no-default-features --features render)
+
+echo "==> cargo build (${profile}, wasm32-unknown-unknown, features: render)"
 if [[ "$profile" == "debug" ]]; then
     cargo build --manifest-path "$repo/Cargo.toml" -p straf3-game \
-        --target wasm32-unknown-unknown
+        --target wasm32-unknown-unknown "${features[@]}"
 else
     cargo build --manifest-path "$repo/Cargo.toml" -p straf3-game \
-        --target wasm32-unknown-unknown --profile "$profile"
+        --target wasm32-unknown-unknown --profile "$profile" "${features[@]}"
 fi
 
 wasm="$target_dir/wasm32-unknown-unknown/$profile/straf3_game.wasm"
@@ -61,3 +72,25 @@ for f in "$out/straf3_game_bg.wasm" "$out/straf3_game.js"; do
 done
 total=$(cat "$out/straf3_game_bg.wasm" "$out/straf3_game.js" | gzip -9 -c | wc -c)
 printf '  %-24s %9s     %9s B gzipped\n' "TOTAL" "" "$total"
+
+# Assert the shape ARCHITECTURE §0 item 7 decided, rather than trusting the
+# feature flags above to have meant it. A byte-scan is the check that cannot be
+# fooled by a transitive dependency re-introducing the overlay: the size alone
+# would not say *what* got in, and by the time anyone measured the size again
+# it would be somebody else's problem.
+echo
+echo "==> bundle shape (ARCHITECTURE §0 item 7: WebGPU only, no WebGL2, no egui)"
+banned=0
+for symbol in egui epaint ecolor; do
+    hits=$(grep -c -a -o "$symbol" "$out/straf3_game_bg.wasm" || true)
+    if [[ "$hits" -gt 0 ]]; then
+        echo "  FAIL  '$symbol' appears $hits time(s) in the shipped wasm" >&2
+        banned=1
+    else
+        echo "  ok    no '$symbol'"
+    fi
+done
+[[ "$banned" -eq 0 ]] || {
+    echo "The overlay is in the browser bundle. Build with --no-default-features --features render." >&2
+    exit 1
+}

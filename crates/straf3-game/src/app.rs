@@ -391,7 +391,7 @@ pub struct App {
     #[cfg(feature = "render")]
     renderer: Option<straf3_render::Renderer>,
     /// The on-screen overlay, built on the first frame the device exists.
-    #[cfg(feature = "render")]
+    #[cfg(feature = "devtools")]
     hud: Option<straf3_devtools::Hud>,
 }
 
@@ -510,7 +510,7 @@ impl App {
             last_fps: 0,
             #[cfg(feature = "render")]
             renderer: None,
-            #[cfg(feature = "render")]
+            #[cfg(feature = "devtools")]
             hud: None,
         }
     }
@@ -902,6 +902,7 @@ impl App {
         if let Some(renderer) = &mut self.renderer {
             // Built on the first frame the device exists — which natively is
             // the first frame and on the web is several frames in.
+            #[cfg(feature = "devtools")]
             if self.hud.is_none() {
                 self.hud = renderer.with_device(straf3_devtools::Hud::new);
             }
@@ -910,6 +911,7 @@ impl App {
             // when no ghost is loaded, and the overlay then draws no split at
             // all rather than `+0.000`, which would claim the player was level
             // with a personal best that is not there.
+            #[cfg(feature = "devtools")]
             let sample = straf3_devtools::TelemetrySample::of(self.game.state())
                 .with_fps(self.last_fps)
                 .with_split_ms(self.split_ms);
@@ -932,35 +934,44 @@ impl App {
                     center_offset: hull.center_offset,
                 }
             });
+            #[cfg(feature = "devtools")]
             let pixels_per_point = self
                 .window
                 .as_ref()
                 .map_or(1.0, |w| w.scale_factor() as f32);
+            #[cfg(feature = "devtools")]
             let hud = self.hud.as_mut();
-            renderer.render_frame(
-                straf3_render::Frame {
-                    prev: &self.game.previous().player,
-                    curr: &self.game.state().player,
-                    alpha: straf3_render::InterpolationAlpha(self.game.alpha()),
-                    ghost,
-                },
-                |o| {
-                    if let Some(hud) = hud {
-                        hud.draw(
-                            straf3_devtools::HudFrame {
-                                device: o.device,
-                                queue: o.queue,
-                                encoder: o.encoder,
-                                target: o.target,
-                                width: o.width,
-                                height: o.height,
-                                pixels_per_point,
-                            },
-                            &sample,
-                        );
-                    }
-                },
-            );
+            let frame = straf3_render::Frame {
+                prev: &self.game.previous().player,
+                curr: &self.game.state().player,
+                alpha: straf3_render::InterpolationAlpha(self.game.alpha()),
+                ghost,
+            };
+            // Two calls rather than one with a `cfg` inside the closure: the
+            // closure's body is what decides whether `straf3-devtools` is
+            // linked at all, and a `cfg!` there would still name the crate.
+            // Without `devtools` the overlay hook is handed a closure that
+            // does nothing, and egui is absent from the binary — which is what
+            // ARCHITECTURE §0 item 7 asks of the web bundle.
+            #[cfg(feature = "devtools")]
+            renderer.render_frame(frame, |o| {
+                if let Some(hud) = hud {
+                    hud.draw(
+                        straf3_devtools::HudFrame {
+                            device: o.device,
+                            queue: o.queue,
+                            encoder: o.encoder,
+                            target: o.target,
+                            width: o.width,
+                            height: o.height,
+                            pixels_per_point,
+                        },
+                        &sample,
+                    );
+                }
+            });
+            #[cfg(not(feature = "devtools"))]
+            renderer.render_frame(frame, |_| {});
         }
 
         self.report_telemetry(delta.timing.elapsed_ms);
