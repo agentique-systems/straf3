@@ -1,19 +1,28 @@
 # Canonical Straf3 movement
 
-**Status of this document.** Part 1 is written. Parts 2 and 3 are not.
+**Status of this document.** Part 1 is written. Part 3 is half written. Part 2
+is not.
 
 | Part | What it is | State |
 |---|---|---|
 | 1 | The criteria a mechanic must meet to enter canon | **written; amended three times; still frozen against candidate evidence** |
-| 2 | The verdict on crouch slide, dash and wall jump | not written — no candidate was measured before the wave ended |
-| 3 | The frozen `PhysicsProfile::straf3()`, constant by constant | not written — `straf3()` does not exist yet |
+| 2 | The verdict on crouch slide, dash and wall jump | **written. All three rejected**, none by a G7 number, no threshold edited |
+| 3 | The frozen `PhysicsProfile::straf3()`, constant by constant | **written.** It exists, it is the default, and its physics digest `4350ccc31bec5d4c` is unchanged from `cpm`'s |
 
-**Nothing has been judged against these criteria.** The wave ended on a capacity
-limit before the lab published candidate numbers, so Part 1 stands complete and
-untested, which is the honest state and a usable one: the next wave inherits
-criteria that provably predate every number they will be applied to. Part 2's
-§2.0 and Part 3's opening record what is already established, so none of it has
-to be re-derived.
+**All three candidates have now been judged, and all three are rejected.** Part 1
+kept its pre-publication immunity all the way through: every threshold it carries
+provably predates every number it was applied to, and **no threshold was edited
+this wave** — §1.7 gains no fourth amendment and nothing needs restating under
+the threshold-edit rule. The only measurement *parameter* that moved is G7's
+refinement floor, which Part 1 declares a parameter rather than a constant, which
+is disclosed in §2.2, and which **decides nothing**: no verdict rests on a G7
+number.
+
+Three things in this document are stated against the interest of the conclusion
+they sit next to, and they are the reason to trust the rest: W7's definition
+disagrees with its own calibration and was applied as written anyway (§2.6);
+W3's levelling test, read strictly, fires on the *control* (§2.4); and the dash
+retune's pre-registered prediction was half wrong (§2.3).
 
 That order is the whole point and it is worth stating before anything else.
 
@@ -933,6 +942,16 @@ which four rounds of this argument got wrong before anyone opened the files.**
   is the weakest-supported constant in this tree, and **Part 3 should treat it
   as a value Straf3 must choose deliberately rather than one it can cite.**
 
+  > **Superseded in part — see §3.7.** This paragraph's reasoning rested on the
+  > upstream being unreachable. It has since been read from bytes, and it does
+  > carry the 400. §3.7 splits the constant: the *magnitude* is cited to the
+  > upstream, and the *quantity* — a window opened by the landing rather than by
+  > the previous jump — remains Straf3's own deliberate choice, for a reason the
+  > upstream's own code makes concrete. **No threshold has been edited and no
+  > criterion has moved**; this note records a change in the evidence, not in
+  > Part 1. The text above is left standing as the historical record of what was
+  > known when the criteria were frozen.
+
 *The structure is better attested than either number, and that is worth more to
 Part 3.* The same file's vq3 branch reads `cpm_pm_jump_z = 0; // turn off
 double-jump in vq3` — an independent port spelling "VQ3 is CPM with the
@@ -1155,22 +1174,504 @@ comparable.
 
 ## Part 2 — The verdicts
 
-**Not written, and deliberately not attempted.** The wave that produced Part 1
-ended on a capacity limit before `tools/straf3-lab` published candidate numbers.
-No candidate has been scored against these criteria by anyone.
+**All three candidates are rejected for this wave.** None is admitted to
+`PhysicsProfile::straf3()`, and all eight candidate constants stay at the
+disabling values `vq3()` and `cpm()` carry.
 
-That is a better outcome than the alternative and it is worth saying plainly: a
-document whose whole discipline is that criteria precede numbers would have been
-worth nothing if it had ended by producing verdicts in a hurry to look finished.
-**Part 1's pre-publication immunity is intact** — every threshold here was fixed
-before any candidate measurement existed, and the next wave inherits that rather
-than having to re-establish it.
+| | crouch slide | dash | wall jump |
+|---|---|---|---|
+| Gates | all pass | all pass **after** the §1.5 retune | all pass |
+| **Verdict** | **rejected** | **rejected** | **rejected** |
+| Decided by | **W3 — weak, and W3 is required at pass** | **W3 weak, and W7 fail at 5 preconditions** | **W3 weak, W4 fail at 1 context / 1 kind, W2 capped at weak** |
 
-Part 2 will record, for each of crouch slide, dash and wall jump: the gates, the
-weighed scores with their measured numbers per context, the verdict — admitted,
-rejected, or unjudgeable on available evidence — any geometry dependency, and
-for a rejection the criterion, the number and what would change the answer. A
-rejection under G7 carries the two obligations §1.6 sets.
+**No threshold was edited to reach any of this.** §1.7 gains no fourth amendment
+and every number below is scored against Part 1 exactly as it stood before the
+sweep existed. r12 is intact, and the one place where a measurement *parameter*
+moved — G7's refinement floor — is disclosed in §2.2 and **decides nothing**.
+
+**Rejecting all three is a real outcome, not a failure of the wave.** §4.1 of the
+vision says no mechanic is included merely because it existed in an older game,
+and §1.8 point 6 of this document says a rejection is not forever: each verdict
+below names the criterion, the number, and what would change the answer, so the
+next wave can satisfy it or argue with it rather than re-proposing from scratch.
+What this wave establishes is that three plausible mechanics, implemented and
+measured properly, do not clear a bar written before they were measured. That
+bar is now tested rather than merely stated.
+
+### 2.1 What the verdicts do *not* rest on
+
+Recorded first because it is the question a reader should be able to settle
+without reading the rest.
+
+**No verdict here turns on a G7 number.** Every rejection is decided by W3, W4,
+W7 or W2, and G7 passes for all three candidates on the reading in §2.2. So the
+auditor's independent ruling on G7's 0.25° refinement floor — pending as this is
+written, and deliberately taken out of the hands of everyone who is party to it —
+**cannot change a single verdict in either direction**. If it rules the floor a
+threshold edit, the consequence is a disclosure under the threshold-edit rule and
+an entry in §1.7; it is not a re-scoring, because nothing was scored on it.
+
+That is stated as a fact about the arithmetic, not as a reason to relax about the
+ruling. §1.6's two obligations on a G7 rejection are not triggered, because there
+is no G7 rejection.
+
+### 2.2 G7's floor moved, and it was the instrument that failed, not the technique
+
+Part 1's G7 requires the instrument to pass a self-test before it is used on a
+candidate: run it on strafejumping and it must report **no** surviving
+discontinuity; run it on overbounce and it must report one.
+
+**At Part 1's stated 1° starting floor, the instrument failed that self-test.**
+The worst strafejump step — `vq3`/`strafe` at 1000 ups entry, at 72.19° — still
+measured **56.75 ups** after refinement to 1°, above the 16 ups threshold. The
+rule as parameterised would have reported a cliff in strafejumping and rejected
+the technique the game is named after. Refined to **0.25°** the same step measures
+**14.60 ups**, and 56.75 → 14.60 across a ×0.25 change in floor is a step
+*halving with the grid*, which is what a gradient does and what a cliff does not.
+Overbounce's step is unmoved at **447.55 ups across 1/16 of a unit** at a drop
+height of 125.344 units. The instrument passes both halves at 0.25° and every G7
+number in this document is taken there.
+
+**Why this is a parameter and not a nudge, and why it is nonetheless being ruled
+on by someone else.** Part 1 states the floor is "a parameter of the rule, not a
+constant", that a step still above threshold at the starting floor should be
+refined further, that the floor needed must be recorded, and that "the finding is
+*whether it halves*". Every one of those conditions is met. But the honest shape
+of the event is also this: *a measurement floor was loosened, after data existed,
+by the parties who need the instrument to work, justified by the original setting
+producing an absurd result* — which is likewise a precise description of an
+illegitimate threshold nudge. The two are separated only by an argument, and the
+people who made the argument are inside it. So it is recorded here and ruled on
+independently by the auditor, **before** these verdicts were final. Since §2.1
+shows no verdict depends on it, that ruling costs nothing to wait for and the
+record is better for having it.
+
+**A pre-registration that was half right, graded by someone else.** Part 1's G7
+predicted this exposure in advance and named a curve for it: `vq3`/`forward` at
+500 ups, in the 50°–60° band where the wish-speed clamp opens. That band is not
+the worst one; the worst is `vq3`/`strafe` at 1000 ups. **The prediction was right
+about the mechanism and wrong about the curve.**
+
+> *Auditor's assessment of that prediction — to be recorded here in the auditor's
+> own words rather than canon's, because a party should not grade its own
+> forecast.*
+
+### 2.3 The gates
+
+| | crouch slide | dash | wall jump |
+|---|---|---|---|
+| **G1** determinism | see below | see below | see below |
+| **G2** in-scope measurements moved | **0 / 1059** | **0 / 1059** | **0 / 1059** |
+| **G3** worst latency, presses that fire | **0** | **0** | **0** |
+| **G3** inputs ignored | see below | see below | see below |
+| **G5(a)** armings on flat ground | **0** | **30 → 0** after the retune | **0** |
+| **G5(b)** point-naive median | **0.0000** | **0.0000** | **0.0000** |
+| **G6** velocity-magnitude clamp | none | none | none |
+| **G6** un-invoked terminal speeds | unmoved | unmoved | unmoved |
+| **G7** worst surviving aim step (0.25°) | 554.86 ups | 428.88 ups | 239.51 ups |
+| **G7** worst closed-form residual | 14.41 ups | 117.98 ups | 8.52 ups |
+| **G8** disabling constants | yes | yes | yes |
+
+**G2 passes, and the denominator is named rather than implied.** 1,059 of the
+2,211 published values were re-measured: the `cpm` half, because `experimental()`
+is `..Self::cpm()` and a `vq3` re-measurement would describe a profile nobody has
+proposed. §7 restates other sections' numbers and §8 is not
+profile-parameterised. Not one in-scope value moved.
+
+**G5(b) passes for all three, at the far end of the gate.** The point-naive
+policy — invoke at the first available command, aimed along the current heading —
+returns a median ratio of **0.0000** against the best. The gate fails at ≥ 0.95.
+These mechanics are the opposite of a cooldown by this measure: the obvious play
+is worth nothing.
+
+**G5(a) and the retune.** The dash armed **30 times in 30 seconds on flat ground**
+at a peak speed of exactly 320.00 ups — `max_speed`, so the gate's premise held
+— which is the failure Part 1 disclosed in advance from reading `step.rs`.
+`crates/straf3-sim/tests/canon_gates.rs` reaches the same conclusion by a
+different route, ten armings out of ten landings at zero speed; two independent
+instruments agreeing. The single §1.5 retune, pre-registered in §3.8 *before* the
+re-measurement, takes it to **0 in all seven contexts**. The slide and the wall
+jump pass unretuned, for the reasons Part 1 predicted: `slide_entry_speed` 400 is
+above `max_speed`, and flat ground has no plane whose `|normal.z|` is at or below
+`wall_normal_max` 0.3.
+
+**The retune's prediction was half wrong, and the disclosure is the point.** §3.8
+predicted W4 "may fall". **It did not: 5 contexts / 3 kinds, unchanged.** The
+reason is worth more than the prediction was: *the fall to the arming landing is
+itself a strafejump*, so a player holding 50–70° from the first command enters at
+320 and lands well above 400, earning in the air the speed the entry did not
+supply. What the retune removes is not the mechanic but the lazy aims — on flat
+ground at 320 ups the best delta falls from **6.73 to 0.01** while 47 timings
+still fire.
+
+*Whether "earned during the approach" satisfies G5(a) is a reading of the gate,
+and lab correctly left it to canon. **It does.** G5(a) asks how often the
+mechanic becomes available to a player who never exceeds `max_speed`, on flat
+ground. A player who reaches 400 ups by holding a strafe angle down a fall **has
+exceeded `max_speed`**, and did so by executing the canonical technique. That is
+the gate's two-currencies argument working exactly as §1.3 states it: the
+availability was bought, and the price was paid in the skill the game is about.
+The gate would be measuring something else entirely if "earned" excluded earning.*
+
+**G1 is not decided by the sweep and is not claimed here.** `cargo xtask
+determinism` across all four targets and
+`the_checksum_covers_the_state_a_technique_depends_on` decide it. What can be
+stated: `SimState::checksum` folds `slide_ms`, `dash_ms` and `wall_contact_ms`,
+so no candidate branches on state the checksum cannot see. The four-target run is
+the auditor's, and **no candidate is admitted, so no candidate constant changes
+and the question is not load-bearing for this freeze.**
+
+**G3's second count is a measured gap, disclosed rather than proxied.** The
+instrument rotates one command's wish direction and asks whether anything moved;
+it cannot ask that of a jump press, because under canon an airborne jump press
+does nothing and there is no control behaviour to differ from. What is read from
+the source instead: the dash and the wall jump both set `jump_held`, **exactly as
+a floor jump does** — the press is consumed until released, which is the
+inherited edge-trigger and not an animation lock. No candidate takes a command
+from the player and returns it later, which is what §4.4's anti-goal names. G3
+passes on that reading, and the reading is stated so it can be disagreed with.
+
+**G7 passes for all three, and the reason is where the steps sit.** G7 fails only
+on a surviving step that exceeds 16 ups **and does not coincide with a boundary
+the player can perceive**. Every large surviving step in all three candidates
+sits in a `ledge256` or `corner` cell — where a quarter-degree of aim decides
+whether the player leaves the edge or meets the wall. An edge and a wall are
+surfaces the player is touching, which is the first example §1.3 gives of a
+perceptible boundary. The steps are large; they are not invisible. Their
+locations are published per cell (`g7_aim_at_deg`, `g7_geometry_at_units`)
+precisely so this can be checked rather than taken.
+
+*Two honest qualifications.* The dash's 117.98 ups closed-form residual is
+entirely the `corner` cell, where the impulse meets a plane inside the same
+command — the rule predicts the impulse exactly and the world then intervenes,
+which is canon's own collision behaviour rather than the mechanic being
+unpredictable. And **no closed form is offered for the horizon outcome**, only
+for the impulse; G7 part 1 asks for a rule that computes "the mechanic's effect",
+and the impulse is that effect, but a reader who thinks the horizon is what must
+be predicted should know it was not.
+
+**The timing axis could not be refined at all**, because one command is the
+simulation's input quantum and there is no finer grid. "Does this step shrink
+when the grid is refined" has no meaning there. Published as a gap, not answered.
+
+### 2.4 Crouch slide — rejected
+
+**Gates:** all pass. **§2.0's question is settled and it does not decide the
+mechanic** (§2.5).
+
+| | number | band |
+|---|---|---|
+| **W1** naive-harm | **209 / 17,472 = 1.2%** | **pass** |
+| **W2** gap median, 7 contexts qualifying | **1.0037** | pass on the gap |
+| **W2** execution window | 8–152 ms in six contexts; **degenerate at `ceiling48`** | pass on the median, disclosed |
+| **W3** | **weak** | **required at pass — this is the rejection** |
+| **W4** material contexts / kinds | **7 / 4** | **pass** |
+| **W5** techniques dominated everywhere | **0** | **pass** |
+| **W7** constants / state / preconditions | 3 / 1 / **3** | **pass** |
+
+**The verdict, and the number behind it: W3 scores *weak*, and §1.5 requires W1,
+W2 and W3 all at pass.** W3's ordered tests: levelling does not hold as a flat
+response (see the ruling below), so the case survives test 1; there *are*
+contexts where using the slide together with a held angle beats either alone by
+more than the materiality threshold — `ledge256` at 800 ups by **+243.79 ups**,
+at 400 by +159.52, `ramp50` at 800 by +93.21, `step18` at 640 by +36.23 — so it
+survives test 2; but test 3 asks whether entry-speed sensitivity
+`d(absolute exit speed)/d(entry speed)` is **≤ 0 anywhere in the swept range**,
+and it is, repeatedly and substantially: `floor` −0.4755 between 400 and 500 ups,
+`corner` −1.2301 between 320 and 400, `ledge256` −2.9058 between 800 and 1000.
+**Arriving faster leaves you slower**, in several contexts, at the horizon. That
+is *weak*, not *fail*, and weak is not enough for a required criterion.
+
+**What would change the answer:** an entry-speed response that is monotonic —
+i.e. a slide whose value does not invert as the player arrives faster. That is a
+question about how the mechanic interacts with the ground terminal speed, not
+about `slide_friction`'s magnitude, so it is unlikely to be reachable by tuning
+the three existing constants. The slide's one retune was not spent, and remains
+available to a future wave.
+
+**A ruling on W3's levelling test, disclosed because it went the candidate's
+way.** W3 fails a mechanic outright if it "ever sets absolute exit speed to a
+value independent of the entry speed". Read strictly — any adjacent pair of entry
+speeds with a zero slope — this fires: `floor` returns 440.09 at both 320 and 400
+ups. **I have ruled that levelling means the response is flat, not that two
+sampled points coincide**, because the same strict reading fires on the
+*control*: on flat ground the canonical technique returns 480.28, 480.31, 480.34,
+480.36, 480.36, 480.37 across the whole entry range — the existing vocabulary
+levels harder than the candidate does, because a second of strafejumping converges
+to a terminal speed regardless of what came in. A test that condemns the
+incumbent for the property it is testing is measuring the horizon, not the
+mechanic. **This ruling does not save the crouch slide** — W3 is weak either way,
+and under the strict reading it would be *fail* — so nothing turns on it here.
+It is recorded because the next wave will meet it with a candidate whose verdict
+does turn on it, and because a ruling made when it changes nothing is worth more
+than one made when it does.
+
+**The two kinds of zero, kept apart.** On flat ground the slide's outcome delta
+at §1.1's horizon is 0.00 across essentially the whole naive neighbourhood. That
+is **not** "the mechanic does nothing": a player holding a direction converges to
+the ground terminal speed within the second between the window closing and the
+horizon whether or not they slid. The advantage is real and then it is spent. The
+horizon was **not** moved to flatter the mechanic — §1.1 defines it where it
+defines it — and `peak_gain_ups` is published beside it as an explicitly labelled
+diagnostic no criterion is scored on. A verdict that read that zero as "no
+effect" would be wrong about the mechanic while reaching the same conclusion,
+which is exactly the sort of accidental rightness this document exists to avoid.
+
+**Geometry dependency, in §1.5's terms.** The slide's stated primary use is
+carrying speed under a low ceiling. `ceiling48` is the one context where the
+timing axis is **degenerate** — crouch is forced, every invocation timing produces
+the identical run — so in the mechanic's own headline use there is nothing to
+time. That is a fact about the mechanic and not about the map. Separately, and
+measured on real geometry rather than testbed: on the training map built for it,
+**no entry speed the map can produce leaves the tunnel still sliding** when the
+slide is armed where the map's own signage says to arm it; armed at the last
+point a standing hull fits, **550 ups** is the lowest that works, against a
+predicted 450. *Where* the slide is armed is worth more than how fast the player
+arrives — a second optimal-play question adjacent to §2.0, which it does not
+answer.
+
+### 2.5 §2.0 settled: tap-and-stand-up does not dominate
+
+The code claim §2.0 makes is **true**. `PM_Friction` selects `slide_friction` on
+`slide_duration_ms != 0 && p.timers.slide_ms > 0` and reads nothing else;
+`p.crouched` is not consulted, and the wish-speed cap is a separate test in
+`walk_move`. So the two halves of "sliding" are gated on different things — the
+friction on a timer, the speed price on a posture — and a player who taps crouch
+and stands up on the next command **keeps the friction for the whole countdown
+having paid the posture cost for one command**. Armed at 400 ups on flat ground,
+all 75 commands of the slide are spent standing.
+
+**But it does not dominate.** Over the cells where both policies fire, hold beats
+tap materially in **16** cells, tap beats hold materially in **7**, and **18** are
+within 16 ups of each other. Largest tap advantage +229.10 ups (`corner` at 500);
+largest hold advantage +280.21 ups (`ledge256` at 400). Which policy wins is
+decided by the geometry — whether the crouched hull clears something, whether the
+player leaves the edge — not by the friction.
+
+So §2.0's worry is answered: the crouch slide is **not** a 600 ms friction toggle
+with a speed price of admission, and the anti-toggle case does not have to be
+remade. This did not rescue the mechanic, and it was not supposed to; it removes
+a reason to reject it that turned out not to hold, which is what settling a
+question before a verdict is for.
+
+*One related finding, measured because it was asked for:* `slide_entry_speed` is
+checked **once, at entry**, and never re-read. Armed at 400 ups with nothing held,
+the timer runs its full 75 commands with **74 of them below the entry speed**,
+ending at 208.48 ups — below `max_speed`. The speed price is a toll at the door,
+not a condition of continued use.
+
+### 2.6 Dash — rejected
+
+**Gates:** all pass, G5(a) only after the single pre-registered retune (§2.3).
+
+| | number | band |
+|---|---|---|
+| **W1** naive-harm | **79 / 26,208 = 0.3%** | **pass** |
+| **W2** gap median, 5 contexts qualifying | **1.0000** | pass |
+| **W3** | **weak** | **required at pass — a rejection** |
+| **W4** material contexts / kinds | **5 / 3** | **pass** |
+| **W5** techniques dominated everywhere | **0** | **pass** |
+| **W7** constants / state / preconditions | 2 / 1 / **5** | **fail — the second rejection** |
+
+**Two independent rejections, and it matters that they are independent.**
+
+*W3 is weak*, on the same test that caught the slide: the dash chains materially —
+`corner` at 500 ups gains **+356.29 ups** over either alone, `ledge256` at 400
+gains +56.18 — so tests 1 and 2 survive, but entry-speed sensitivity is ≤ 0 in
+many places (`ramp26` **−1.9792** between 800 and 1000 ups, `floor` −0.5246,
+`ramp50` −0.6590). Weak, and W3 is required at pass.
+
+*W7 fails at five preconditions.* The predicates gating the dash in `step.rs` are
+`jump_pressed`, `!jump_held`, airborne, `dash_ms > 0`, and `wishdir != 0` — five,
+with `addspeed > 0` excluded as a test on the impulse rather than on state, and
+before the retune adds `speed >= dash_entry_speed` at the arming landing, which
+would make six. W7 fails at ≥ 5.
+
+**A defect in W7 that must be disclosed even though it does not change this
+verdict.** W7's *definition* counts "distinct state predicates gating the mechanic
+in `step.rs`", and five is that count honestly taken. But W7's *calibration*
+counts differently: it calls the double jump "land from a jump, jump again soon —
+two" and a strafejump "be in the air, hold a direction off your velocity — two".
+Counted by the definition, the incumbent double jump scores **four**
+(`jump_pressed`, `!jump_held`, grounded, `double_jump_ms > 0`), which would be
+*weak*. **The definition and its own calibration examples disagree, and the
+definition is stricter.** I have applied the definition as written, because
+applying the looser reading after seeing that it rescues a candidate is precisely
+the move this document exists to prevent — and because the threshold-edit rule
+lets me change a criterion only by disclosing it, never by choosing the
+convenient reading silently. The dash would score **three** under the
+calibration's own style ("be airborne in the window a fast landing opened, press
+jump again, aim it"), which is a *pass*.
+
+So this is on the record as plainly as I can put it: **had W7 been counted the
+way its own calibration counts, the dash would not have been rejected by W7.** It
+would still have been rejected by W3, which is why the verdict stands and why
+this disclosure costs nothing to make. A future wave should fix W7's wording —
+*before* measuring its next candidate, not after.
+
+**What would change the answer:** for W3, a monotonic entry-speed response — the
+dash currently pays most where the player arrived slowest, which is the inversion
+W3 tests for. For W7, either a mechanic with fewer gating predicates or a
+corrected criterion. The dash's one retune has been spent.
+
+**Geometry dependency.** The dash's primary use — converting a landing that ended
+a jump into speed across the current heading — has geometry in the training map
+built for it. One property found in measurement and worth carrying: with the
+arming floor at 400 and `dash_speed` at 400, **a dash aimed along the direction
+of travel is worth exactly nothing at every speed that can arm it**, because
+`addspeed = dash_speed − velocity·wishdir` is not positive and the window is
+deliberately not spent. The dash's entire value lives across the heading. That is
+the clamp working as designed and is why W1's naive-harm rate is so low — the
+naive press mostly does nothing rather than something bad — but it also means the
+mechanic is invisible to a player who does not already know to turn.
+
+### 2.7 Wall jump — rejected
+
+**Gates:** all pass, including G5(a) under amendment 2's flat-ground reading.
+
+| | number | band |
+|---|---|---|
+| **W1** naive-harm | **6 / 1,950 = 0.3%** | **pass** |
+| **W2** gap median, **1** context qualifying | 1.0011 | **weak — capped by amendment 3** |
+| **W3** | **weak** | **required at pass — a rejection** |
+| **W4** material contexts / kinds | **1 / 1** | **fail — a rejection** |
+| **W5** techniques dominated everywhere | **0** | **pass** |
+| **W7** constants / state / preconditions | 3 / 2 / **4** | weak |
+
+**Three rejections, and W4 is the one that matters.** The wall jump is material
+in exactly **one** of seven contexts, spanning **one** kind. W4 fails at 0 or 1
+context. Amendment 3's floor then caps W2 at *weak* independently, because fewer
+than three contexts qualify for its median — and amendment 3 said in advance that
+a candidate ended this way must be told that **W2 and W4 agreed rather than that
+two independent criteria condemned it**, so that is said here. W3 is weak on the
+same entry-speed test as the others, with `corner` slopes of −3.5750 and −0.0230.
+
+**Amendment 2 earned its keep, in the direction that costs the document
+something.** Under the seven-context reading of G5(a) the wall jump would have
+been **ended at a gate with no weighing at all** — `note_wall_contact` has no
+speed precondition, so a player walking into a wall at 100 ups arms one. Amendment
+2 ruled for flat ground on the two-currencies argument, so the wall jump was
+weighed instead. It then failed the weighing. **The amendment did not save it and
+was never meant to; it bought the mechanic a hearing, and the hearing produced a
+better record than a gate stop would have** — including the two findings below,
+neither of which a G5(a) rejection would have surfaced.
+
+**It does not beat a clean line.** Measured on real geometry: near-constant
+**+33 ups against the clipped speed** at every approach angle, but a net **loss**
+against the approach speed past about 20° — **−1.7 ups at 20°, −43.1 at 30°**. It
+beats a line that was going to touch the wall anyway. Against a W4 of 1 context
+and 1 kind, that is the sharpest thing anyone has measured about this candidate:
+its value is recovery from a mistake, not a technique.
+
+**And its most likely degeneracy is measured rather than feared.** A wall jump
+climbs **any slot narrower than 165 units indefinitely** —
+`g < wall_jump_velocity·2·jump_velocity/gravity + 30`. In a 128-wide pocket:
+**13 bounces, 429.8 units of climb, 33.1 units per bounce.** Whether hands can
+chain it is unmeasured; the mover does it, pressing jump on the exact command the
+contact window opens. Geometry placed such a pocket in a dead end, off route,
+behind no checkpoint, deliberately — so that the operator meets it during the
+§1.9 playtest rather than after a freeze. §1.9's ask names it explicitly.
+
+**What would change the answer:** W4 needs the mechanic to be material in at
+least three contexts spanning two kinds. It is material in one. That is not a
+tuning problem — `wall_jump_velocity` changes how much it gives, not where walls
+are — so the honest statement is that **the wall jump is a one-situation
+mechanic**, and §1.4's W4 exists to say that a mechanic which pays in exactly one
+place needs maps built around it. Its retune was not spent and remains available,
+but no value of the three constants adds contexts.
+
+### 2.8 W5, and a finding about §1.2's harness
+
+**W5 passes for all three candidates: no canonical technique is dominated
+everywhere in its own domain.** That is the criterion's answer and it is
+unambiguous.
+
+But the number behind it is smaller than it looks, and the verdict says so. On
+§1.2's harness — one context, one entry speed, an angle held off the current
+velocity, a jump that may or may not be pressed — **four of the seven named
+techniques are the same command policy.** `ground_turn`, ramp traversal, step-up
+and the drop launch are each *hold a direction and press nothing*; so is
+`air_forward`. What distinguishes them is the context each is named in, because
+the geometry supplies the technique. Only the strafe axis and the
+jump-on-landing rhythm are separate things for the hands to do.
+
+**Scoring W5 as seven independent measurements would overstate the evidence by
+four**, and this verdict does not. The survival test is still applied per named
+technique over its own domain, as §1.5 requires, and every technique survives. It
+is a finding about the harness rather than about the candidates, and it belongs
+in Part 2 because the next wave will otherwise re-derive it.
+
+### 2.9 What Part 2 did not measure
+
+Named rather than proxied, in the same spirit as §1.10.
+
+1. **G1's four-target determinism run** is the auditor's, not the sweep's. Since
+   no candidate is admitted, no candidate constant changes and G1 is not
+   load-bearing for this freeze.
+2. **G3's second count** is measured on steering, not on presses (§2.3).
+3. **G7's timing axis** cannot be refined; one command is the input quantum.
+4. **W6's pair counts** are published per entry speed in the machine-readable
+   section rather than collapsed to a single band. No verdict here rests on W6:
+   all three candidates are rejected by required criteria that W6 cannot reach.
+5. **The per-cell collapse for W2 and G5(b)** — six entry speeds into one context
+   figure — is not specified by Part 1. Lab collapsed by the median of qualifying
+   entry speeds first, disclosed the choice, and published every per-cell number
+   so a different collapse costs nothing. **I ratify that collapse**, and record
+   that Part 1 should say which it means before the next candidate is measured.
+6. **Route diversity** is still unmeasured; §1.8 point 4 stands unchanged.
+
+### 2.1 The gates that do not need the sweep
+
+Several gates are properties of `crates/straf3-sim/src/step.rs` and
+`profile.rs` rather than of the candidate sweep, and they are settled here.
+**These are gate results, not weighed scores**, and none of them is a verdict:
+§1.5 makes a gate failure end a case, but a gate *pass* only earns the weighing.
+
+They are published now, before the sweep, for the same reason Part 1 disclosed
+two of them in advance — a gate consequence discovered after the numbers looks
+exactly like a gate written after the numbers. Each is executed rather than read:
+`crates/straf3-sim/tests/canon_gates.rs`.
+
+**G5(a) — the disclosed one, run rather than predicted.** §1.3 G5(a) runs a
+player who never exceeds `max_speed` on **flat open ground** and counts how many
+times the mechanic becomes available; it fails if that count is not zero.
+
+| Candidate | Count on flat ground | Result |
+|---|---|---|
+| Crouch slide | 0 | **pass** |
+| Dash | **10 of 10 landings, at zero horizontal speed** | **fail** |
+| Wall jump | 0 | **pass** |
+
+The dash's failure is the one G5(a) disclosed in advance, in those words, from
+`step.rs` alone: a standing player jumps on the spot, lands, and the landing arms
+a dash window because arming is gated on `left_ground_by_jumping` and nothing
+else. The test stands still and jumps ten times; it arms ten times. Under §1.5's
+retune rule this is a **pre-registrable retune rather than an automatic
+rejection**, and the retune is registered in §3.8 — before the re-measurement,
+as §1.5 requires.
+
+The two passes are published as the negative controls a gate needs. The slide
+passes for the reason `profile.rs` designed in — `slide_entry_speed` 400 is above
+`max_speed` 320, so ground acceleration alone cannot arm it. The wall jump passes
+because `note_wall_contact` refuses any plane whose `|normal.z|` exceeds
+`wall_normal_max` 0.3 and flat ground's normal is 1.0 — which is **amendment 2's
+flat-ground ruling doing exactly what it was written to do**, and worth marking:
+under the rejected seven-context reading the wall jump would have been ended here
+with no weighing.
+
+**G4 — no new binding. All three pass, and no candidate is ended by canon's own
+choice.** The slide reads the crouch edge; the dash and the wall jump read the
+jump edge; all are in the vocabulary §1.3 names. `Buttons` also carries `ATTACK`
+and `WALK`, which are *not* movement inputs, so the test is behavioural rather
+than a bitfield identity: holding both, at a speed where a slide is one crouch
+edge away, arms nothing. Since G4 is marked **canon's own choice** in §1.0's
+authority table, the fact that it ends no candidate is worth recording — nothing
+in this wave rests on it.
+
+**Still needing the sweep:** G2 (inertness across the published corpus), G5(b)
+(the naive-to-best ratio), G7 part 2 (surviving discontinuities), and every
+weighed criterion W1–W7. G1 is the determinism run; G6(b) and G7 part 1 need the
+sweep's numbers beside the rule.
 
 ### 2.0 Known unmeasured questions, which a verdict must settle first
 
@@ -1210,48 +1711,490 @@ the unjudgeable verdict both exist because of it.
 
 ## Part 3 — The frozen ruleset
 
-**Not written, and `PhysicsProfile::straf3()` does not exist.** The same
-capacity limit ended the wave before the freeze. `vq3()` and `cpm()` are
-unchanged, so no physics digest has moved and no artefact captured under either
-has been invalidated.
+**Partly written.** The half of Part 3 that argues the *inherited* constants —
+§3.1 to §3.5 below — is written, because none of it depends on a candidate
+verdict. The candidate block (§3.7) and the constructor itself wait on Part 2,
+and saying which is which is the point of this paragraph.
 
-Part 3 will record `PhysicsProfile::straf3()` constant by constant, each with
-either a citation at the grade its source actually has, or the reason Straf3
-chose the value. Four things are already established and should not be
-re-derived:
+Two claims the previous wave's Part 3 stub made are now discharged. §3.0's
+unexplored source has been explored and read from bytes; the result is in §3.6
+and it is mostly a negative. Point 4's arithmetic has been replaced by a
+measurement; the number is in §3.5 and it vindicates the map that was built to
+it.
 
-1. **Admitting any or all three candidates adds no field to `PhysicsProfile`.**
-   All eight candidate constants already exist. An admission is a value change,
-   which is what the data doctrine in G8 is for. The one identified route to a
-   new field is a `dash_entry_speed` constant, if the dash's G5(a) exposure is
-   answered by the retune that mirrors `slide_entry_speed`.
-2. **`double_jump_window_ms` 400 must be chosen, not cited.** Its sole
-   attestation traces to the same `cpm1_dev_docs` upstream as everything else and
-   describes itself as a degraded copy of it. See §1.6.
-3. **`friction` 6 can now be justified rather than merely inherited.** Xonotic's
-   reconstruction states that `cpm1_dev_docs` used 8 "but friction is 6 in all
-   ~modern CPMA releases, and in DeFRaG CPM", which is why GPP-1-1's CPM branch
-   carries 8 and this tree correctly does not.
-4. **`jump_velocity` 270 is verified, and Straf3's jump is not Quake 3's.** The
-   constant is id's without qualification; the *integrator* is Straf3's
-   deliberate choice — `step.rs` integrates gravity at the average of start and
-   end vertical speeds, "what makes jump height nearly independent of the command
-   rate" — and the resulting *behaviour* is a consequence of both, belonging to
-   neither of r5's two clauses on its own. Quake 3 at 125 fps was measured by
-   Xonotic's authors at **48.528 units over 720 ms**; `coil.map`'s header states
-   Straf3's as **45.6 units over 0.675 s**, and the course was built to those.
-   **Both Straf3 figures are arithmetic, not measurement** — they are
-   `270²/(2·800)` and `2·270/800`, agreeing with a map comment. Nobody has
-   measured this tree's actual jump. Part 3 must replace them with a measured
-   figure or say it did not.
+### 3.1 The rule, and the four grades
 
-### 3.0 One unexplored source, recorded rather than chased
+§1.8 point 5 states the rule this part applies: every constant canon carries
+must either carry a citation to a verifiable source **at the grade that source
+actually has**, or be a value Straf3 chose deliberately with the reason
+recorded. "It was in CPM" is not a reason, because §4.1 says the objective is
+not preservation.
 
-`rdntcntrl/ratoa_gamecode` (OpenArena Ratmod). freepromode's own README
-recommends it over freepromode — "The movement is more accurate" — making it the
-only reconstruction a CPM reimplementer has positively rated above their own
-work. **Nobody on this run has examined it.** It is the obvious next place to
-look before Part 3 argues `double_jump_window_ms` or `double_jump_boost`.
+Honouring "at the grade that source actually has" requires the grades to be
+named, so that a constant cannot be quietly promoted by being described
+warmly. Part 3 uses four:
+
+| Grade | Means | What it is not |
+|---|---|---|
+| **A — id source** | Read from id Software's Quake 3 GPL release | — |
+| **U — the CPM upstream** | Read from `cpm1_dev_docs`, the document every CPM reconstruction descends from | **Not** CPMA. It is the *design document CPM was built from*, not the shipped game, and its own author called it "old and outdated" |
+| **B — two reconstructions agree** | Two community reconstructions with no *stated* shared lineage carry the same value | Not verification. Two copies of one document are one witness, and this wave found that most of them are copies |
+| **S — Straf3's choice** | The value is chosen and the reason recorded — including where a source exists but attests a *different quantity* | Not an admission of ignorance. §4.1 makes choosing the default, not the fallback |
+
+**Grade U is new to this wave and it changes most of the table below.** The
+previous wave recorded `cpm1_dev_docs` as the single upstream every
+reconstruction traces to, and treated it as unreachable — which made every
+reconstruction a copy of a document nobody could read. It has now been read from
+bytes (§3.6), and six constants move to Grade U.
+
+**The ceiling on Grade U, stated before it is used.** It is not CPMA. CPMA's
+source has never been public and no constant in this tree has been checked
+against the shipped game. Worse for one constant and better for another, the
+upstream **disagrees with modern CPMA about `friction`** — §3.3 — which is
+direct evidence that Grade U is not the top of the ladder. Where the
+reconstructions agree with each other and disagree with the upstream, the
+upstream is the *weaker* citation, and Part 3 says which of the two each
+constant is cited to.
+
+### 3.2 The sixteen constants at Grade A
+
+These are id's, read from the GPL release, and `profile.rs` marks each
+*Verified*. `crates/straf3-sim/src/profile.rs`'s
+`verified_constants_match_the_gpl_source` asserts them, and
+`tests/movement.rs`'s `the_verified_constants_are_visible_in_the_movement_itself`
+asserts they are *used* rather than merely stored — which is the difference
+between a constant and a comment.
+
+`accelerate` 10, `friction` 6, `stop_speed` 100, `max_speed` 320 (the `g_speed`
+cvar default), `duck_scale` 0.25, `air_accelerate` 1, `gravity` 800,
+`jump_velocity` 270, `step_height` 18, `overclip` 1.001, `max_clip_planes` 5,
+`ground_trace_probe` 0.25, `min_walk_normal` 0.7, `hull_mins` (−15, −15, −24),
+`hull_maxs` (15, 15, 32), `crouched_height` 16.
+
+`straf3()` carries all sixteen unchanged. **This is a choice and not an
+inheritance**, and §4.1 requires it to be argued rather than assumed: the
+sixteen are the shape of the player and the shape of the world's response to
+them, they are the substrate every measurement in `docs/movement-lab.md` was
+taken against, and no candidate this wave proposes needs any of them to move.
+Changing one would invalidate 2211 published measurements to buy nothing this
+wave can name. That is the reason; it is not "they were in Quake".
+
+### 3.3 `friction` 6 is a deliberate divergence, not an inheritance
+
+**This is the constant whose story the primary source inverted, and it is the
+best worked example in Part 3 of why reading bytes matters.**
+
+The previous wave's Part 3 said `friction` 6 "can now be justified rather than
+merely inherited", resting on Xonotic's *claim* that `cpm1_dev_docs` used 8 "but
+friction is 6 in all modern CPMA releases, and in DeFRaG CPM". That claim is now
+checked against the bytes it is a claim about, and **it is true**:
+
+| Source | VQ3 | CPM |
+|---|---|---|
+| `cpm1_dev_docs` `bg_promode.c:113` / `:210` | `pm_friction = 6` | **`pm_friction = 8`** |
+| This tree | 6 | **6** |
+
+So Straf3 does **not** inherit its CPM friction. The upstream's CPM branch says
+8; Straf3 carries 6, which is the upstream's *VQ3* value and modern CPMA's CPM
+value. **That is r1's second clause, not its first — a value Straf3 chose, with
+the reason recorded — and it is a stronger sentence than any citation would have
+been**, because the citation would have said 8.
+
+*The reason, stated as §1.8 point 5 requires:* Straf3 follows the game as it is
+actually played rather than the design document it was built from. Xonotic's
+reconstruction states 6 is what modern CPMA and DeFRaG CPM ship; `ratoa` carries
+`const float pm_friction = 6.0f` as its base and — the load-bearing half —
+**declares no `pm_cpm_friction` at all**, so a CPM-capable port never overrides
+it. That is Xonotic's claim observed rather than asserted, in a third
+independent place. An unexamined inheritance would have given Straf3 an 8 that
+no CPM player has felt in twenty years.
+
+**And it is the standing warning about Grade U.** The one constant where the
+upstream can be checked against the living game, the upstream is wrong. Nothing
+else in §3.4 should be read as though Grade U were the top of the ladder.
+
+### 3.4 The CPM constants, now cited to CPM's own document
+
+These are the `TODO(wave2)` block: the values `cpm()` adds on top of the VQ3
+base. None is Grade A and none ever will be without a CPMA demo.
+
+Every value below is now cited to the **assignment site** in the upstream, never
+to a file-scope declaration — see §3.6 for why that distinction is the whole
+ball game here.
+
+| Constant | Value | Grade | Cited to |
+|---|---|---|---|
+| `accelerate` (CPM) | 15 | **U** | `bg_promode.c:209` `pm_accelerate = 15;` |
+| `air_stop_accelerate` | 2.5 | **U** | `bg_promode.c:205` `cpm_pm_airstopaccelerate = 2.5;` |
+| `air_control` | 150 | **U** | `bg_promode.c:206` `cpm_pm_aircontrol = 150;` |
+| `strafe_accelerate` | 70 | **U** | `bg_promode.c:207` `cpm_pm_strafeaccelerate = 70;` |
+| `strafe_wish_speed_cap` | 30 | **U** | `bg_promode.c:208` `cpm_pm_wishspeed = 30;` |
+| `double_jump_boost` | 100 | **U** | `bg_promode.c:202` `cpm_pm_jump_z = 100;` |
+| `double_jump_window_ms` | 400 | **U** for the magnitude, **S** for the quantity | §3.7 — and the split is real, not a hedge |
+| `friction` | 6 | **S** | §3.3 — the upstream says 8 |
+
+**`air_control` 150 is the constant this read rescued, and the near-miss is
+worth recording.** Before the upstream was reachable it stood at one
+reconstruction; `ratoa` appeared to add a second, but `ratoa`'s consuming
+function is headed *"Copied with edits from `cl_input.c` from Xonotic's
+Darkplaces engine"* — the lineage canon already cited, arriving a second time
+wearing different clothes. Part 3 was about to record 150 at the *weakest* grade
+in the table. It is in fact one of the best-attested constants here, because the
+upstream both assigns 150 **and carries the formula this tree implements**:
+
+> `k = 32;`
+> `k *= cpm_pm_aircontrol*dot*dot*pml.frametime;`
+
+against `step.rs:947`'s `k = 32 * air_control * dot² * dt`. The `movementDir`
+gate matches too. So the constant *and* the expression it lives in are cited
+together, which is worth more than the number alone — a number is only meaningful
+inside the formula that reads it.
+
+*One divergence, recorded so a later reader does not find it and think it was
+missed:* `ratoa` scales `k` by an additional `clamp(0, 1, wishspeed /
+airstrafewishspeed)`. **The upstream does not, and neither does this tree** — so
+that factor is Xonotic's addition and this tree matches CPM's own document
+rather than Xonotic's variant. (Its practical effect is nil either way: with the
+cap at 30 and an ordinary wishspeed near 320 it saturates at 1.)
+
+**What this read cost as well as gave: GPP-1-1 is demoted.** §1.6 cites GPP-1-1's
+`bg_promode.c` for `double_jump_boost`. It is now clear that GPP-1-1 *is a copy
+of this upstream file*, third-hand and patched for Tremulous — it was never an
+independent witness, so every "GPP-1-1 plus X" reads as one more source than it
+is. The gain is real anyway, because 100 is now cited to the original rather than
+to the copy, and the copy's self-contradicting file-scope `0.5` is explained: the
+upstream declares a bare `float cpm_pm_jump_z;` with **no initialiser at all**,
+so the `0.5` is GPP-1-1's own patch and not a defect in CPM.
+
+**The ceiling, once more, because it is the sentence most likely to be dropped
+when this table is quoted.** Grade U is the design document, not the shipped
+game. §3.3 shows it disagreeing with modern CPMA on the one constant where the
+comparison can be made. Nothing here has been verified against CPMA, and nobody
+on this run has seen CPMA's source, because it does not exist publicly.
+
+### 3.5 The jump, measured
+
+Part 3's previous draft recorded that both Straf3 jump figures were
+`270²/(2·800)` and `2·270/800` — **arithmetic agreeing with a map comment**, and
+that nobody had measured this tree's actual jump. That is now done.
+
+`crates/straf3-sim/tests/canon_jump.rs` drops a player onto `FlatGround`, lets
+them settle, presses jump and watches the origin. Nothing in it computes an
+expected value from `jump_velocity` and `gravity`; that is the point, because
+the closed form is the thing being checked. At 125 Hz, the rate §1.8 point 3
+fixes:
+
+| Quantity | **Measured** | `coil.map` asserts | Closed form |
+|---|---|---|---|
+| Apex above rest | **45.561630 units** | 45.6 | 45.5625 |
+| Airborne | **680 ms** (85 commands) | 0.675 s | 675 ms |
+
+**`coil.map` is vindicated rather than contradicted, and that is worth saying
+plainly because the course was built to those numbers.** The apex agrees to the
+precision the map states. The airborne figure is quantised to the command grid —
+the player is airborne at the end of command 84 (672 ms) and grounded at the end
+of command 85 (680 ms) — so the continuous landing lies in **(672, 680] ms**,
+and 675 falls inside that bracket. There is no finding against the map here.
+
+**Straf3's jump belongs to neither clause alone, and the measurement shows why.**
+`jump_velocity` 270 is id's at Grade A without qualification. The *integrator* is
+Straf3's own: `step.rs` integrates gravity at the average of the start and end
+vertical speeds within a sub-step. The resulting behaviour is a consequence of
+both, so it is neither a cited constant nor a free choice. The integrator's own
+claim — that this makes jump height "nearly independent of the command rate" —
+turns out to understate itself:
+
+| Rate | Apex | Airborne |
+|---|---|---|
+| 250 Hz (4 ms) | 45.561630 | 676 ms |
+| 125 Hz (8 ms) | 45.561630 | 680 ms |
+| 62.5 Hz (16 ms) | 45.561592 | 688 ms |
+
+The apex at 250 and 125 Hz is identical to the last digit printed, and 62.5 Hz
+differs by 4·10⁻⁵ units. Only the airborne duration moves, by one command's
+width, which is quantisation rather than physics.
+
+For contrast and not as a target: Xonotic's authors measured Quake 3 at 125 fps
+at **48.528 units over 720 ms**. Straf3 is lower and shorter. Neither figure is
+evidence about the other, because the integrators differ; the comparison is
+recorded because a reader who knows Quake will otherwise wonder.
+
+### 3.6 The sources, read from bytes
+
+Two sources were opened this wave. §1.6's closing rule governs both: a constant
+may be cited only against a source someone read **from bytes**, and the citation
+records who read it.
+
+*Chain of custody. All eleven files below were fetched raw with `curl`, hashed,
+and read by* **`canon`** *— not through a summarising fetch.*
+
+| File | Source | sha256 | Size |
+|---|---|---|---|
+| `bg_promode.c` | `cpm1_dev_docs`, Wayback `id_` capture 2017-01-25 | `589f1e89…` | 7455 b, 370 lines |
+| `bg_promode.h` | same archive | `989b9ec6…` | 2718 b |
+| `step1`–`step6.txt`, `main.txt` | same archive | recorded in the seat journal | 2298 lines total |
+| `bg_pmove.c` | `rdntcntrl/ratoa_gamecode`, branch `ratoa` | `d10e1335…` | 59241 b, 2514 lines |
+| `bg_public.h` | same repo | `7a699cfe…` | 27721 b |
+
+The `id_` modifier matters and is not decoration: it returns the original bytes
+with no Archive.org HTML wrapper. A citation to a wrapped page would be a
+citation to Archive.org's rendering.
+
+#### 3.6.1 `cpm1_dev_docs` — the upstream, and the trap it set
+
+§1.6 recorded this document as the single upstream every CPM reconstruction
+descends from, and treated it as unreachable. **It is reachable**, and reading it
+is what produced §3.3, §3.4 and §3.7.
+
+**The trap fired exactly where §1.6 predicted, and against the primary source,
+which is the worst place for it.** The first twelve lines declare, at file
+scope:
+
+    float	cpm_pm_airstopaccelerate = 1;
+    float	cpm_pm_aircontrol = 0;
+    float	cpm_pm_strafeaccelerate = 1;
+    float	cpm_pm_wishspeed = 400;
+
+Not 2.5, 150, 70, 30. **`aircontrol = 0` is air control switched off**, and
+`wishspeed = 400` is an order of magnitude from 30. A Part 3 that cited these
+would have committed §1.6's own documented mistake a third time — and it would
+have looked unimpeachable, because the source is the original. The real values
+are assigned in `CPM_UpdateSettings`'s pro-mode branch at lines 202-210, and
+**every citation in §3.4 is to the assignment site**.
+
+*Why the declarations exist at all, since it explains the whole pattern:*
+`CPM_UpdateSettings(num)` is called with `num = 0` for VQ3 and `num = 1` for
+pro-mode. Lines 105-113 write the VQ3 values unconditionally; lines 202-210 then
+overwrite them if `num`. The file-scope initialisers are never the ruleset — they
+are placeholders before either branch runs. Reading only the top of the file
+gives a confident, precise, wrong answer, which is the failure mode §1.6 names.
+
+**The structural point §1.6 rates above the magnitudes is confirmed at the
+source.** `bg_promode.c:105` reads `cpm_pm_jump_z = 0; // turn off double-jump
+in vq3`. "VQ3 is CPM with the extensions switched off", spelled as a zero on the
+very field, in CPM's own document — not in a port's copy of it. That is the
+relationship `profile.rs` encodes and defends.
+
+#### 3.6.2 `ratoa_gamecode` — §3.0's named source, mostly a negative
+
+The previous Part 3 named `rdntcntrl/ratoa_gamecode` (OpenArena Ratmod) as the
+one reconstruction nobody had examined — recommended over freepromode by
+freepromode's own author. It has now been read, and the result is mostly a
+**negative**, which is why it is written up rather than dropped.
+
+**The declare-then-overwrite trap is absent here, and that was checked rather
+than assumed.** Every movement constant is `const float` at file scope, so it
+*cannot* be reassigned, and every other occurrence is a read inside the
+`PM_Get*` accessors.
+
+**What it gave:** §3.3's third leg for `friction` 6 — the base is 6 and there is
+no `pm_cpm_friction` override anywhere in 2514 lines.
+
+**What it did not give, which is what §3.0 actually hoped for.** `ratoa` does
+contain a 400 and a 100 together, in `PM_CheckJump`, which looks at first exactly
+like the double-jump attestation §1.6 could not find. It is not one, for three
+independent reasons, any one of which is sufficient:
+
+1. `pm->ps->stats[STAT_JUMPTIME] = 400;` is assigned **unconditionally**, outside
+   every `if`, on every successful jump — including the first jump from
+   standing. It is not gated on the jump having ended a jump.
+2. **It is set at the moment of the jump, not at the landing.** Straf3's window
+   opens *on landing* (`step.rs:740-742`, gated on `left_ground_by_jumping`), so
+   `ratoa`'s 400 ms runs from the previous jump and Straf3's runs from the
+   landing. These are different quantities that share a number. And §3.5's
+   measurement makes the difference concrete: a flat-ground jump→land→jump has
+   ≥675 ms between the two jumps, so `ratoa`'s timer has **already expired at the
+   landing** — its boost can never fire on a flat-ground double jump at all. It
+   fires only when a second jump follows within 400 ms of the first, which
+   requires a short air time: higher ground, or a ramp.
+3. **The source's own author calls it a ramp jump.** `bg_public.h:293` reads
+   `STAT_JUMPTIME,	// rampjump`; the boost is gated on `RAT_RAMPJUMP`; and the
+   commented-out lines beside it add *horizontal* velocity along `pml.forward`.
+
+This is the right number attached to a different mechanism — the `bg_promode.c`
+failure in a new costume, caught this time because the file was read rather than
+summarised.
+
+**And `ratoa` is not doing anything idiosyncratic: it is a faithful copy of the
+upstream.** `cpm1_dev_docs`' `step2.txt` sets `STAT_JUMPTIME = 400` in exactly
+the same place and in exactly the same way. So the finding above is a finding
+about **CPM's own double jump**, not about Ratmod — which is why §3.7 is written
+the way it is rather than as a simple citation.
+
+### 3.7 `double_jump_window_ms` — one constant, two grades
+
+**§1.6 instructed Part 3 to treat this as a value Straf3 must choose rather than
+one it can cite. That instruction was conditioned on evidence that has since
+changed, and this section supersedes it — on its own terms, not by overruling
+it.** §1.6's reasoning was that every attestation traced to an upstream nobody
+could read. The upstream has now been read. **No threshold in Part 1 has been
+edited**, no criterion has moved, and §1.7 gains no amendment: what changed is a
+fact about the world, and Part 3 is where facts about constants belong.
+
+The honest answer is a split, and the split is real rather than a hedge.
+
+**The magnitude: Grade U.** `cpm1_dev_docs`' `step2.txt` line 42 carries
+`pm->ps->stats[STAT_JUMPTIME] = 400;`. The 400 ms double-jump window is in CPM's
+own document, verbatim, and §1.6's "no millisecond window anywhere" was a fact
+about GPP-1-1's 372-line copy rather than about CPM.
+
+**The quantity: Grade S — Straf3's own, deliberately.** The upstream sets its
+timer like this, in `PM_CheckJump`, after `velocity[2] = JUMP_VELOCITY`:
+
+    if (cpm_pm_jump_z) {
+        if (pm->ps->stats[STAT_JUMPTIME] > 0) {
+            pm->ps->velocity[2] += cpm_pm_jump_z;
+        }
+        pm->ps->stats[STAT_JUMPTIME] = 400;
+    }
+
+The window is set **at the jump, unconditionally, on every jump**, and the boost
+is granted when the *previous jump* was under 400 ms ago. Straf3's window opens
+**on the landing**, and only if the landing ended a jump
+(`step.rs:740-742`, gated on `left_ground_by_jumping`). Those are different
+quantities wearing the same number, and the difference is not academic:
+
+> §3.5 measured this tree's jump at **680 ms airborne**. Under the upstream's
+> own rule the timer has expired long before the player lands, so a flat-ground
+> jump→land→jump can never receive the boost at all. The upstream's 400 ms is
+> reachable only when air time is short — landing on higher ground, or a ramp.
+
+*The reason Straf3 chose the landing-gated quantity*, which `profile.rs` already
+records: walking off a ledge and jumping on contact should not be a double jump,
+and a window measured from the landing is the one a player can actually feel and
+aim for. **A citation to the upstream's 400 would therefore be the right number
+attached to the wrong mechanism** — precisely the error §1.6 exists to prevent,
+and the reason this section publishes two grades instead of one.
+
+*And the magnitude's reason, now that it is separable:* 400 is what the tree's
+entire published corpus was measured under, it matches CPM's document, and
+nothing argues for a different number. Straf3 keeps it on both counts.
+
+**`double_jump_boost` = 100 — Grade U, and the messiest citation in the tree is
+now the cleanest.** `cpm1_dev_docs`' `bg_promode.c:202` assigns
+`cpm_pm_jump_z = 100; // enable double-jump` in `CPM_UpdateSettings`'s pro-mode
+branch. That is the primary source, plainly.
+
+This retires the caveat §1.6 attached to it. §1.6 cited GPP-1-1's
+`cpm_pm_jump_z = 100/*/230*/` and noted, correctly, that the same file declared
+the variable at file scope as `0.5` with a comment whose arithmetic disagreed
+with itself. **The upstream declares a bare `float cpm_pm_jump_z;` with no
+initialiser at all** — so the `0.5` and its broken comment are GPP-1-1's own
+patch, not a defect in CPM, and the confusion §1.6 could not resolve dissolves
+once the original is read. GPP-1-1 is a *copy* of this file and never was an
+independent witness; the number is cited to the original instead.
+
+Unlike the window, the boost has no quantity problem: it is extra upward velocity
+added to a jump, and that is exactly what `profile.rs` carries.
+
+**The structural point, which §1.6 rates above both magnitudes, is confirmed at
+the source rather than in a copy.** `bg_promode.c:105` reads `cpm_pm_jump_z = 0;
+// turn off double-jump in vq3` — "VQ3 is CPM with the extensions switched off",
+spelled as a zero on the very field `profile.rs` uses, in CPM's own document.
+`ratoa` spells the same relationship a second way, carrying `pm_accelerate 10.0f`
+beside `pm_cpm_accelerate 15.0f` and switching on movement mode. **The
+relationship is better attested than any magnitude, and it is the relationship
+`profile.rs` encodes.**
+
+### 3.8 The freeze: `PhysicsProfile::straf3()`
+
+**It exists, it is the default, and its physics digest is
+`4350ccc31bec5d4c`.**
+
+**That digest is *unchanged*.** It is bit-for-bit the digest `cpm()` already
+had, because all three candidates were rejected (Part 2) and no inherited
+constant moved. The consequences are worth listing, because this is the outcome
+the whole tree was waiting on and it is the good one:
+
+- every `.s3d` recorded under `cpm` **still loads** — `ghost.rs` refuses a
+  mismatch and there is no mismatch;
+- no seeded leaderboard is orphaned;
+- the browser client needs **no rebuild** to agree with native;
+- `crates/straf3-records`' `PROFILE_LAYOUT_VERSION` stays at **1**, because the
+  struct did not gain a field.
+
+`crates/straf3-replay/src/identity.rs`'s
+`the_freeze_did_not_move_the_physics_digest` pins all of that, including the
+literal digest. It is not a tautology: that module records how commit `a604820`
+moved every profile's digest by adding eight *gated-off* fields and silently
+invalidated a committed personal best the same day. This wave came within one
+accepted mechanic of repeating it — `dash_entry_speed` was added, moved the
+digest, and was **reverted whole** when the dash was rejected.
+
+**Why `straf3()` is spelled out rather than written `Self::cpm()`.** The
+equality is a *finding*, not a *link*. `cpm()` is a reconstruction of somebody
+else's game and should be corrected the day someone verifies it against a CPMA
+demo; `straf3()` is Straf3's own frozen ruleset and must **not** move because a
+reconstruction was corrected. Delegating would make every future correction to
+`cpm` a silent change to canon.
+`straf3_and_cpm_agree_today_but_are_not_linked` pins the equality and says in
+one line what to do when it breaks.
+
+**What the client must do, since r1's "plays by default" clause reaches past this
+crate.** `straf3-sim`'s `Default` is now `straf3()` and
+`default_profile_is_canonical_straf3` asserts it. But
+`crates/straf3-game/src/profile.rs` — not this crate — still advertises
+`NAMES = "cpm|vq3|experimental"` with no `straf3` arm in `by_name`, which returns
+`None` for an unknown name and is refused by the caller, so `--profile straf3` is
+refused outright; and `is_canon` matches exactly `b"cpm" | b"vq3"` under a test
+named `the_canonical_profiles_are_exactly_the_two_that_predate_this_wave`. That
+test's name is now the thing it asserts against: **`straf3` is a third canonical
+profile and the first that does not predate this wave.** Adding it is the
+client's change, not canon's.
+
+### 3.9 The candidate constants
+
+**All eight stay at their disabling values, because Part 2 rejected all three
+candidates.** The eight candidate constants — `slide_entry_speed`,
+`slide_friction`, `slide_duration_ms`, `dash_speed`, `dash_window_ms`,
+`wall_jump_velocity`, `wall_contact_window_ms`, `wall_normal_max` — all exist on
+`PhysicsProfile` already, so an admission is a value change and a rejection or an
+unjudgeable verdict leaves them at the disabling values `vq3()` and `cpm()`
+carry — which is where a rejection and an unjudgeable verdict both put them.
+
+#### The dash's single retune, pre-registered — and reverted
+
+Recorded here because a retune registered *after* its measurement is not
+evidence but a search for a number that passes — §1.5's words, and the reason
+this paragraph was written before any dash number existed.
+
+**The constant:** a new `dash_entry_speed` = 400, mirroring `slide_entry_speed`
+exactly, tested against horizontal speed at the arming landing. **The
+direction:** above `max_speed` 320, so ground acceleration alone cannot arm a
+dash. **The prediction:** G5(a) moves from fail to pass; W4's context count may
+*fall*, because the dash becomes unavailable wherever the player cannot arrive
+at speed; W1 may move in either direction and no sign is predicted; G3, G4, G6,
+G7 and G8 should not move at all, and if any of them does that is a finding about
+the retune rather than a pass.
+
+This is the one route to a new field that Part 3's earlier draft identified, and
+it is **the one retune the dash gets**. If the retuned dash fails a required
+criterion it is rejected, and there is no second attempt.
+
+*Status: measured, then reverted whole.* Implemented on commit `cd64b05`, from
+which the retuned-dash cells were derived and published beside the unretuned
+ones. **The dash was rejected, so the field did not land** — `cd64b05` is
+reverted in `e37c21a` and `PhysicsProfile` never gained a ninth candidate
+constant. That is the promise below, kept.
+`crates/straf3-sim/tests/canon_gates.rs` asserts **both** states from the shipped
+tree — ten armings out of ten at zero speed before the retune, zero after — so
+the gate failure that justifies the retune stays reproducible rather than
+surviving only as a claim in this document.
+
+**It lands in `straf3-sim` only if the dash is admitted, and the reason is
+sharper than "dead weight".** `identity.rs` folds an *exhaustive destructure* of
+`PhysicsProfile`, so a new field moves the physics digest of **`vq3()` and
+`cpm()` as well** — a rejected candidate would permanently alter the digest of
+two profiles it has nothing to do with. Three separate exhaustive destructures
+had to learn the field when it was added, every one of them by compiler error
+rather than by being remembered: `canon_frozen.rs`, `straf3-replay`'s
+`physics_digest`, and `straf3-records`' `profile_bits`. That is the seam working,
+and it is also the measure of what a field costs.
+
+**A consequence the freeze report owes the operator either way:** a moved
+physics digest orphans anything pinned to the old one, including seeded
+leaderboards in `crates/straf3-records`. The digest moves when `straf3()` lands
+regardless of the dash; the dash only changes by how much.
 
 ---
 

@@ -385,6 +385,118 @@ impl PhysicsProfile {
         }
     }
 
+    /// **Canonical Straf3 movement — the frozen competitive ruleset.**
+    ///
+    /// This is what the game plays by default and what a ranked record is set
+    /// under. `docs/movement-canon.md` Part 3 argues it constant by constant;
+    /// every value below carries either a citation to a source someone read
+    /// **from bytes** or a stated reason Straf3 chose it.
+    ///
+    /// # It is numerically equal to [`Self::cpm`] today, and that is a result
+    ///
+    /// Three candidate mechanics — crouch slide, dash, wall jump — were
+    /// implemented, measured across 7,168 published values, and judged against
+    /// criteria written before any of them was measured. **All three were
+    /// rejected** (canon Part 2): the slide and the dash on W3, whose
+    /// entry-speed test they fail because arriving faster can leave the player
+    /// slower; the dash also on W7; the wall jump on W4, being material in one
+    /// context of seven. So no candidate constant is switched on here.
+    ///
+    /// And no *inherited* constant moved either, for a reason canon §1.8 point 2
+    /// states rather than assumes: **tuning is a different activity from
+    /// judging**, it needs the operator's hands rather than a sweep, and this
+    /// wave judged. Changing a number merely to make `straf3` look different
+    /// from `cpm` would be the mirror image of keeping one merely because CPM
+    /// had it, and `docs/VISION.md` §4.1 rejects both.
+    ///
+    /// The consequence is worth stating because it is unusually good: this
+    /// profile's physics digest **equals `cpm`'s**, so the freeze invalidates no
+    /// existing recording, orphans no seeded leaderboard, and costs the browser
+    /// client no rebuild.
+    ///
+    /// # Why it is spelled out rather than written `Self::cpm()`
+    ///
+    /// Because the equality is a *finding*, not a *link*, and the two profiles
+    /// answer to different authorities. [`Self::cpm`] is a reconstruction of
+    /// somebody else's game and should be corrected the day someone verifies it
+    /// against a CPMA demo. `straf3()` is Straf3's own frozen ruleset and must
+    /// **not** move because a reconstruction was corrected — that would be canon
+    /// changing under the game by accident, which is the thing the freeze
+    /// exists to prevent. Delegating would make every future correction to
+    /// `cpm` a silent change to canon.
+    ///
+    /// `straf3_and_cpm_agree_today_but_are_not_linked` pins the equality so it
+    /// cannot drift unnoticed, and says in one line what to do when it breaks.
+    ///
+    /// # Provenance, in brief — the argument is canon Part 3
+    ///
+    /// - **Sixteen constants at id's grade**, read from the Quake 3 GPL
+    ///   release: `accelerate` (VQ3's 10), `friction`, `stop_speed`,
+    ///   `max_speed`, `duck_scale`, `air_accelerate`, `gravity`,
+    ///   `jump_velocity`, `step_height`, `overclip`, `max_clip_planes`,
+    ///   `ground_trace_probe`, `min_walk_normal`, the hull and
+    ///   `crouched_height`.
+    /// - **Six at the CPM upstream's grade**, read from `cpm1_dev_docs`'
+    ///   `bg_promode.c` (sha256 `589f1e89…`) — and read at the **assignment
+    ///   site** in `CPM_UpdateSettings`, not at the file-scope declarations,
+    ///   which say `aircontrol = 0` and would have been a confident citation to
+    ///   the wrong thing.
+    /// - **`friction` 6 is a Straf3 choice, not an inheritance.** The upstream's
+    ///   CPM branch sets `pm_friction = 8`; its VQ3 branch sets 6. Straf3
+    ///   carries 6 in both, following modern CPMA and DeFRaG rather than the
+    ///   design document, because the game as played beats the document it was
+    ///   built from.
+    /// - **`double_jump_window_ms` 400 is split**: the magnitude is the
+    ///   upstream's, the *quantity* is Straf3's own. CPM sets its timer at the
+    ///   jump; Straf3 opens the window on the **landing**, gated on
+    ///   [`crate::PlayerState::left_ground_by_jumping`], so walking off a ledge
+    ///   and jumping on contact is not a double jump.
+    #[must_use]
+    pub const fn straf3() -> Self {
+        Self {
+            // ── id's, verified against the GPL release ────────────────────
+            friction: s(6.0), // and see the note above: this one is *chosen*
+            stop_speed: s(100.0),
+            max_speed: s(320.0),
+            duck_scale: s(0.25),
+            air_accelerate: s(1.0),
+            gravity: s(800.0),
+            jump_velocity: s(270.0),
+            step_height: s(18.0),
+            overclip: s(1.001),
+            max_clip_planes: 5,
+            ground_trace_probe: s(0.25),
+            min_walk_normal: s(0.7),
+            hull_mins: vec3(s(-15.0), s(-15.0), s(-24.0)),
+            hull_maxs: vec3(s(15.0), s(15.0), s(32.0)),
+            crouched_height: s(16.0),
+
+            // ── the CPM upstream's, at its assignment site ────────────────
+            accelerate: s(15.0),
+            air_control: s(150.0),
+            air_stop_accelerate: s(2.5),
+            strafe_accelerate: s(70.0),
+            strafe_wish_speed_cap: s(30.0),
+            double_jump_window_ms: 400,
+            double_jump_boost: s(100.0),
+
+            // ── the three candidates, all rejected (canon Part 2) ─────────
+            //
+            // Left at their disabling values, which is where a rejection and an
+            // unjudgeable verdict both put them. `canon_frozen.rs` asserts by
+            // exhaustive destructure that canon carries no candidate switched
+            // on, and `straf3` is canon.
+            slide_entry_speed: s(0.0),
+            slide_friction: s(0.0),
+            slide_duration_ms: 0,
+            dash_speed: s(0.0),
+            dash_window_ms: 0,
+            wall_jump_velocity: s(0.0),
+            wall_contact_window_ms: 0,
+            wall_normal_max: s(0.0),
+        }
+    }
+
     /// CPM plus the three candidate mechanics, for measurement only (spec
     /// rev 3, criteria 4 and 5).
     ///
@@ -501,9 +613,16 @@ pub struct Hull {
 }
 
 impl Default for PhysicsProfile {
-    /// CPM, per spec D1: the default is the higher skill ceiling.
+    /// Canonical Straf3 movement.
+    ///
+    /// This was [`PhysicsProfile::cpm`] until the movement freeze, per spec D1's
+    /// "the default is the higher skill ceiling". It is now
+    /// [`PhysicsProfile::straf3`], which satisfies D1's reason unchanged — the
+    /// two are numerically equal — while making the default *Straf3's own
+    /// ruleset* rather than a reconstruction of another game's. See
+    /// `docs/movement-canon.md` Part 3.
     fn default() -> Self {
-        Self::cpm()
+        Self::straf3()
     }
 }
 
@@ -512,8 +631,69 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_profile_is_cpm_per_d1() {
-        assert_eq!(PhysicsProfile::default(), PhysicsProfile::cpm());
+    fn default_profile_is_canonical_straf3() {
+        // Was `cpm()` until the movement freeze. Spec D1 asked for the higher
+        // skill ceiling and got it: `straf3()` is numerically equal to `cpm()`,
+        // so D1's reason is untouched and the default is now the game's own
+        // ruleset rather than a reconstruction of somebody else's.
+        assert_eq!(PhysicsProfile::default(), PhysicsProfile::straf3());
+    }
+
+    /// The equality between canon and the CPM reconstruction is a **finding**,
+    /// not a link, and this is what keeps it from drifting unnoticed.
+    ///
+    /// Canon Part 2 rejected all three candidate mechanics and canon §1.8
+    /// point 2 reserves *tuning* for the operator rather than a sweep, so no
+    /// constant moved and `straf3()` came out equal to `cpm()`. That is worth a
+    /// great deal — the physics digest does not move, so the freeze invalidates
+    /// no recording and orphans no leaderboard.
+    ///
+    /// **If this test fails, do not "fix" it by delegating.** It means somebody
+    /// changed one of the two. Decide which: correcting `cpm()` against a CPMA
+    /// demo is expected and must *not* drag canon with it — in that case update
+    /// this test to record that the two have diverged, and say so in
+    /// `docs/movement-canon.md` Part 3. Changing `straf3()` is a change to
+    /// frozen canon and needs Part 3 rewritten and every artefact re-cut.
+    #[test]
+    fn straf3_and_cpm_agree_today_but_are_not_linked() {
+        assert_eq!(
+            PhysicsProfile::straf3(),
+            PhysicsProfile::cpm(),
+            "canon and the CPM reconstruction have diverged; read this test's \
+             doc comment before changing either"
+        );
+    }
+
+    /// Canon carries no candidate mechanic switched on — asserted here beside
+    /// the constants as well as in `canon_frozen.rs`, because a test next to
+    /// the data is the one an editor of the data actually runs.
+    #[test]
+    fn canonical_straf3_carries_no_candidate_mechanic() {
+        let p = PhysicsProfile::straf3();
+        assert_eq!(p.slide_entry_speed, s(0.0));
+        assert_eq!(p.slide_friction, s(0.0));
+        assert_eq!(p.slide_duration_ms, 0);
+        assert_eq!(p.dash_speed, s(0.0));
+        assert_eq!(p.dash_window_ms, 0);
+        assert_eq!(p.wall_jump_velocity, s(0.0));
+        assert_eq!(p.wall_contact_window_ms, 0);
+        assert_eq!(p.wall_normal_max, s(0.0));
+    }
+
+    /// The two constants Part 3 argues hardest, pinned with their grades.
+    #[test]
+    fn the_frozen_constants_part_3_argues_are_the_ones_it_publishes() {
+        let p = PhysicsProfile::straf3();
+        // A Straf3 choice: the CPM upstream's own CPM branch sets 8. Straf3
+        // follows modern CPMA instead, and Part 3 §3.3 records why.
+        assert_eq!(p.friction, s(6.0));
+        // The upstream's magnitude, attached to Straf3's own quantity: the
+        // window opens on the landing, not at the jump. Part 3 §3.7.
+        assert_eq!(p.double_jump_window_ms, 400);
+        assert_eq!(p.double_jump_boost, s(100.0));
+        // Cited at the assignment site in `CPM_UpdateSettings`, never at the
+        // file-scope declaration, which says 0.
+        assert_eq!(p.air_control, s(150.0));
     }
 
     #[test]

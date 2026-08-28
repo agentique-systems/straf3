@@ -366,6 +366,48 @@ mod tests {
         );
     }
 
+    /// **The movement freeze did not move the physics digest, and this is the
+    /// test that says so.**
+    ///
+    /// `docs/movement-canon.md` Part 2 rejected all three candidate mechanics
+    /// and Part 3 moved no inherited constant, so `PhysicsProfile::straf3()`
+    /// came out numerically equal to `cpm()`. The consequence is why anyone
+    /// downstream cares: **every `.s3d` recorded under `cpm` still loads**, no
+    /// seeded leaderboard is orphaned, and the browser client needs no rebuild
+    /// to agree with native.
+    ///
+    /// This is not a tautology dressed as a test. The module doc above records
+    /// that commit `a604820` moved every profile's digest by adding eight
+    /// gated-off fields and silently invalidated a committed personal best the
+    /// same day. The candidate wave came within one accepted mechanic of doing
+    /// it again: `dash_entry_speed` was added for canon §1.5's pre-registered
+    /// dash retune, moved this digest, and was reverted whole when the dash was
+    /// rejected — precisely so this assertion would still hold.
+    ///
+    /// If it fails, the freeze has moved and every committed artefact must be
+    /// re-cut. That is a decision, not a merge conflict.
+    #[test]
+    fn the_freeze_did_not_move_the_physics_digest() {
+        assert_eq!(
+            physics_digest(&PhysicsProfile::straf3()),
+            physics_digest(&PhysicsProfile::cpm()),
+            "canonical straf3 no longer agrees with cpm: every recording made \
+             under cpm has just stopped loading"
+        );
+        // The frozen value, pinned. Recorded in canon Part 3 and quoted to the
+        // browser workstream, so a silent change is caught here and named.
+        assert_eq!(
+            physics_digest(&PhysicsProfile::straf3()),
+            0x4350_ccc3_1bec_5d4c,
+            "the canonical physics digest moved"
+        );
+        // And canon is still distinguishable from the profile it is not.
+        assert_ne!(
+            physics_digest(&PhysicsProfile::straf3()),
+            physics_digest(&PhysicsProfile::vq3())
+        );
+    }
+
     #[test]
     fn one_changed_constant_changes_the_identity() {
         // The whole point: a tweak to a movement constant must invalidate every

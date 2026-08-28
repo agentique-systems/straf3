@@ -36,6 +36,11 @@ use straf3_sim::num::{Scalar, Vec3, to_bits};
 /// One, because this is the first schema written against the profile as it
 /// stands. The exhaustive destructure in [`profile_bits`] is what forces
 /// whoever widens the struct to come here.
+///
+/// It stayed at one through the candidate wave. `dash_entry_speed` was added
+/// for canon §1.5's pre-registered dash retune, bumped this to two, and was
+/// reverted whole when the dash was rejected — the layout version describes the
+/// struct this build carries, not the struct that was considered.
 pub const PROFILE_LAYOUT_VERSION: i16 = 1;
 
 /// The two canon families. `experimental` is deliberately absent: spec D2 says
