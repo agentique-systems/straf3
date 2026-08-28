@@ -1171,20 +1171,451 @@ comparable.
 
 ## Part 2 — The verdicts
 
-**No verdict is written.** The candidate sweep has not published, so no weighed
-criterion has been scored, and a verdict requires them.
+**All three candidates are rejected for this wave.** None is admitted to
+`PhysicsProfile::straf3()`, and all eight candidate constants stay at the
+disabling values `vq3()` and `cpm()` carry.
 
-That restraint is deliberate and worth saying plainly: a document whose whole
-discipline is that criteria precede numbers would be worth nothing if it ended by
-producing verdicts in a hurry to look finished. **Part 1's pre-publication
-immunity is intact** — every threshold was fixed before any candidate measurement
-existed, and **no threshold has been edited this wave.**
+| | crouch slide | dash | wall jump |
+|---|---|---|---|
+| Gates | all pass | all pass **after** the §1.5 retune | all pass |
+| **Verdict** | **rejected** | **rejected** | **rejected** |
+| Decided by | **W3 — weak, and W3 is required at pass** | **W3 weak, and W7 fail at 5 preconditions** | **W3 weak, W4 fail at 1 context / 1 kind, W2 capped at weak** |
 
-Part 2 will record, for each of crouch slide, dash and wall jump: the gates, the
-weighed scores with their measured numbers per context, the verdict — admitted,
-rejected, or unjudgeable on available evidence — any geometry dependency, and
-for a rejection the criterion, the number and what would change the answer. A
-rejection under G7 carries the two obligations §1.6 sets.
+**No threshold was edited to reach any of this.** §1.7 gains no fourth amendment
+and every number below is scored against Part 1 exactly as it stood before the
+sweep existed. r12 is intact, and the one place where a measurement *parameter*
+moved — G7's refinement floor — is disclosed in §2.2 and **decides nothing**.
+
+**Rejecting all three is a real outcome, not a failure of the wave.** §4.1 of the
+vision says no mechanic is included merely because it existed in an older game,
+and §1.8 point 6 of this document says a rejection is not forever: each verdict
+below names the criterion, the number, and what would change the answer, so the
+next wave can satisfy it or argue with it rather than re-proposing from scratch.
+What this wave establishes is that three plausible mechanics, implemented and
+measured properly, do not clear a bar written before they were measured. That
+bar is now tested rather than merely stated.
+
+### 2.1 What the verdicts do *not* rest on
+
+Recorded first because it is the question a reader should be able to settle
+without reading the rest.
+
+**No verdict here turns on a G7 number.** Every rejection is decided by W3, W4,
+W7 or W2, and G7 passes for all three candidates on the reading in §2.2. So the
+auditor's independent ruling on G7's 0.25° refinement floor — pending as this is
+written, and deliberately taken out of the hands of everyone who is party to it —
+**cannot change a single verdict in either direction**. If it rules the floor a
+threshold edit, the consequence is a disclosure under the threshold-edit rule and
+an entry in §1.7; it is not a re-scoring, because nothing was scored on it.
+
+That is stated as a fact about the arithmetic, not as a reason to relax about the
+ruling. §1.6's two obligations on a G7 rejection are not triggered, because there
+is no G7 rejection.
+
+### 2.2 G7's floor moved, and it was the instrument that failed, not the technique
+
+Part 1's G7 requires the instrument to pass a self-test before it is used on a
+candidate: run it on strafejumping and it must report **no** surviving
+discontinuity; run it on overbounce and it must report one.
+
+**At Part 1's stated 1° starting floor, the instrument failed that self-test.**
+The worst strafejump step — `vq3`/`strafe` at 1000 ups entry, at 72.19° — still
+measured **56.75 ups** after refinement to 1°, above the 16 ups threshold. The
+rule as parameterised would have reported a cliff in strafejumping and rejected
+the technique the game is named after. Refined to **0.25°** the same step measures
+**14.60 ups**, and 56.75 → 14.60 across a ×0.25 change in floor is a step
+*halving with the grid*, which is what a gradient does and what a cliff does not.
+Overbounce's step is unmoved at **447.55 ups across 1/16 of a unit** at a drop
+height of 125.344 units. The instrument passes both halves at 0.25° and every G7
+number in this document is taken there.
+
+**Why this is a parameter and not a nudge, and why it is nonetheless being ruled
+on by someone else.** Part 1 states the floor is "a parameter of the rule, not a
+constant", that a step still above threshold at the starting floor should be
+refined further, that the floor needed must be recorded, and that "the finding is
+*whether it halves*". Every one of those conditions is met. But the honest shape
+of the event is also this: *a measurement floor was loosened, after data existed,
+by the parties who need the instrument to work, justified by the original setting
+producing an absurd result* — which is likewise a precise description of an
+illegitimate threshold nudge. The two are separated only by an argument, and the
+people who made the argument are inside it. So it is recorded here and ruled on
+independently by the auditor, **before** these verdicts were final. Since §2.1
+shows no verdict depends on it, that ruling costs nothing to wait for and the
+record is better for having it.
+
+**A pre-registration that was half right, graded by someone else.** Part 1's G7
+predicted this exposure in advance and named a curve for it: `vq3`/`forward` at
+500 ups, in the 50°–60° band where the wish-speed clamp opens. That band is not
+the worst one; the worst is `vq3`/`strafe` at 1000 ups. **The prediction was right
+about the mechanism and wrong about the curve.**
+
+> *Auditor's assessment of that prediction — to be recorded here in the auditor's
+> own words rather than canon's, because a party should not grade its own
+> forecast.*
+
+### 2.3 The gates
+
+| | crouch slide | dash | wall jump |
+|---|---|---|---|
+| **G1** determinism | see below | see below | see below |
+| **G2** in-scope measurements moved | **0 / 1059** | **0 / 1059** | **0 / 1059** |
+| **G3** worst latency, presses that fire | **0** | **0** | **0** |
+| **G3** inputs ignored | see below | see below | see below |
+| **G5(a)** armings on flat ground | **0** | **30 → 0** after the retune | **0** |
+| **G5(b)** point-naive median | **0.0000** | **0.0000** | **0.0000** |
+| **G6** velocity-magnitude clamp | none | none | none |
+| **G6** un-invoked terminal speeds | unmoved | unmoved | unmoved |
+| **G7** worst surviving aim step (0.25°) | 554.86 ups | 428.88 ups | 239.51 ups |
+| **G7** worst closed-form residual | 14.41 ups | 117.98 ups | 8.52 ups |
+| **G8** disabling constants | yes | yes | yes |
+
+**G2 passes, and the denominator is named rather than implied.** 1,059 of the
+2,211 published values were re-measured: the `cpm` half, because `experimental()`
+is `..Self::cpm()` and a `vq3` re-measurement would describe a profile nobody has
+proposed. §7 restates other sections' numbers and §8 is not
+profile-parameterised. Not one in-scope value moved.
+
+**G5(b) passes for all three, at the far end of the gate.** The point-naive
+policy — invoke at the first available command, aimed along the current heading —
+returns a median ratio of **0.0000** against the best. The gate fails at ≥ 0.95.
+These mechanics are the opposite of a cooldown by this measure: the obvious play
+is worth nothing.
+
+**G5(a) and the retune.** The dash armed **30 times in 30 seconds on flat ground**
+at a peak speed of exactly 320.00 ups — `max_speed`, so the gate's premise held
+— which is the failure Part 1 disclosed in advance from reading `step.rs`.
+`crates/straf3-sim/tests/canon_gates.rs` reaches the same conclusion by a
+different route, ten armings out of ten landings at zero speed; two independent
+instruments agreeing. The single §1.5 retune, pre-registered in §3.8 *before* the
+re-measurement, takes it to **0 in all seven contexts**. The slide and the wall
+jump pass unretuned, for the reasons Part 1 predicted: `slide_entry_speed` 400 is
+above `max_speed`, and flat ground has no plane whose `|normal.z|` is at or below
+`wall_normal_max` 0.3.
+
+**The retune's prediction was half wrong, and the disclosure is the point.** §3.8
+predicted W4 "may fall". **It did not: 5 contexts / 3 kinds, unchanged.** The
+reason is worth more than the prediction was: *the fall to the arming landing is
+itself a strafejump*, so a player holding 50–70° from the first command enters at
+320 and lands well above 400, earning in the air the speed the entry did not
+supply. What the retune removes is not the mechanic but the lazy aims — on flat
+ground at 320 ups the best delta falls from **6.73 to 0.01** while 47 timings
+still fire.
+
+*Whether "earned during the approach" satisfies G5(a) is a reading of the gate,
+and lab correctly left it to canon. **It does.** G5(a) asks how often the
+mechanic becomes available to a player who never exceeds `max_speed`, on flat
+ground. A player who reaches 400 ups by holding a strafe angle down a fall **has
+exceeded `max_speed`**, and did so by executing the canonical technique. That is
+the gate's two-currencies argument working exactly as §1.3 states it: the
+availability was bought, and the price was paid in the skill the game is about.
+The gate would be measuring something else entirely if "earned" excluded earning.*
+
+**G1 is not decided by the sweep and is not claimed here.** `cargo xtask
+determinism` across all four targets and
+`the_checksum_covers_the_state_a_technique_depends_on` decide it. What can be
+stated: `SimState::checksum` folds `slide_ms`, `dash_ms` and `wall_contact_ms`,
+so no candidate branches on state the checksum cannot see. The four-target run is
+the auditor's, and **no candidate is admitted, so no candidate constant changes
+and the question is not load-bearing for this freeze.**
+
+**G3's second count is a measured gap, disclosed rather than proxied.** The
+instrument rotates one command's wish direction and asks whether anything moved;
+it cannot ask that of a jump press, because under canon an airborne jump press
+does nothing and there is no control behaviour to differ from. What is read from
+the source instead: the dash and the wall jump both set `jump_held`, **exactly as
+a floor jump does** — the press is consumed until released, which is the
+inherited edge-trigger and not an animation lock. No candidate takes a command
+from the player and returns it later, which is what §4.4's anti-goal names. G3
+passes on that reading, and the reading is stated so it can be disagreed with.
+
+**G7 passes for all three, and the reason is where the steps sit.** G7 fails only
+on a surviving step that exceeds 16 ups **and does not coincide with a boundary
+the player can perceive**. Every large surviving step in all three candidates
+sits in a `ledge256` or `corner` cell — where a quarter-degree of aim decides
+whether the player leaves the edge or meets the wall. An edge and a wall are
+surfaces the player is touching, which is the first example §1.3 gives of a
+perceptible boundary. The steps are large; they are not invisible. Their
+locations are published per cell (`g7_aim_at_deg`, `g7_geometry_at_units`)
+precisely so this can be checked rather than taken.
+
+*Two honest qualifications.* The dash's 117.98 ups closed-form residual is
+entirely the `corner` cell, where the impulse meets a plane inside the same
+command — the rule predicts the impulse exactly and the world then intervenes,
+which is canon's own collision behaviour rather than the mechanic being
+unpredictable. And **no closed form is offered for the horizon outcome**, only
+for the impulse; G7 part 1 asks for a rule that computes "the mechanic's effect",
+and the impulse is that effect, but a reader who thinks the horizon is what must
+be predicted should know it was not.
+
+**The timing axis could not be refined at all**, because one command is the
+simulation's input quantum and there is no finer grid. "Does this step shrink
+when the grid is refined" has no meaning there. Published as a gap, not answered.
+
+### 2.4 Crouch slide — rejected
+
+**Gates:** all pass. **§2.0's question is settled and it does not decide the
+mechanic** (§2.5).
+
+| | number | band |
+|---|---|---|
+| **W1** naive-harm | **209 / 17,472 = 1.2%** | **pass** |
+| **W2** gap median, 7 contexts qualifying | **1.0037** | pass on the gap |
+| **W2** execution window | 8–152 ms in six contexts; **degenerate at `ceiling48`** | pass on the median, disclosed |
+| **W3** | **weak** | **required at pass — this is the rejection** |
+| **W4** material contexts / kinds | **7 / 4** | **pass** |
+| **W5** techniques dominated everywhere | **0** | **pass** |
+| **W7** constants / state / preconditions | 3 / 1 / **3** | **pass** |
+
+**The verdict, and the number behind it: W3 scores *weak*, and §1.5 requires W1,
+W2 and W3 all at pass.** W3's ordered tests: levelling does not hold as a flat
+response (see the ruling below), so the case survives test 1; there *are*
+contexts where using the slide together with a held angle beats either alone by
+more than the materiality threshold — `ledge256` at 800 ups by **+243.79 ups**,
+at 400 by +159.52, `ramp50` at 800 by +93.21, `step18` at 640 by +36.23 — so it
+survives test 2; but test 3 asks whether entry-speed sensitivity
+`d(absolute exit speed)/d(entry speed)` is **≤ 0 anywhere in the swept range**,
+and it is, repeatedly and substantially: `floor` −0.4755 between 400 and 500 ups,
+`corner` −1.2301 between 320 and 400, `ledge256` −2.9058 between 800 and 1000.
+**Arriving faster leaves you slower**, in several contexts, at the horizon. That
+is *weak*, not *fail*, and weak is not enough for a required criterion.
+
+**What would change the answer:** an entry-speed response that is monotonic —
+i.e. a slide whose value does not invert as the player arrives faster. That is a
+question about how the mechanic interacts with the ground terminal speed, not
+about `slide_friction`'s magnitude, so it is unlikely to be reachable by tuning
+the three existing constants. The slide's one retune was not spent, and remains
+available to a future wave.
+
+**A ruling on W3's levelling test, disclosed because it went the candidate's
+way.** W3 fails a mechanic outright if it "ever sets absolute exit speed to a
+value independent of the entry speed". Read strictly — any adjacent pair of entry
+speeds with a zero slope — this fires: `floor` returns 440.09 at both 320 and 400
+ups. **I have ruled that levelling means the response is flat, not that two
+sampled points coincide**, because the same strict reading fires on the
+*control*: on flat ground the canonical technique returns 480.28, 480.31, 480.34,
+480.36, 480.36, 480.37 across the whole entry range — the existing vocabulary
+levels harder than the candidate does, because a second of strafejumping converges
+to a terminal speed regardless of what came in. A test that condemns the
+incumbent for the property it is testing is measuring the horizon, not the
+mechanic. **This ruling does not save the crouch slide** — W3 is weak either way,
+and under the strict reading it would be *fail* — so nothing turns on it here.
+It is recorded because the next wave will meet it with a candidate whose verdict
+does turn on it, and because a ruling made when it changes nothing is worth more
+than one made when it does.
+
+**The two kinds of zero, kept apart.** On flat ground the slide's outcome delta
+at §1.1's horizon is 0.00 across essentially the whole naive neighbourhood. That
+is **not** "the mechanic does nothing": a player holding a direction converges to
+the ground terminal speed within the second between the window closing and the
+horizon whether or not they slid. The advantage is real and then it is spent. The
+horizon was **not** moved to flatter the mechanic — §1.1 defines it where it
+defines it — and `peak_gain_ups` is published beside it as an explicitly labelled
+diagnostic no criterion is scored on. A verdict that read that zero as "no
+effect" would be wrong about the mechanic while reaching the same conclusion,
+which is exactly the sort of accidental rightness this document exists to avoid.
+
+**Geometry dependency, in §1.5's terms.** The slide's stated primary use is
+carrying speed under a low ceiling. `ceiling48` is the one context where the
+timing axis is **degenerate** — crouch is forced, every invocation timing produces
+the identical run — so in the mechanic's own headline use there is nothing to
+time. That is a fact about the mechanic and not about the map. Separately, and
+measured on real geometry rather than testbed: on the training map built for it,
+**no entry speed the map can produce leaves the tunnel still sliding** when the
+slide is armed where the map's own signage says to arm it; armed at the last
+point a standing hull fits, **550 ups** is the lowest that works, against a
+predicted 450. *Where* the slide is armed is worth more than how fast the player
+arrives — a second optimal-play question adjacent to §2.0, which it does not
+answer.
+
+### 2.5 §2.0 settled: tap-and-stand-up does not dominate
+
+The code claim §2.0 makes is **true**. `PM_Friction` selects `slide_friction` on
+`slide_duration_ms != 0 && p.timers.slide_ms > 0` and reads nothing else;
+`p.crouched` is not consulted, and the wish-speed cap is a separate test in
+`walk_move`. So the two halves of "sliding" are gated on different things — the
+friction on a timer, the speed price on a posture — and a player who taps crouch
+and stands up on the next command **keeps the friction for the whole countdown
+having paid the posture cost for one command**. Armed at 400 ups on flat ground,
+all 75 commands of the slide are spent standing.
+
+**But it does not dominate.** Over the cells where both policies fire, hold beats
+tap materially in **16** cells, tap beats hold materially in **7**, and **18** are
+within 16 ups of each other. Largest tap advantage +229.10 ups (`corner` at 500);
+largest hold advantage +280.21 ups (`ledge256` at 400). Which policy wins is
+decided by the geometry — whether the crouched hull clears something, whether the
+player leaves the edge — not by the friction.
+
+So §2.0's worry is answered: the crouch slide is **not** a 600 ms friction toggle
+with a speed price of admission, and the anti-toggle case does not have to be
+remade. This did not rescue the mechanic, and it was not supposed to; it removes
+a reason to reject it that turned out not to hold, which is what settling a
+question before a verdict is for.
+
+*One related finding, measured because it was asked for:* `slide_entry_speed` is
+checked **once, at entry**, and never re-read. Armed at 400 ups with nothing held,
+the timer runs its full 75 commands with **74 of them below the entry speed**,
+ending at 208.48 ups — below `max_speed`. The speed price is a toll at the door,
+not a condition of continued use.
+
+### 2.6 Dash — rejected
+
+**Gates:** all pass, G5(a) only after the single pre-registered retune (§2.3).
+
+| | number | band |
+|---|---|---|
+| **W1** naive-harm | **79 / 26,208 = 0.3%** | **pass** |
+| **W2** gap median, 5 contexts qualifying | **1.0000** | pass |
+| **W3** | **weak** | **required at pass — a rejection** |
+| **W4** material contexts / kinds | **5 / 3** | **pass** |
+| **W5** techniques dominated everywhere | **0** | **pass** |
+| **W7** constants / state / preconditions | 2 / 1 / **5** | **fail — the second rejection** |
+
+**Two independent rejections, and it matters that they are independent.**
+
+*W3 is weak*, on the same test that caught the slide: the dash chains materially —
+`corner` at 500 ups gains **+356.29 ups** over either alone, `ledge256` at 400
+gains +56.18 — so tests 1 and 2 survive, but entry-speed sensitivity is ≤ 0 in
+many places (`ramp26` **−1.9792** between 800 and 1000 ups, `floor` −0.5246,
+`ramp50` −0.6590). Weak, and W3 is required at pass.
+
+*W7 fails at five preconditions.* The predicates gating the dash in `step.rs` are
+`jump_pressed`, `!jump_held`, airborne, `dash_ms > 0`, and `wishdir != 0` — five,
+with `addspeed > 0` excluded as a test on the impulse rather than on state, and
+before the retune adds `speed >= dash_entry_speed` at the arming landing, which
+would make six. W7 fails at ≥ 5.
+
+**A defect in W7 that must be disclosed even though it does not change this
+verdict.** W7's *definition* counts "distinct state predicates gating the mechanic
+in `step.rs`", and five is that count honestly taken. But W7's *calibration*
+counts differently: it calls the double jump "land from a jump, jump again soon —
+two" and a strafejump "be in the air, hold a direction off your velocity — two".
+Counted by the definition, the incumbent double jump scores **four**
+(`jump_pressed`, `!jump_held`, grounded, `double_jump_ms > 0`), which would be
+*weak*. **The definition and its own calibration examples disagree, and the
+definition is stricter.** I have applied the definition as written, because
+applying the looser reading after seeing that it rescues a candidate is precisely
+the move this document exists to prevent — and because the threshold-edit rule
+lets me change a criterion only by disclosing it, never by choosing the
+convenient reading silently. The dash would score **three** under the
+calibration's own style ("be airborne in the window a fast landing opened, press
+jump again, aim it"), which is a *pass*.
+
+So this is on the record as plainly as I can put it: **had W7 been counted the
+way its own calibration counts, the dash would not have been rejected by W7.** It
+would still have been rejected by W3, which is why the verdict stands and why
+this disclosure costs nothing to make. A future wave should fix W7's wording —
+*before* measuring its next candidate, not after.
+
+**What would change the answer:** for W3, a monotonic entry-speed response — the
+dash currently pays most where the player arrived slowest, which is the inversion
+W3 tests for. For W7, either a mechanic with fewer gating predicates or a
+corrected criterion. The dash's one retune has been spent.
+
+**Geometry dependency.** The dash's primary use — converting a landing that ended
+a jump into speed across the current heading — has geometry in the training map
+built for it. One property found in measurement and worth carrying: with the
+arming floor at 400 and `dash_speed` at 400, **a dash aimed along the direction
+of travel is worth exactly nothing at every speed that can arm it**, because
+`addspeed = dash_speed − velocity·wishdir` is not positive and the window is
+deliberately not spent. The dash's entire value lives across the heading. That is
+the clamp working as designed and is why W1's naive-harm rate is so low — the
+naive press mostly does nothing rather than something bad — but it also means the
+mechanic is invisible to a player who does not already know to turn.
+
+### 2.7 Wall jump — rejected
+
+**Gates:** all pass, including G5(a) under amendment 2's flat-ground reading.
+
+| | number | band |
+|---|---|---|
+| **W1** naive-harm | **6 / 1,950 = 0.3%** | **pass** |
+| **W2** gap median, **1** context qualifying | 1.0011 | **weak — capped by amendment 3** |
+| **W3** | **weak** | **required at pass — a rejection** |
+| **W4** material contexts / kinds | **1 / 1** | **fail — a rejection** |
+| **W5** techniques dominated everywhere | **0** | **pass** |
+| **W7** constants / state / preconditions | 3 / 2 / **4** | weak |
+
+**Three rejections, and W4 is the one that matters.** The wall jump is material
+in exactly **one** of seven contexts, spanning **one** kind. W4 fails at 0 or 1
+context. Amendment 3's floor then caps W2 at *weak* independently, because fewer
+than three contexts qualify for its median — and amendment 3 said in advance that
+a candidate ended this way must be told that **W2 and W4 agreed rather than that
+two independent criteria condemned it**, so that is said here. W3 is weak on the
+same entry-speed test as the others, with `corner` slopes of −3.5750 and −0.0230.
+
+**Amendment 2 earned its keep, in the direction that costs the document
+something.** Under the seven-context reading of G5(a) the wall jump would have
+been **ended at a gate with no weighing at all** — `note_wall_contact` has no
+speed precondition, so a player walking into a wall at 100 ups arms one. Amendment
+2 ruled for flat ground on the two-currencies argument, so the wall jump was
+weighed instead. It then failed the weighing. **The amendment did not save it and
+was never meant to; it bought the mechanic a hearing, and the hearing produced a
+better record than a gate stop would have** — including the two findings below,
+neither of which a G5(a) rejection would have surfaced.
+
+**It does not beat a clean line.** Measured on real geometry: near-constant
+**+33 ups against the clipped speed** at every approach angle, but a net **loss**
+against the approach speed past about 20° — **−1.7 ups at 20°, −43.1 at 30°**. It
+beats a line that was going to touch the wall anyway. Against a W4 of 1 context
+and 1 kind, that is the sharpest thing anyone has measured about this candidate:
+its value is recovery from a mistake, not a technique.
+
+**And its most likely degeneracy is measured rather than feared.** A wall jump
+climbs **any slot narrower than 165 units indefinitely** —
+`g < wall_jump_velocity·2·jump_velocity/gravity + 30`. In a 128-wide pocket:
+**13 bounces, 429.8 units of climb, 33.1 units per bounce.** Whether hands can
+chain it is unmeasured; the mover does it, pressing jump on the exact command the
+contact window opens. Geometry placed such a pocket in a dead end, off route,
+behind no checkpoint, deliberately — so that the operator meets it during the
+§1.9 playtest rather than after a freeze. §1.9's ask names it explicitly.
+
+**What would change the answer:** W4 needs the mechanic to be material in at
+least three contexts spanning two kinds. It is material in one. That is not a
+tuning problem — `wall_jump_velocity` changes how much it gives, not where walls
+are — so the honest statement is that **the wall jump is a one-situation
+mechanic**, and §1.4's W4 exists to say that a mechanic which pays in exactly one
+place needs maps built around it. Its retune was not spent and remains available,
+but no value of the three constants adds contexts.
+
+### 2.8 W5, and a finding about §1.2's harness
+
+**W5 passes for all three candidates: no canonical technique is dominated
+everywhere in its own domain.** That is the criterion's answer and it is
+unambiguous.
+
+But the number behind it is smaller than it looks, and the verdict says so. On
+§1.2's harness — one context, one entry speed, an angle held off the current
+velocity, a jump that may or may not be pressed — **four of the seven named
+techniques are the same command policy.** `ground_turn`, ramp traversal, step-up
+and the drop launch are each *hold a direction and press nothing*; so is
+`air_forward`. What distinguishes them is the context each is named in, because
+the geometry supplies the technique. Only the strafe axis and the
+jump-on-landing rhythm are separate things for the hands to do.
+
+**Scoring W5 as seven independent measurements would overstate the evidence by
+four**, and this verdict does not. The survival test is still applied per named
+technique over its own domain, as §1.5 requires, and every technique survives. It
+is a finding about the harness rather than about the candidates, and it belongs
+in Part 2 because the next wave will otherwise re-derive it.
+
+### 2.9 What Part 2 did not measure
+
+Named rather than proxied, in the same spirit as §1.10.
+
+1. **G1's four-target determinism run** is the auditor's, not the sweep's. Since
+   no candidate is admitted, no candidate constant changes and G1 is not
+   load-bearing for this freeze.
+2. **G3's second count** is measured on steering, not on presses (§2.3).
+3. **G7's timing axis** cannot be refined; one command is the input quantum.
+4. **W6's pair counts** are published per entry speed in the machine-readable
+   section rather than collapsed to a single band. No verdict here rests on W6:
+   all three candidates are rejected by required criteria that W6 cannot reach.
+5. **The per-cell collapse for W2 and G5(b)** — six entry speeds into one context
+   figure — is not specified by Part 1. Lab collapsed by the median of qualifying
+   entry speeds first, disclosed the choice, and published every per-cell number
+   so a different collapse costs nothing. **I ratify that collapse**, and record
+   that Part 1 should say which it means before the next candidate is measured.
+6. **Route diversity** is still unmeasured; §1.8 point 4 stands unchanged.
 
 ### 2.1 The gates that do not need the sweep
 
