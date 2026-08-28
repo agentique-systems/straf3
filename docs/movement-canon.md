@@ -916,10 +916,22 @@ which four rounds of this argument got wrong before anyone opened the files.**
   0.37037" — a declaration that disagrees with its own arithmetic and uses a
   different unit from the assignment; and the file is a Tremulous gameplay
   patch, so it is third-hand about CPMA.
-- **`double_jump_window_ms` 400.** **Not corroborated there at all.** There is no
-  millisecond window anywhere in that file's 372 lines. It rests on
-  freepromode's README alone. Xonotic's CPMA reconstruction, whose other values
-  match this tree's closely, sets `sv_doublejump 0`.
+- **`double_jump_window_ms` 400.** **Not corroborated there at all** — there is no
+  millisecond window anywhere in that file's 372 lines — and its one attestation
+  is much weaker than it looked. freepromode's README documents the cvar
+  `g_doublejump` as "Give a boost if a jump is done within 400 ms of the last
+  one", which is the number, verbatim. But the README also says, in the same
+  file: that its author "used some code … `cpm1_dev_docs.zip`" and **"tried to
+  purge it", which "has resulted in a *less accurate* imitation of CPM
+  physics"**; that "I know that CPM is incorrect"; and that a better
+  reconstruction exists elsewhere which the author recommends over their own.
+  Xonotic's reconstruction sets `sv_doublejump 0`.
+
+  So the 400 is attested by a source that (a) traces to the same single upstream
+  document every other port traces to, and is therefore **not independent
+  evidence**, and (b) describes itself as a degraded copy of that upstream. It
+  is the weakest-supported constant in this tree, and **Part 3 should treat it
+  as a value Straf3 must choose deliberately rather than one it can cite.**
 
 *The structure is better attested than either number, and that is worth more to
 Part 3.* The same file's vq3 branch reads `cpm_pm_jump_z = 0; // turn off
@@ -928,14 +940,16 @@ extensions switched off" as a zero on the very field, which is the relationship
 `profile.rs` already encodes and defends.
 
 *(Chain of custody, because a document that demands citations owes one for its
-own claims. GPP-1-1's `bg_promode.c` and Xonotic's `physicsCPMA.cfg` were
-fetched raw and read line by line by the author of this document —
-`sha256 31bea076…` and `914892ff…`. Both had previously been read through a
-summarising fetch, and both were misread that way: `bg_promode.c` declares
+own claims. All three sources — GPP-1-1's `bg_promode.c`, Xonotic's
+`physicsCPMA.cfg` and freepromode's `README.md` — were fetched raw and read in
+full by the author of this document: `sha256 31bea076…`, `914892ff…` and
+`087d9a43…`. Every one of them had previously been read through a summarising
+fetch, and **two of the three were misread that way**. `bg_promode.c` declares
 Tremulous-tuned values at file scope and overwrites them at runtime, so a
-summary surfaces the declarations and misses the function. freepromode's README
-has **not** been read from source by anyone on this run and the 400 ms rests on
-it, which is the weakest link in this paragraph and is stated as such.)*
+summary surfaces the declarations and misses the function; and freepromode's
+README was cited for the 400 ms without the disclaimers three lines below it
+that are the most important thing in the file. Neither error was visible in the
+summary; both were obvious within a minute of `curl`.)*
 
 **Part 3 must not argue that these numbers were never inherited** — that claim
 is contradicted by the files. It must argue 400 and 100 separately, at the
