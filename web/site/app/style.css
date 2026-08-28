@@ -248,14 +248,23 @@ section > h2 {
 }
 .digest-mid { color: var(--ink-faint); }
 
-.facts { margin: 0; display: grid; gap: 0 1.5rem; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); }
+/*
+ * One column, not a responsive grid. An auto-fit grid gives every row the
+ * height of its tallest cell, so one fact carrying a note leaves a hole beside
+ * two that do not — and a definition list with holes in it reads as missing
+ * data, which on this site means something specific.
+ */
+.facts { margin: 0; display: block; }
 .fact {
   display: grid;
-  grid-template-columns: 11rem 1fr;
+  grid-template-columns: 12rem 1fr;
   gap: 0.75rem;
-  padding: 0.35rem 0;
+  padding: 0.4rem 0;
   border-bottom: 1px solid var(--line);
   align-items: baseline;
+}
+@media (max-width: 34rem) {
+  .fact { grid-template-columns: 1fr; gap: 0; }
 }
 .fact dt { color: var(--ink-dim); font-size: 0.85rem; }
 .fact dd { margin: 0; font-family: var(--mono); font-size: 0.88rem; overflow-wrap: anywhere; }
@@ -300,14 +309,21 @@ tr.is-record td.rank, tr.is-record td.time { color: var(--accent); font-weight: 
   border-color: var(--accent);
   color: var(--ink);
 }
+/*
+ * A pinned tab is marked by a dashed border and nothing else. An emoji pin was
+ * the obvious choice and rendered as a tofu box in the monospace stack, which
+ * is worse than no marker: a glyph that fails to resolve looks like a bug in
+ * the digest next to it.
+ */
 .category-tab.pinned { border-style: dashed; }
-.category-tab.pinned::before { content: "📌 "; font-size: 0.8em; filter: grayscale(1); }
 
 .pin-note {
-  margin: -0.4rem 0 1rem;
+  margin: 0.9rem 0 1rem;
   font-size: 0.82rem;
   color: var(--ink-faint);
 }
+/* Tucked up under the tabs it explains — but only there. */
+.categories + .pin-note { margin-top: -0.4rem; }
 
 /* ── cards ────────────────────────────────────────────────────────────── */
 

@@ -39,6 +39,8 @@
  * it and keeping just the prose would leave the site matching on a sentence.
  */
 
+import { categoryText } from './router.js';
+
 const BASE = '/v1';
 
 /**
@@ -148,19 +150,29 @@ export function map(slug) {
 /**
  * `GET /v1/maps/:slug/leaderboard`.
  *
- * The category is passed as the two things it is: a family, and — when the URL
- * pinned one — an exact physics digest. A service that does not understand
- * `profile_digest` must answer with what it *did* use, so the page can say the
- * board it is showing is not the board that was asked for. It must not
- * silently substitute the current profile (§7.2 step 2).
+ * The category travels as **one** `profile` parameter carrying the whole
+ * category key — `cpm`, or `cpm@a1b2c3d4e5f60718` — which is the same grammar
+ * the URL path uses (URLS.md §2) and the shape the service implements.
+ *
+ * It was briefly two parameters here, a family plus a separate
+ * `profile_digest`, and that is worth a warning rather than a silent fix: a
+ * service reading only `profile` sees a bare family, answers with the *current*
+ * board, and a pinned URL quietly renders rows set under constants it did not
+ * ask for. That is the substitution ARCHITECTURE §7.2 step 2 forbids, arriving
+ * by way of a query parameter nobody was reading. Sending the key whole means
+ * a service that does not understand pinning cannot accidentally half-understand
+ * it — it either answers the pinned board or it fails.
+ *
+ * The site still checks the `category` that comes back against the one it
+ * asked for, because "cannot half-understand it" is a property of this call and
+ * not a guarantee about the answer.
  *
  * @param {string} slug
  * @param {import('./router.js').Category} category
  * @param {{limit?: number, offset?: number}} [page]
  */
 export function leaderboard(slug, category, page = {}) {
-  const q = new URLSearchParams({ profile: category.family });
-  if (category.digest) q.set('profile_digest', category.digest);
+  const q = new URLSearchParams({ profile: categoryText(category) });
   if (page.limit !== undefined) q.set('limit', String(page.limit));
   if (page.offset !== undefined) q.set('offset', String(page.offset));
   return call(`/maps/${encodeURIComponent(slug)}/leaderboard?${q}`);
@@ -193,27 +205,25 @@ export function attempt(slug, category) {
   return call('/attempts', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      map: slug,
-      profile: category.family,
-      profile_digest: category.digest ?? undefined,
-    }),
+    body: JSON.stringify({ map: slug, profile: categoryText(category) }),
   });
 }
 
 /**
  * `POST /v1/runs` — submit a finished run.
  *
- * `run_digest_hex16` travels in the payload beside the bytes even though the
- * service recomputes it from the recording and ranks on its own re-simulation
- * (§7.2 step 5). It is here as a *claim to disagree with*: the site reports
- * what the browser said the digest was, through a channel that is not the file
- * header, so a header written by a code path that never ran the simulation has
- * nothing to agree with. The same value is written to the console for the same
- * reason.
+ * The body is the raw `.s3d` bytes, uncompressed; the ticket travels as
+ * `X-Straf3-Ticket`. Both are the service's shapes as implemented.
  *
- * The bytes go as base64 in JSON rather than as a raw body: one shape for the
- * whole `/v1` surface, and the payload is ~17 KiB.
+ * The two `X-Straf3-Client-*` headers are the browser's *claim* about the run,
+ * sent through a channel that is not the file. The service does not need them
+ * — it re-simulates and computes the time itself (§7.2 step 5), and its answer
+ * echoes the `run_digest` it derived from the bytes. That is precisely what
+ * makes them useful: the site can then compare what the browser said against
+ * what the service computed, and a recording whose header was written by a code
+ * path that never ran the simulation has nothing to agree with. Unknown request
+ * headers are ignored by a service that does not read them, so this costs
+ * nothing if it never does.
  *
  * @param {object} run
  * @param {string} run.ticket
@@ -222,17 +232,15 @@ export function attempt(slug, category) {
  * @param {Uint8Array} run.s3d
  */
 export function submitRun({ ticket, time_ms, run_digest_hex16, s3d }) {
-  let binary = '';
-  for (let i = 0; i < s3d.length; i += 1) binary += String.fromCharCode(s3d[i]);
   return call('/runs', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      ticket,
-      client_time_ms: time_ms,
-      run_digest_hex16,
-      s3d_base64: btoa(binary),
-    }),
+    headers: {
+      'content-type': 'application/vnd.straf3.demo',
+      'x-straf3-ticket': ticket,
+      'x-straf3-client-run-digest': run_digest_hex16,
+      'x-straf3-client-time-ms': String(time_ms),
+    },
+    body: s3d,
   });
 }
 

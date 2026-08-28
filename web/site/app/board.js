@@ -22,8 +22,8 @@
  * States 2 and 3 look identical in a naive DOM — an empty `<tbody>` — and they
  * are completely different facts about the world. Everything below exists to
  * keep them apart, and `boardView` is a pure function of the asked-for category
- * and the API result so that all four can be rendered side by side and looked
- * at (see `/dev/r9` in `web/dev/serve.mjs`).
+ * and the API result, so all four can be produced on demand and looked at:
+ * `node web/dev/serve.mjs --fixtures` serves each from a real route.
  */
 
 import { h, absent, digest as digestEl, provenance, action } from './ui.js';
@@ -37,14 +37,18 @@ import { categoryText, href, isDigest16 } from './router.js';
  * blank player name is better than "anonymous" invented by the site, and a
  * missing time is better than a zero that sorts to the top.
  *
+ * `rank` comes from the service's `rank() over (order by time_ms, set_at)`, so
+ * tied times share a rank. It is used as given rather than replaced by the row
+ * index: renumbering a tie into 1, 2 invents an ordering the data does not have.
+ *
  * @param {any} e
  * @param {number} index
  */
 function entryRow(e, index) {
   const rank = Number.isInteger(e?.rank) ? e.rank : index + 1;
-  const name = e?.player?.display_name ?? e?.display_name ?? null;
+  const name = typeof e?.player === 'string' ? e.player : (e?.player?.display_name ?? e?.display_name ?? null);
   const timeMs = Number.isFinite(e?.time_ms) ? e.time_ms : null;
-  const runRef = e?.run_digest ?? e?.run_digest_hex16 ?? e?.run_id ?? e?.id ?? null;
+  const runRef = e?.run_digest ?? e?.run_id ?? null;
 
   const nameCell = name
     ? h('span', null, name)
@@ -88,36 +92,46 @@ function table(entries, total) {
 /**
  * The board that was *asked for*, versus the board that came back.
  *
- * A service that does not understand `profile_digest` must answer with the
- * category it actually used (api.js, ARCHITECTURE §7.2 step 2). If that is not
- * the category in the URL, the page says so above the rows rather than
- * presenting them as the pinned board.
+ * The service must answer with the category it actually used (ARCHITECTURE
+ * §7.2 step 2). When that is not the category in the URL, the rows are **not
+ * shown at all** — the mismatch replaces them rather than heading them.
+ *
+ * The temptation is to print a warning and render the rows underneath, on the
+ * grounds that some data beats none. It does not. A pinned URL that displays
+ * the current board with a caption is still displaying the current board, and
+ * URLS.md §3 says a pinned key whose digest the service does not honour renders
+ * as unknown, "not as empty and never as the current board". Rows a reader can
+ * see are rows a reader will read; the caption loses.
  *
  * @param {import('./router.js').Category} asked
  * @param {any} answered  the `category` object from the response, if any
+ * @returns {HTMLElement|null} a replacement for the board, or null to render it
  */
-function substitutionWarning(asked, answered) {
+function substitution(asked, answered) {
   if (!answered) return null;
-  const gotDigest = answered.digest ?? answered.profile_digest ?? null;
-  const gotFamily = answered.family ?? answered.profile ?? answered.kind ?? null;
+  const gotDigest = answered.digest ?? null;
+  const gotFamily = answered.family ?? null;
 
   if (asked.digest && gotDigest && String(gotDigest) !== asked.digest) {
-    return absent({
-      kind: 'error',
-      what: 'These are not the rows this URL asked for.',
+    return h('div', null, absent({
+      kind: 'unknown',
+      what: 'The records service answered about a different board.',
       why:
-        `The URL pins physics ${asked.digest}, and the records service answered with ` +
-        `${gotDigest} instead. A time set under different constants is not comparable ` +
-        'to one set under these, so the rows below are not this board.',
-      next: 'Treat them as another category until the service answers the pinned one.',
-    });
+        `This URL pins physics ${asked.digest}. The service replied with the board for ` +
+        `${gotDigest} instead — times set under different constants, which are not comparable ` +
+        'to times set under the ones this URL names.',
+      next:
+        'Those rows are not shown here. Showing them under this address would make this page ' +
+        'the current board wearing a pinned URL.',
+    }));
   }
   if (gotFamily && asked.family && String(gotFamily) !== asked.family) {
-    return absent({
-      kind: 'error',
-      what: `This is the ${gotFamily} board, not ${asked.family}.`,
-      why: `The URL asked for ${asked.family} and the records service answered with ${gotFamily}.`,
-    });
+    return h('div', null, absent({
+      kind: 'unknown',
+      what: `The records service answered with the ${gotFamily} board.`,
+      why: `This URL asks for ${asked.family}, and ${gotFamily} is a different game with a different board.`,
+      next: 'Its rows are not shown here.',
+    }));
   }
   return null;
 }
@@ -169,6 +183,32 @@ export function boardView({ map, category, result }) {
       );
     }
 
+    // A family with no rows at all, as opposed to a *pinned* key naming a
+    // digest with no row. Different questions, different answers.
+    if (result.error === 'unknown_physics_family') {
+      return h('div', null, absent({
+        kind: 'unknown',
+        what: `There is no physics family called "${category.family}".`,
+        why:
+          `${result.detail} A category is (map, physics profile), and the records service has ` +
+          `no profile of kind ${category.family} — so there is no board here to be empty or full.`,
+        next: 'The families this service knows are listed on the map page above.',
+      }));
+    }
+
+    // Malformed against URLS.md §2's grammar. A client error, not a missing
+    // resource — the router normally catches these before a request is made,
+    // so reaching here means the two grammars disagree, which is worth saying.
+    if (result.error === 'invalid_category') {
+      return h('div', null, absent({
+        kind: 'error',
+        what: 'This category key is not well formed.',
+        why:
+          `${result.detail} A category is <family> or <family>@<digest16>, with the digest ` +
+          'sixteen lowercase hex characters.',
+      }));
+    }
+
     if (result.error === 'unknown_map') {
       return h('div', null, absent({
         kind: 'unknown',
@@ -210,12 +250,13 @@ export function boardView({ map, category, result }) {
     }));
   }
 
-  const warning = substitutionWarning(category, data.category);
+  // Before anything is rendered: is this even the board that was asked for?
+  const wrongBoard = substitution(category, data.category);
+  if (wrongBoard) return wrongBoard;
 
   // 2. Empty, and stated as empty — a fact, not a failure.
   if (entries.length === 0) {
     return h('div', null,
-      warning,
       absent({
         kind: 'empty',
         what: 'Nobody has set a time here yet.',
@@ -224,17 +265,14 @@ export function boardView({ map, category, result }) {
           'This is the board being new, not the service being unavailable.',
         next: 'Finish a run and you hold the record.',
       }),
-      h('div', { class: 'page-head', style: 'border:0;margin:1rem 0 0;padding:0' },
-        h('div', null),
-        h('div', { class: 'actions' },
-          action(href.play(map, { category }), `play ${map}`, { kind: 'primary' }))),
+      h('div', { class: 'actions', style: 'margin-top:1rem' },
+        action(href.play(map, { category }), `play ${map}`, { kind: 'primary' })),
       provenance('service', `GET /v1/maps/${map}/leaderboard — 200, ${total ?? 0} total`),
     );
   }
 
   // 1. Rows.
   return h('div', null,
-    warning,
     table(entries, total),
     provenance('service', `GET /v1/maps/${map}/leaderboard — ${entries.length} of ${total ?? entries.length}`),
   );
@@ -248,13 +286,18 @@ export function boardView({ map, category, result }) {
  * pinned board drops the pin, because `cpm@<digest>` and `vq3@<same digest>`
  * is not a thing that exists — a digest belongs to one profile.
  *
+ * `families` is whatever the service said this map has, and there is
+ * deliberately no fallback list. Defaulting to `['vq3', 'cpm']` when the
+ * service cannot answer would put two tabs on the page for boards nothing has
+ * claimed exist — a small invention, on the page whose whole job is not making
+ * them.
+ *
  * @param {string} map
  * @param {import('./router.js').Category} active
  * @param {string[]} families
  */
 export function categoryTabs(map, active, families) {
-  const known = families.length ? families : ['vq3', 'cpm'];
-  const tabs = known.map((family) => {
+  const tabs = families.map((family) => {
     const isActive = family === active.family && !active.digest;
     return h('a', {
       class: 'category-tab',

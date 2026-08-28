@@ -22,33 +22,43 @@ export function title() {
 /**
  * One map card.
  *
- * The per-profile record times come from `/v1/maps` (§7.5, "list, with
- * per-profile record times"). A profile with no record shows the profile and no
- * time, never a `--:--.---` shaped like one.
+ * Each category row carries the service's own count and record for that board,
+ * so the difference between "0 entries" and "no record" is already made here
+ * rather than inferred from a missing time. A category with no record shows the
+ * family and the word *no record*, never a `--:--.---` shaped like a time.
+ *
+ * The category links are **unpinned** — this is the index, and the index means
+ * "the current cpm board". A link out of a *record* pins the digest instead
+ * (URLS.md §3); that is the record page's job, not this one's.
  *
  * @param {any} m
  */
 function card(m) {
   const slug = String(m?.slug ?? '');
   const name = m?.name ?? slug;
-  const records = Array.isArray(m?.records) ? m.records : [];
+  const categories = Array.isArray(m?.categories) ? m.categories : [];
 
   return h('article', { class: 'card' },
     h('h3', null, h('a', { href: href.map(slug) }, name)),
     h('p', { class: 'card-sub' }, slug, m?.author ? ` · ${m.author}` : ''),
 
-    records.length
-      ? h('table', null, h('tbody', null, ...records.map((/** @type {any} */ r) => h('tr', null,
-          h('td', null, h('a', {
-            href: href.map(slug, { family: String(r?.profile ?? r?.kind ?? ''), digest: null }),
-            class: 'mono',
-          }, String(r?.profile ?? r?.kind ?? '?'))),
-          h('td', { class: 'num time' }, Number.isFinite(r?.time_ms)
-            ? formatTime(r.time_ms)
-            : h('span', { class: 'unknown' }, 'no record')),
-          h('td', null, r?.player?.display_name ?? r?.display_name ?? ''),
-        ))))
-      : h('p', { class: 'pending' }, 'no record times on this map yet'),
+    categories.length
+      ? h('table', null, h('tbody', null, ...categories.map((/** @type {any} */ c) => {
+          const family = String(c?.family ?? '?');
+          const rec = c?.record ?? null;
+          return h('tr', null,
+            h('td', null, h('a', {
+              href: href.map(slug, { family, digest: null }),
+              class: 'mono',
+              title: c?.label ?? undefined,
+            }, family)),
+            h('td', { class: 'num time' }, rec && Number.isFinite(rec.time_ms)
+              ? h('a', { href: href.record(String(rec.run_digest ?? rec.run_id)) }, formatTime(rec.time_ms))
+              : h('span', { class: 'unknown' }, 'no record')),
+            h('td', null, rec?.player ?? (Number.isFinite(c?.entries) ? `${c.entries} entries` : '')),
+          );
+        })))
+      : h('p', { class: 'pending' }, 'the service lists no categories for this map'),
 
     h('div', { class: 'card-actions' },
       action(href.play(slug), 'play', { kind: 'primary' }),
