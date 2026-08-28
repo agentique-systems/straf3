@@ -3,6 +3,10 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- `/play/coil` and `/watch/<run>` are client-side routes served by this
+         same file, so relative URLs below them would resolve to `/play/pkg/…`
+         and fetch this page back instead of the module. -->
+    <base href="/" />
     <title>straf3</title>
     <style>
       html, body { margin: 0; height: 100%; overflow: hidden;
@@ -12,20 +16,32 @@
       #straf3-status { position: fixed; inset: 0; display: grid; place-items: center;
                        text-align: center; padding: 2rem; pointer-events: none;
                        white-space: pre-wrap; text-shadow: 0 0 4px #000; }
+      #straf3-status:empty { display: none; }
+      #straf3-notice { position: fixed; left: 10px; top: 8px; right: 10px;
+                       color: #e8b57a; white-space: pre-wrap; pointer-events: none; }
       #straf3-help { position: fixed; left: 10px; bottom: 8px; opacity: .55; }
     </style>
   </head>
   <body>
     <canvas id="straf3-canvas" tabindex="0"></canvas>
+    <!-- The centred overlay: loading, and the two kinds of stop. Cleared by
+         the client once it is actually running. -->
     <div id="straf3-status">starting…</div>
+    <!-- Failures that cost less than the map — a ghost that would not resolve,
+         a seek this build cannot do. Separate from the overlay above so that
+         "ready" clearing the overlay does not also wipe them. -->
+    <div id="straf3-notice"></div>
     <div id="straf3-help">
       WASD move · mouse look · Space jump · Ctrl crouch · click to capture · Esc to release · R respawn
     </div>
 
     <script type="module">
-      const status = document.getElementById("straf3-status");
+      // The client's own shell. `web/site` serves the real `/play/<map>` and
+      // `/watch/<run>` pages; this one exists so the browser build can be
+      // loaded, driven and debugged without the site in the picture, and it
+      // reads the same URLs so that what is exercised here is what ships.
       const canvas = document.getElementById("straf3-canvas");
-      const say = (text) => { status.textContent = text; };
+      const say = (text) => { document.getElementById("straf3-status").textContent = text; };
 
       // The canvas is sized here, in device pixels, and re-sized on every
       // window resize. winit reports the change as a Resized event, which the
@@ -37,6 +53,75 @@
       }
       fitCanvas();
       window.addEventListener("resize", fitCanvas);
+
+      // ── the URL becomes the config (URLS.md §4) ──────────────────────────
+      //
+      //   /play/<map>?p=<family>[@<digest16>][&ghost=<url>]
+      //   /watch/<run>?t=<ms>
+      //
+      // A bare `index.html` with no path is the ordinary dev case, so it falls
+      // back to `?map=` and finally to the shipped course.
+      function configFromUrl(backend) {
+        const params = new URLSearchParams(location.search);
+        const path = location.pathname.split("/").filter(Boolean);
+        const route = path.length >= 2 ? path[path.length - 2] : "";
+        const tail = path.length >= 2 ? path[path.length - 1] : "";
+
+        if (route === "watch") {
+          return {
+            backend,
+            canvas_id: "straf3-canvas",
+            mode: "watch",
+            // No records service in this shell: a watch link names the bytes
+            // directly. The site resolves `<run>` through `/v1` instead.
+            recording_url: params.get("s3d") || tail,
+            seek_ms: Number(params.get("t") || 0),
+          };
+        }
+
+        // `?p=<family>@<digest16>` — split on the last `@` so a family name
+        // could contain one without breaking the pin.
+        const p = params.get("p") || "";
+        const at = p.lastIndexOf("@");
+        const family = (at === -1 ? p : p.slice(0, at)) || "cpm";
+        const digest = at === -1 ? null : p.slice(at + 1);
+
+        return {
+          backend,
+          canvas_id: "straf3-canvas",
+          mode: "play",
+          map: { slug: (route === "play" ? tail : params.get("map")) || "coil" },
+          physics: { family, digest },
+          ghost_url: params.get("ghost"),
+        };
+      }
+
+      // ── the callbacks the client calls (wave contract §B) ────────────────
+      globalThis.straf3 = {
+        onStatus(kind, message) {
+          console.log(`[straf3 ${kind}]`, message);
+        },
+        onPointerLock(locked) {
+          console.log(`[straf3] pointer lock ${locked ? "taken" : "released"}`);
+        },
+        onRunFinished(run) {
+          // This shell has nowhere to submit a run to, so it offers the bytes
+          // as a download and puts the digest where it can be read off the
+          // page — which is exactly what a run used as evidence needs.
+          console.log(
+            `[straf3] run ${run.time_ms} ms, digest ${run.run_digest_hex16}, ` +
+            `${run.command_count} commands, ${run.s3d.length} bytes`
+          );
+          const name = `${run.run_digest_hex16}.s3d`;
+          const url = URL.createObjectURL(new Blob([run.s3d], { type: "application/octet-stream" }));
+          const link = document.createElement("a");
+          link.href = url;
+          link.download = name;
+          link.textContent = `run ${run.time_ms} ms — ${name}`;
+          link.style.cssText = "position:fixed;right:10px;top:8px;color:#8fd28f";
+          document.body.appendChild(link);
+        },
+      };
 
       // ── the backend decision, made here and not inside wasm ──────────────
       //
@@ -59,6 +144,15 @@
         }
       }
 
+      // winit's web backend never returns from `spawn_app`: it throws a
+      // sentinel to unwind out of it. That is its normal control flow on this
+      // platform, and since the game is now started from inside a promise the
+      // throw surfaces as an uncaught error rather than at our call site — so
+      // it is recognised and swallowed here, and anything else is still shown.
+      const isWinitSentinel = (value) => `${value}`.includes("Using exceptions for control flow");
+      window.addEventListener("error", (e) => { if (isWinitSentinel(e.message || e.error)) e.preventDefault(); });
+      window.addEventListener("unhandledrejection", (e) => { if (isWinitSentinel(e.reason)) e.preventDefault(); });
+
       const backend = await pickBackend();
       if (backend === "none") {
         say(
@@ -72,24 +166,24 @@
         try {
           const module = await import("./pkg/straf3_game.js");
           await module.default();
-          // From here the module owns this status line — it clears it once it
+          // For `drive.mjs`, which needs `straf3_last_run()` from an evaluated
+          // expression and cannot reach an ES module's exports otherwise. It
+          // is the shell's handle on its own module, not an API.
+          globalThis.__straf3_module = module;
+          // From here the module owns the status line: it clears it once it
           // has actually started, and writes its own message if it refuses.
-          // Clearing it here instead would erase that message, and would not
-          // run reliably anyway: winit's web backend never returns normally.
-          module.start_web(backend);
+          module.start_web(JSON.stringify(configFromUrl(backend)));
         } catch (e) {
-          // winit throws a sentinel exception to unwind out of spawn_app.
-          // That is its normal control flow on this platform, not a failure.
-          const text = `${e}`;
-          if (!text.includes("Using exceptions for control flow")) {
-            say(`straf3 failed to start:\n${text}`);
+          if (!isWinitSentinel(e)) {
+            say(`straf3 failed to start:\n${e}`);
             console.error(e);
           }
         }
       }
 
-      // Pointer lock needs a user gesture; winit asks for it when the game
-      // sees a click, and this focuses the canvas so keystrokes reach it.
+      // Pointer lock needs a user gesture. The client asks for it when the
+      // game sees a click — never on load — and this focuses the canvas so
+      // keystrokes reach it.
       canvas.addEventListener("pointerdown", () => canvas.focus());
     </script>
   </body>

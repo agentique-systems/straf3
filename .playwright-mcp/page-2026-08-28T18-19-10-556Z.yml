@@ -1,0 +1,3 @@
+- generic [active] [ref=e1]:
+  - generic: straf3 needs WebGPU, and this browser did not offer an adapter. Chrome 113+, Edge 113+ or Firefox with WebGPU enabled will run it. On a software-only machine, launch Chrome with --enable-unsafe-webgpu --use-angle=swiftshader
+  - generic [ref=e3]: WASD move · mouse look · Space jump · Ctrl crouch · click to capture · Esc to release · R respawn
