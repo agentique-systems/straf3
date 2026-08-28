@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>straf3</title>
+    <meta name="description" content="straf3 — a first-person movement game in the Quake 3 Defrag tradition, on a deterministic simulation." />
+    <meta name="color-scheme" content="dark" />
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/app/style.css" />
+    <!--
+      The shell.
+
+      Every route in docs/web/URLS.md §1 is served this exact file, with status
+      200, by any server implementing §7's fallback rule — `web/dev/serve.mjs`
+      here, `try_files $uri /index.html` in production. There is one shell and
+      the router reads `location.pathname`; there is no hash routing and no
+      per-route HTML.
+
+      What is static here is only what is true on every route: the wordmark, the
+      nav, and the empty `<main>`. Nothing below pretends to know which page it
+      is about to become — a shell with a plausible-looking skeleton in it is
+      the same lie as a leaderboard that renders empty when the service is down.
+    -->
+  </head>
+  <body>
+    <a class="skip" href="#app">skip to content</a>
+
+    <header class="site-head">
+      <a class="wordmark" href="/" aria-label="straf3 home">straf3</a>
+      <nav class="site-nav" aria-label="site">
+        <a href="/">maps</a>
+        <a href="/play/coil">play coil</a>
+      </nav>
+      <p class="origin-note" id="origin-note"></p>
+    </header>
+
+    <main id="app" tabindex="-1">
+      <noscript>
+        <div class="absent absent-unavailable" role="status">
+          <p class="absent-what">This page needs JavaScript.</p>
+          <p class="absent-why">
+            straf3's site is a set of plain ES modules with no build step, and the
+            browser client is WebAssembly. Neither runs with scripting disabled.
+          </p>
+        </div>
+      </noscript>
+      <p class="booting">loading…</p>
+    </main>
+
+    <footer class="site-foot">
+      <p>
+        straf3 — deterministic movement.
+        <span class="foot-sep">·</span>
+        URL scheme: <code>docs/web/URLS.md</code>
+        <span class="foot-sep">·</span>
+        <a href="/health">/health</a>
+      </p>
+    </footer>
+
+    <script type="module" src="/app/main.js"></script>
+  </body>
+</html>

@@ -25,10 +25,50 @@
  * @template T
  * @typedef {{status:'ok', data:T, source:'service'}
  *         | {status:'absent', detail:string}
- *         | {status:'failed', code:number, detail:string}} ApiResult
+ *         | {status:'failed', code:number, error:string|null, detail:string}} ApiResult
+ */
+
+/**
+ * `failed` carries the machine-readable `error` code alongside the sentence,
+ * because one of them is rendered differently from all the others.
+ *
+ * `unknown_physics_digest` — a pinned `@digest16` the service has no profile
+ * row for — is not "the board failed to load". URLS.md §3 says such a board
+ * renders as *unknown*, never as empty and never as the current board, and the
+ * only thing that distinguishes it from an ordinary 404 is this code. Dropping
+ * it and keeping just the prose would leave the site matching on a sentence.
  */
 
 const BASE = '/v1';
+
+/**
+ * The Neon Auth bearer token, when the visitor has signed in.
+ *
+ * Held in memory and in `sessionStorage`, never in a cookie: the service
+ * verifies a bearer JWT against the Neon Auth JWKS and there is no cookie
+ * session to forge a request against. `null` means anonymous, which is a
+ * perfectly good state — anonymous play records locally and is claimed
+ * afterwards (ARCHITECTURE §6.4's behaviour, kept).
+ *
+ * @returns {string|null}
+ */
+export function token() {
+  try {
+    return sessionStorage.getItem('straf3.token');
+  } catch {
+    return null;
+  }
+}
+
+/** @param {string|null} value */
+export function setToken(value) {
+  try {
+    if (value === null) sessionStorage.removeItem('straf3.token');
+    else sessionStorage.setItem('straf3.token', value);
+  } catch {
+    /* private mode: the session is simply not remembered across reloads */
+  }
+}
 
 /**
  * @param {string} path
@@ -36,13 +76,18 @@ const BASE = '/v1';
  * @returns {Promise<ApiResult<any>>}
  */
 async function call(path, init) {
+  /** @type {Record<string,string>} */
+  const headers = { accept: 'application/json' };
+  const bearer = token();
+  if (bearer) headers.authorization = `Bearer ${bearer}`;
   let res;
   try {
-    res = await fetch(BASE + path, { headers: { accept: 'application/json' }, ...init });
+    res = await fetch(BASE + path, { ...init, headers: { ...headers, ...(init?.headers ?? {}) } });
   } catch (err) {
     return {
       status: 'failed',
       code: 0,
+      error: 'request_failed',
       detail: `the request to ${BASE}${path} did not complete: ${
         err instanceof Error ? err.message : String(err)
       }`,
@@ -56,7 +101,12 @@ async function call(path, init) {
       body = JSON.parse(text);
     } catch {
       if (res.ok) {
-        return { status: 'failed', code: res.status, detail: `${path} returned ${text.length} bytes that are not JSON` };
+        return {
+          status: 'failed',
+          code: res.status,
+          error: 'not_json',
+          detail: `${path} returned ${text.length} bytes that are not JSON`,
+        };
       }
     }
   }
@@ -73,6 +123,7 @@ async function call(path, init) {
     return {
       status: 'failed',
       code: res.status,
+      error: typeof body?.error === 'string' ? body.error : null,
       detail: body?.detail ?? body?.error ?? `${path} returned HTTP ${res.status}`,
     };
   }
@@ -128,6 +179,64 @@ export function run(runRef) {
 }
 
 /**
+ * `POST /v1/attempts` — a ticket for one run (ARCHITECTURE §3.1, §7.3).
+ *
+ * Fetched when a run *starts*, not when it finishes, because the ticket's TTL
+ * has to cover the run. A failure here is not fatal to playing: the site plays
+ * the map anyway and says the run will not be rankable, which is true and is
+ * better than refusing to start.
+ *
+ * @param {string} slug
+ * @param {import('./router.js').Category} category
+ */
+export function attempt(slug, category) {
+  return call('/attempts', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      map: slug,
+      profile: category.family,
+      profile_digest: category.digest ?? undefined,
+    }),
+  });
+}
+
+/**
+ * `POST /v1/runs` — submit a finished run.
+ *
+ * `run_digest_hex16` travels in the payload beside the bytes even though the
+ * service recomputes it from the recording and ranks on its own re-simulation
+ * (§7.2 step 5). It is here as a *claim to disagree with*: the site reports
+ * what the browser said the digest was, through a channel that is not the file
+ * header, so a header written by a code path that never ran the simulation has
+ * nothing to agree with. The same value is written to the console for the same
+ * reason.
+ *
+ * The bytes go as base64 in JSON rather than as a raw body: one shape for the
+ * whole `/v1` surface, and the payload is ~17 KiB.
+ *
+ * @param {object} run
+ * @param {string} run.ticket
+ * @param {number} run.time_ms          what the client says; never ranked
+ * @param {string} run.run_digest_hex16 what the client says the rolling digest was
+ * @param {Uint8Array} run.s3d
+ */
+export function submitRun({ ticket, time_ms, run_digest_hex16, s3d }) {
+  let binary = '';
+  for (let i = 0; i < s3d.length; i += 1) binary += String.fromCharCode(s3d[i]);
+  return call('/runs', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      ticket,
+      client_time_ms: time_ms,
+      run_digest_hex16,
+      s3d_base64: btoa(binary),
+    }),
+  });
+}
+
+/**
  * The `.s3d` bytes for a run — what a ghost and a replay are made of.
  *
  * Returns bytes, not JSON, so it does not go through {@link call}.
@@ -143,13 +252,18 @@ export async function demo(runRef) {
   try {
     res = await fetch(path);
   } catch (err) {
-    return { status: 'failed', code: 0, detail: `${path}: ${err instanceof Error ? err.message : String(err)}` };
+    return {
+      status: 'failed',
+      code: 0,
+      error: 'request_failed',
+      detail: `${path}: ${err instanceof Error ? err.message : String(err)}`,
+    };
   }
   if (res.status === 503 || res.status === 502) {
     return { status: 'absent', detail: 'the records service is not answering for demo downloads' };
   }
   if (!res.ok) {
-    return { status: 'failed', code: res.status, detail: `${path} returned HTTP ${res.status}` };
+    return { status: 'failed', code: res.status, error: null, detail: `${path} returned HTTP ${res.status}` };
   }
   return { status: 'ok', data: new Uint8Array(await res.arrayBuffer()), source: 'service' };
 }
