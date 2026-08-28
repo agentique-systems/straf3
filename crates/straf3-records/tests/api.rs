@@ -11,8 +11,8 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use serde_json::json;
 use straf3_records::{digest16, profiles};
-use support::fixture::{self, TestCourse};
 use support::Harness;
+use support::fixture::{self, TestCourse};
 use uuid::Uuid;
 
 // ── the surface exists and answers ──────────────────────────────────────────
@@ -236,7 +236,10 @@ async fn a_pinned_category_still_means_what_it_meant_after_the_physics_changes()
         .bind(original)
         .execute(&harness.pool)
         .await;
-    assert!(erase.is_err(), "nor deletable — a pinned board would lose its meaning");
+    assert!(
+        erase.is_err(),
+        "nor deletable — a pinned board would lose its meaning"
+    );
 
     // The unpinned key follows the family forward.
     let (status, body) = harness.get("/v1/maps/coil/leaderboard?profile=cpm").await;
@@ -249,7 +252,9 @@ async fn a_pinned_category_still_means_what_it_meant_after_the_physics_changes()
 
     // The pinned key does not. This is r8.
     let (status, body) = harness
-        .get(&format!("/v1/maps/coil/leaderboard?profile=cpm@{original_hex}"))
+        .get(&format!(
+            "/v1/maps/coil/leaderboard?profile=cpm@{original_hex}"
+        ))
         .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
@@ -262,12 +267,11 @@ async fn a_pinned_category_still_means_what_it_meant_after_the_physics_changes()
 
     // And a pin naming a digest from the wrong family is refused rather than
     // helpfully resolved.
-    let vq3: i64 = sqlx::query_scalar(
-        "select digest from physics_profiles where kind = 'vq3' limit 1",
-    )
-    .fetch_one(&harness.pool)
-    .await
-    .unwrap();
+    let vq3: i64 =
+        sqlx::query_scalar("select digest from physics_profiles where kind = 'vq3' limit 1")
+            .fetch_one(&harness.pool)
+            .await
+            .unwrap();
     let (status, body) = harness
         .get(&format!(
             "/v1/maps/coil/leaderboard?profile=cpm@{}",
@@ -299,11 +303,10 @@ async fn a_run_is_pending_until_the_verifier_agrees_and_only_then_is_it_ranked()
     harness.seed().await;
     let map_id = course.insert(&harness.pool).await;
 
-    let profile_id: i32 =
-        sqlx::query_scalar("select id from physics_profiles where kind = 'cpm'")
-            .fetch_one(&harness.pool)
-            .await
-            .unwrap();
+    let profile_id: i32 = sqlx::query_scalar("select id from physics_profiles where kind = 'cpm'")
+        .fetch_one(&harness.pool)
+        .await
+        .unwrap();
 
     let recording = course.a_finishing_run();
     assert!(
@@ -371,7 +374,10 @@ async fn a_run_is_pending_until_the_verifier_agrees_and_only_then_is_it_ranked()
         .await;
     assert_eq!(board["total"], 1);
     assert_eq!(board["entries"][0]["rank"], 1);
-    assert_eq!(board["entries"][0]["time_ms"].as_i64().unwrap() as u32, honest_time);
+    assert_eq!(
+        board["entries"][0]["time_ms"].as_i64().unwrap() as u32,
+        honest_time
+    );
     assert_eq!(board["entries"][0]["run_digest"], run_digest);
     // r10: the display name came from the verified token subject and from
     // nothing the client sent.
@@ -386,7 +392,10 @@ async fn a_run_is_pending_until_the_verifier_agrees_and_only_then_is_it_ranked()
         )
         .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(served, bytes, "a ghost gets exactly the bytes that were submitted");
+    assert_eq!(
+        served, bytes,
+        "a ghost gets exactly the bytes that were submitted"
+    );
 
     harness.cleanup().await;
 }
@@ -404,11 +413,10 @@ async fn a_lie_in_the_header_is_recorded_as_a_claim_and_never_as_the_time() {
     let (harness, token, _player) = fixture::signed_in("claimedtime").await;
     harness.seed().await;
     let map_id = course.insert(&harness.pool).await;
-    let profile_id: i32 =
-        sqlx::query_scalar("select id from physics_profiles where kind = 'cpm'")
-            .fetch_one(&harness.pool)
-            .await
-            .unwrap();
+    let profile_id: i32 = sqlx::query_scalar("select id from physics_profiles where kind = 'cpm'")
+        .fetch_one(&harness.pool)
+        .await
+        .unwrap();
 
     let recording = course.a_finishing_run();
     let honest_time = recording.claimed().run_time_ms.unwrap();
@@ -443,7 +451,10 @@ async fn a_lie_in_the_header_is_recorded_as_a_claim_and_never_as_the_time() {
     let (_, board) = harness
         .get("/v1/maps/fixture-course/leaderboard?profile=cpm")
         .await;
-    assert_eq!(board["entries"][0]["time_ms"].as_i64().unwrap() as u32, honest_time);
+    assert_eq!(
+        board["entries"][0]["time_ms"].as_i64().unwrap() as u32,
+        honest_time
+    );
 
     harness.cleanup().await;
 }
@@ -463,11 +474,10 @@ async fn a_forged_header_digest_can_make_a_row_but_can_never_make_a_ranked_time(
     let (harness, token, _player) = fixture::signed_in("forged").await;
     harness.seed().await;
     let map_id = course.insert(&harness.pool).await;
-    let profile_id: i32 =
-        sqlx::query_scalar("select id from physics_profiles where kind = 'cpm'")
-            .fetch_one(&harness.pool)
-            .await
-            .unwrap();
+    let profile_id: i32 = sqlx::query_scalar("select id from physics_profiles where kind = 'cpm'")
+        .fetch_one(&harness.pool)
+        .await
+        .unwrap();
 
     let honest = course.a_finishing_run();
     let forged = fixture::forge_run_digest(&honest.to_bytes(), honest.claimed().digest ^ 1);
@@ -483,7 +493,11 @@ async fn a_forged_header_digest_can_make_a_row_but_can_never_make_a_ranked_time(
         .await;
     let ticket_id: Uuid = ticket["ticket"].as_str().unwrap().parse().unwrap();
     let (status, submitted) = harness.post_demo(&token, ticket_id, forged).await;
-    assert_eq!(status, StatusCode::ACCEPTED, "the row is created: {submitted}");
+    assert_eq!(
+        status,
+        StatusCode::ACCEPTED,
+        "the row is created: {submitted}"
+    );
     let run_id = submitted["run_id"].as_str().unwrap().to_string();
 
     fixture::run_verifier(&harness.pool, &course, map_id, profile_id).await;
@@ -514,13 +528,21 @@ async fn a_forged_header_digest_can_make_a_row_but_can_never_make_a_ranked_time(
     // client-supplied digest it would collide forever.
     let (honest_token, _) = fixture::sign_in_as(&harness, "honest-subject", "Honest").await;
     let (_, ticket) = harness
-        .post_json("/v1/attempts", &honest_token, json!({"map": "fixture-course"}))
+        .post_json(
+            "/v1/attempts",
+            &honest_token,
+            json!({"map": "fixture-course"}),
+        )
         .await;
     let ticket_id: Uuid = ticket["ticket"].as_str().unwrap().parse().unwrap();
     let (status, submitted) = harness
         .post_demo(&honest_token, ticket_id, honest.to_bytes())
         .await;
-    assert_eq!(status, StatusCode::ACCEPTED, "the squat did not block it: {submitted}");
+    assert_eq!(
+        status,
+        StatusCode::ACCEPTED,
+        "the squat did not block it: {submitted}"
+    );
 
     fixture::run_verifier(&harness.pool, &course, map_id, profile_id).await;
 
@@ -547,11 +569,10 @@ async fn a_run_belongs_to_whoever_was_verified_with_it_first() {
     let (harness, token, _player) = fixture::signed_in("ownership").await;
     harness.seed().await;
     let map_id = course.insert(&harness.pool).await;
-    let profile_id: i32 =
-        sqlx::query_scalar("select id from physics_profiles where kind = 'cpm'")
-            .fetch_one(&harness.pool)
-            .await
-            .unwrap();
+    let profile_id: i32 = sqlx::query_scalar("select id from physics_profiles where kind = 'cpm'")
+        .fetch_one(&harness.pool)
+        .await
+        .unwrap();
 
     let bytes = course.a_finishing_run().to_bytes_with_checksums().unwrap();
 
@@ -603,11 +624,10 @@ async fn two_pending_copies_of_one_run_are_resolved_by_verification_not_by_intak
     let (harness, token, _player) = fixture::signed_in("racecopies").await;
     harness.seed().await;
     let map_id = course.insert(&harness.pool).await;
-    let profile_id: i32 =
-        sqlx::query_scalar("select id from physics_profiles where kind = 'cpm'")
-            .fetch_one(&harness.pool)
-            .await
-            .unwrap();
+    let profile_id: i32 = sqlx::query_scalar("select id from physics_profiles where kind = 'cpm'")
+        .fetch_one(&harness.pool)
+        .await
+        .unwrap();
     let bytes = course.a_finishing_run().to_bytes_with_checksums().unwrap();
 
     let ticket_for = async |token: &str| -> Uuid {
@@ -732,11 +752,10 @@ async fn a_run_answers_to_its_uuid_and_to_its_digest_with_the_same_body() {
     let (status, body) = harness.get(&format!("/v1/runs/by-digest/{claimed}")).await;
     assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
 
-    let profile_id: i32 =
-        sqlx::query_scalar("select id from physics_profiles where kind = 'cpm'")
-            .fetch_one(&harness.pool)
-            .await
-            .unwrap();
+    let profile_id: i32 = sqlx::query_scalar("select id from physics_profiles where kind = 'cpm'")
+        .fetch_one(&harness.pool)
+        .await
+        .unwrap();
     fixture::run_verifier(&harness.pool, &course, map_id, profile_id).await;
 
     let (_, run) = harness.get(&format!("/v1/runs/{run_id}")).await;
@@ -810,13 +829,26 @@ async fn a_real_ed25519_token_verifies_and_names_a_player_created_from_its_subje
 async fn a_token_that_is_wrong_is_refused_with_the_reason_named() {
     let _url = require_database!();
     let keys = fixture::TestKeys::new();
-    let harness = Harness::with_jwks("badtokens", keys.jwks(Some("https://issuer.test".into()))).await;
+    let harness =
+        Harness::with_jwks("badtokens", keys.jwks(Some("https://issuer.test".into()))).await;
 
     let cases: Vec<(&str, String, &str)> = vec![
         ("expired", keys.token_expired_an_hour_ago("s"), "expired"),
-        ("wrong issuer", keys.token_from_another_issuer("s"), "authority"),
-        ("bad signature", keys.token_with_a_broken_signature("s"), "signature"),
-        ("unknown kid", keys.token_from_an_unpublished_key("s"), "key"),
+        (
+            "wrong issuer",
+            keys.token_from_another_issuer("s"),
+            "authority",
+        ),
+        (
+            "bad signature",
+            keys.token_with_a_broken_signature("s"),
+            "signature",
+        ),
+        (
+            "unknown kid",
+            keys.token_from_an_unpublished_key("s"),
+            "key",
+        ),
     ];
 
     for (name, token, expected) in cases {
@@ -860,14 +892,20 @@ async fn a_submission_without_a_live_ticket_of_your_own_is_refused() {
     assert_eq!(body["error"], "missing_ticket");
 
     // A ticket nobody issued.
-    let (status, body) = harness.post_demo(&token, Uuid::new_v4(), bytes.clone()).await;
+    let (status, body) = harness
+        .post_demo(&token, Uuid::new_v4(), bytes.clone())
+        .await;
     assert_eq!(status, StatusCode::CONFLICT);
     assert_eq!(body["error"], "bad_ticket");
 
     // Somebody else's ticket.
     let (other_token, _) = fixture::sign_in_as(&harness, "other-subject", "Other").await;
     let (_, ticket) = harness
-        .post_json("/v1/attempts", &other_token, json!({"map": "fixture-course"}))
+        .post_json(
+            "/v1/attempts",
+            &other_token,
+            json!({"map": "fixture-course"}),
+        )
         .await;
     let theirs: Uuid = ticket["ticket"].as_str().unwrap().parse().unwrap();
     let (status, body) = harness.post_demo(&token, theirs, bytes.clone()).await;

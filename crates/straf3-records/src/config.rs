@@ -55,7 +55,8 @@ impl Config {
     /// When `DATABASE_URL` is absent or `STRAF3_RECORDS_ADDR` does not parse.
     pub fn from_env() -> Result<Self, String> {
         let database_url = std::env::var("DATABASE_URL")
-            .map_err(|_| "DATABASE_URL is not set. It lives in the gitignored `.env`.".to_string())?;
+            .map_err(|_| "DATABASE_URL is not set. It lives in the gitignored `.env`.".to_string())
+            .map(|url| direct_endpoint(&url))?;
 
         let addr_text =
             std::env::var("STRAF3_RECORDS_ADDR").unwrap_or_else(|_| DEFAULT_ADDR.to_string());
@@ -81,8 +82,8 @@ impl Config {
                     .join("maps")
             });
 
-        let maps_url_prefix = std::env::var("STRAF3_MAPS_URL_PREFIX")
-            .unwrap_or_else(|_| "/assets/maps".to_string());
+        let maps_url_prefix =
+            std::env::var("STRAF3_MAPS_URL_PREFIX").unwrap_or_else(|_| "/assets/maps".to_string());
 
         Ok(Self {
             database_url,
@@ -106,6 +107,39 @@ impl Config {
             self.maps_dir.display(),
         )
     }
+}
+
+/// Neon's direct endpoint for a pooled connection string.
+///
+/// # Why the service does not use the pooler
+///
+/// `DATABASE_URL` in the operator's `.env` names Neon's pooled endpoint —
+/// PgBouncer in transaction-pooling mode. Most of what this service does is
+/// perfectly happy there. One thing is not, and it is not a hypothetical:
+///
+/// `sqlx`'s migrator takes a **session-scoped** `pg_advisory_lock` for the
+/// duration of a migration run. Through a transaction pooler the server backend
+/// outlives the client that took it, and the lock goes back into the pool still
+/// held. That happened here: `pg_locks` showed backend 1472 **idle**, holding
+/// advisory lock `(328116550, 694340936)` — sqlx's migration lock — long after
+/// the process that took it was gone, with the next migration blocked behind it
+/// indefinitely. It took a `pg_terminate_backend` to clear.
+///
+/// The lock is not *broken* by the pooler — a second session correctly cannot
+/// take it — it is *leaked* by it, which is worse, because the holder is
+/// unreachable. Migrations run at startup in both binaries, so every restart is
+/// exposed to it.
+///
+/// This is one local origin with a handful of connections; pooling buys nothing
+/// here and costs that. The transformation is Neon's own convention and is done
+/// in code rather than by editing the operator's `.env`, so nothing has to be
+/// kept in sync by hand. `STRAF3_USE_POOLED_DATABASE=1` opts back in.
+#[must_use]
+pub fn direct_endpoint(url: &str) -> String {
+    if std::env::var("STRAF3_USE_POOLED_DATABASE").is_ok_and(|v| v == "1") {
+        return url.to_string();
+    }
+    url.replace("-pooler.", ".")
 }
 
 fn non_empty(key: &str) -> Option<String> {

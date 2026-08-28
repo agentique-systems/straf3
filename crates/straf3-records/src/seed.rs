@@ -66,13 +66,25 @@ impl SeedReport {
             );
         }
         for (kind, digest) in &self.profiles_inserted {
-            let _ = writeln!(out, "physics_profiles + {kind} {}", digest16::format(*digest));
+            let _ = writeln!(
+                out,
+                "physics_profiles + {kind} {}",
+                digest16::format(*digest)
+            );
         }
         for (kind, digest) in &self.profiles_present {
-            let _ = writeln!(out, "physics_profiles = {kind} {}", digest16::format(*digest));
+            let _ = writeln!(
+                out,
+                "physics_profiles = {kind} {}",
+                digest16::format(*digest)
+            );
         }
         for (slug, digest) in &self.maps {
-            let _ = writeln!(out, "maps            = {slug} collision {}", digest16::format(*digest));
+            let _ = writeln!(
+                out,
+                "maps            = {slug} collision {}",
+                digest16::format(*digest)
+            );
         }
         for (name, why) in &self.map_failures {
             let _ = writeln!(out, "maps            ! {name}: {why}");
@@ -104,9 +116,13 @@ pub async fn seed_profiles(pool: &PgPool, report: &mut SeedReport) -> Result<(),
         .await?;
 
         if inserted.is_some() {
-            report.profiles_inserted.push((canon.kind.to_string(), digest));
+            report
+                .profiles_inserted
+                .push((canon.kind.to_string(), digest));
         } else {
-            report.profiles_present.push((canon.kind.to_string(), digest));
+            report
+                .profiles_present
+                .push((canon.kind.to_string(), digest));
         }
     }
     Ok(())

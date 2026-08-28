@@ -89,7 +89,9 @@ pub fn decode_submission(body: &[u8], content_encoding: Option<&str>) -> ApiResu
     };
 
     let recording = Recording::from_bytes(&bytes).map_err(|e| {
-        ApiError::malformed_demo(format!("these bytes are not a `.s3d` this build reads: {e}"))
+        ApiError::malformed_demo(format!(
+            "these bytes are not a `.s3d` this build reads: {e}"
+        ))
     })?;
 
     // §7.3: 150,000 commands is twenty minutes at 125 Hz. The decoder already
@@ -187,7 +189,10 @@ mod tests {
         assert_eq!(submission.run_digest(), recording.claimed().digest);
         assert_eq!(submission.commands(), 32);
         assert_eq!(submission.tick_rate_hz(), 125);
-        assert_eq!(submission.bytes, bytes, "the stored bytes are the sent bytes");
+        assert_eq!(
+            submission.bytes, bytes,
+            "the stored bytes are the sent bytes"
+        );
     }
 
     #[test]

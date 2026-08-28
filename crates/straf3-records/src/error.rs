@@ -107,8 +107,7 @@ impl ApiError {
         Self::new(
             StatusCode::BAD_REQUEST,
             "missing_ticket",
-            "a submission must carry the `X-Straf3-Ticket` from `POST /v1/attempts`."
-                .to_string(),
+            "a submission must carry the `X-Straf3-Ticket` from `POST /v1/attempts`.".to_string(),
         )
     }
 
@@ -169,11 +168,7 @@ impl ApiError {
 
     /// A bug here, not a condition the caller can fix.
     pub fn internal(detail: impl Into<String>) -> Self {
-        Self::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "internal_error",
-            detail,
-        )
+        Self::new(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", detail)
     }
 
     /// A malformed request that is none of the above.
@@ -215,9 +210,9 @@ impl From<sqlx::Error> for ApiError {
             | sqlx::Error::Io(_)
             | sqlx::Error::Tls(_)
             | sqlx::Error::Protocol(_)
-            | sqlx::Error::Configuration(_) => Self::database_unavailable(format!(
-                "the records database did not answer: {error}"
-            )),
+            | sqlx::Error::Configuration(_) => {
+                Self::database_unavailable(format!("the records database did not answer: {error}"))
+            }
             _ => Self::internal(format!("database error: {error}")),
         }
     }

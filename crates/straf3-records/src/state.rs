@@ -25,7 +25,13 @@ impl AppState {
     /// on every run it takes in — derived at startup by
     /// [`crate::seed::ensure_sim_build`], never configured.
     #[must_use]
-    pub fn new(pool: PgPool, jwks: Jwks, config: Config, sim_build: SimBuild, sim_build_id: i32) -> Self {
+    pub fn new(
+        pool: PgPool,
+        jwks: Jwks,
+        config: Config,
+        sim_build: SimBuild,
+        sim_build_id: i32,
+    ) -> Self {
         Self(Arc::new(Inner {
             pool,
             jwks,

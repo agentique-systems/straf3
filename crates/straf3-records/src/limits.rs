@@ -53,9 +53,7 @@ pub const MAX_SUBMISSIONS_PER_DAY: i64 = 500;
 pub fn max_plausible_demo_bytes() -> usize {
     const HEADER_SLACK: usize = 4096;
     let per_command = straf3_replay::COMMAND_BYTES + 8;
-    HEADER_SLACK
-        + per_command * MAX_COMMANDS as usize
-        + 2 * straf3_replay::MAX_NAME_BYTES as usize
+    HEADER_SLACK + per_command * MAX_COMMANDS as usize + 2 * straf3_replay::MAX_NAME_BYTES as usize
 }
 
 #[cfg(test)]

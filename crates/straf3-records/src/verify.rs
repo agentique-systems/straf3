@@ -328,7 +328,9 @@ mod tests {
 
         let mut trace = Vec::new();
         let outcome = recording
-            .replay(&world, &world_id, &profile, |_, st| trace.push(st.checksum()))
+            .replay(&world, &world_id, &profile, |_, st| {
+                trace.push(st.checksum())
+            })
             .expect("the fixture replays against its own world");
 
         assert_eq!(
@@ -354,7 +356,9 @@ mod tests {
         let claimed = recording.claimed();
         let mut trace = Vec::new();
         let outcome = recording
-            .replay(&world, &world_id, &profile, |_, st| trace.push(st.checksum()))
+            .replay(&world, &world_id, &profile, |_, st| {
+                trace.push(st.checksum())
+            })
             .unwrap();
         assert_eq!(outcome.digest, claimed.digest);
 

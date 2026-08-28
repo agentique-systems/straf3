@@ -21,8 +21,8 @@
 //! §7.2 step 2 forbids the verifier from making, and this resolver does not get
 //! to make it either.
 
-use sqlx::{PgPool, Row};
 use sqlx::postgres::PgRow;
+use sqlx::{PgPool, Row};
 
 use crate::digest16;
 use crate::error::{ApiError, ApiResult};
@@ -173,8 +173,7 @@ pub fn parse_category_key(spec: &str) -> ApiResult<(String, Option<u64>)> {
     let (family, pinned) = match spec.split_once('@') {
         None => (spec, None),
         Some((family, digest)) => {
-            let parsed =
-                digest16::parse(digest).ok_or_else(|| ApiError::invalid_category(spec))?;
+            let parsed = digest16::parse(digest).ok_or_else(|| ApiError::invalid_category(spec))?;
             (family, Some(parsed))
         }
     };
@@ -215,7 +214,10 @@ pub async fn all_maps(pool: &PgPool) -> ApiResult<Vec<MapRow>> {
     let rows = sqlx::query(&format!("select {MAP_COLUMNS} from maps order by slug"))
         .fetch_all(pool)
         .await?;
-    rows.iter().map(MapRow::from_row).collect::<Result<_, _>>().map_err(Into::into)
+    rows.iter()
+        .map(MapRow::from_row)
+        .collect::<Result<_, _>>()
+        .map_err(Into::into)
 }
 
 /// The current profile of a family: the newest row of that kind.
@@ -270,7 +272,10 @@ pub async fn all_profiles(pool: &PgPool) -> ApiResult<Vec<ProfileRow>> {
     ))
     .fetch_all(pool)
     .await?;
-    rows.iter().map(ProfileRow::from_row).collect::<Result<_, _>>().map_err(Into::into)
+    rows.iter()
+        .map(ProfileRow::from_row)
+        .collect::<Result<_, _>>()
+        .map_err(Into::into)
 }
 
 /// Resolve a category key against a map.
@@ -362,7 +367,14 @@ mod tests {
 
     #[test]
     fn a_malformed_key_is_a_refusal_and_not_a_family() {
-        for spec in ["", "CPM", "cpm@", "cpm@short", "c p m", "cpm@0123456789abcdef@x"] {
+        for spec in [
+            "",
+            "CPM",
+            "cpm@",
+            "cpm@short",
+            "c p m",
+            "cpm@0123456789abcdef@x",
+        ] {
             assert!(
                 parse_category_key(spec).is_err(),
                 "`{spec}` should not parse as a category key"

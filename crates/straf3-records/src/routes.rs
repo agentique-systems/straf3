@@ -100,9 +100,9 @@ async fn not_found(uri: axum::http::Uri) -> ApiError {
 /// health check that reported on the process rather than on the database would
 /// say "up" at exactly the moment the boards stopped being answerable.
 async fn health(State(state): State<AppState>) -> ApiResult<Json<Value>> {
-    crate::db::round_trips(state.pool())
-        .await
-        .map_err(|e| ApiError::database_unavailable(format!("the records database did not answer: {e}")))?;
+    crate::db::round_trips(state.pool()).await.map_err(|e| {
+        ApiError::database_unavailable(format!("the records database did not answer: {e}"))
+    })?;
 
     Ok(Json(json!({
         "status": "ok",
@@ -120,7 +120,9 @@ async fn meta(State(state): State<AppState>) -> ApiResult<Json<Value>> {
     // The newest row per family is the one an unpinned category resolves to.
     let mut current: std::collections::HashMap<&str, u64> = std::collections::HashMap::new();
     for profile in &all {
-        current.entry(profile.kind.as_str()).or_insert(profile.digest);
+        current
+            .entry(profile.kind.as_str())
+            .or_insert(profile.digest);
     }
 
     Ok(Json(json!({
@@ -244,7 +246,10 @@ async fn map_detail(
             "default_category".to_string(),
             json!(profiles::DEFAULT_FAMILY),
         );
-        object.insert("leaderboard".to_string(), json!(format!("/v1/maps/{}/leaderboard", map.slug)));
+        object.insert(
+            "leaderboard".to_string(),
+            json!(format!("/v1/maps/{}/leaderboard", map.slug)),
+        );
     }
     Ok(Json(body))
 }
@@ -290,8 +295,7 @@ async fn leaderboard(
     Path(slug): Path<String>,
     Query(query): Query<BoardQuery>,
 ) -> ApiResult<Json<Value>> {
-    let category =
-        catalog::resolve_category(state.pool(), &slug, query.profile.as_deref()).await?;
+    let category = catalog::resolve_category(state.pool(), &slug, query.profile.as_deref()).await?;
     let limit = query.limit.unwrap_or(50).clamp(1, 200);
     let offset = query.offset.unwrap_or(0).max(0);
 
@@ -324,10 +328,7 @@ async fn leaderboard(
     .fetch_one(state.pool())
     .await?;
 
-    let entries: Vec<Value> = rows
-        .iter()
-        .map(entry_json)
-        .collect::<Result<_, _>>()?;
+    let entries: Vec<Value> = rows.iter().map(entry_json).collect::<Result<_, _>>()?;
 
     // The shape r9 turns on. An empty board is this, with `entries: []` and
     // `total: 0` — a 200 that says "nobody has set a time", which is a
@@ -348,8 +349,7 @@ async fn leaderboard_me(
     headers: HeaderMap,
 ) -> ApiResult<Json<Value>> {
     let player = auth::authenticate(state.pool(), state.jwks(), &headers).await?;
-    let category =
-        catalog::resolve_category(state.pool(), &slug, query.profile.as_deref()).await?;
+    let category = catalog::resolve_category(state.pool(), &slug, query.profile.as_deref()).await?;
 
     let row = sqlx::query(
         "select rank, display_name, time_ms, set_at, run_id, verified_digest from ( \
@@ -495,12 +495,10 @@ async fn submit_run(
         ));
     };
 
-    let map_row = sqlx::query(
-        "select id, slug from maps where collision_digest = $1",
-    )
-    .bind(digest16::to_sql(*collision_digest))
-    .fetch_optional(state.pool())
-    .await?;
+    let map_row = sqlx::query("select id, slug from maps where collision_digest = $1")
+        .bind(digest16::to_sql(*collision_digest))
+        .fetch_optional(state.pool())
+        .await?;
     let Some(map_row) = map_row else {
         return Err(ApiError::unhonourable_recording(
             "unknown_map",
@@ -830,15 +828,24 @@ async fn run_demo(State(state): State<AppState>, Path(id): Path<String>) -> ApiR
     }
 
     let bytes: Vec<u8> = row.try_get("demo_bytes_blob")?;
-    let digest = digest16::from_sql(row.try_get::<Option<i64>, _>("verified_digest")?.unwrap_or(0));
+    let digest = digest16::from_sql(
+        row.try_get::<Option<i64>, _>("verified_digest")?
+            .unwrap_or(0),
+    );
     Ok((
         [
-            (header::CONTENT_TYPE, "application/vnd.straf3.demo".to_string()),
+            (
+                header::CONTENT_TYPE,
+                "application/vnd.straf3.demo".to_string(),
+            ),
             (
                 header::CONTENT_DISPOSITION,
                 format!("inline; filename=\"{}.s3d\"", digest16::format(digest)),
             ),
-            (header::CACHE_CONTROL, "public, max-age=31536000, immutable".to_string()),
+            (
+                header::CACHE_CONTROL,
+                "public, max-age=31536000, immutable".to_string(),
+            ),
         ],
         bytes,
     )
@@ -938,10 +945,12 @@ async fn player_profile(
 
 fn hex(bytes: &[u8]) -> String {
     use std::fmt::Write as _;
-    bytes.iter().fold(String::with_capacity(bytes.len() * 2), |mut out, b| {
-        let _ = write!(out, "{b:02x}");
-        out
-    })
+    bytes
+        .iter()
+        .fold(String::with_capacity(bytes.len() * 2), |mut out, b| {
+            let _ = write!(out, "{b:02x}");
+            out
+        })
 }
 
 #[cfg(test)]

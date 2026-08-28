@@ -136,7 +136,9 @@ impl Harness {
         // CPU. Off the pool, the lock cannot span a pool acquisition.
         {
             use sqlx::Connection as _;
-            let mut conn = sqlx::PgConnection::connect(&url).await.expect("migrator conn");
+            let mut conn = sqlx::PgConnection::connect(&url)
+                .await
+                .expect("migrator conn");
             conn.execute(format!("set search_path to {schema}").as_str())
                 .await
                 .expect("search_path");

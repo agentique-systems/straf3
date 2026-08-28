@@ -55,7 +55,14 @@ mod tests {
 
     #[test]
     fn round_trips_through_the_bigint_column() {
-        for value in [0, 1, u64::MAX, u64::MAX / 2, 0x8000_0000_0000_0000, 0x0123_4567_89ab_cdef] {
+        for value in [
+            0,
+            1,
+            u64::MAX,
+            u64::MAX / 2,
+            0x8000_0000_0000_0000,
+            0x0123_4567_89ab_cdef,
+        ] {
             assert_eq!(from_sql(to_sql(value)), value, "{value:#018x}");
         }
     }

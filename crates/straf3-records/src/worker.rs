@@ -61,7 +61,11 @@ impl MapCache {
             .map(|e| e.path())
             .filter(|p| p.extension().is_some_and(|e| e == "map"))
         {
-            let Some(slug) = path.file_stem().and_then(|s| s.to_str()).map(str::to_string) else {
+            let Some(slug) = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .map(str::to_string)
+            else {
                 continue;
             };
             if !catalog::is_valid_slug(&slug) {

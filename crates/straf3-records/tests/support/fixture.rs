@@ -126,12 +126,7 @@ impl TestCourse {
         )
     }
 
-    fn record_with(
-        &self,
-        profile: &PhysicsProfile,
-        name: &str,
-        declared: WorldId,
-    ) -> Recording {
+    fn record_with(&self, profile: &PhysicsProfile, name: &str, declared: WorldId) -> Recording {
         let world = self.compiled.collider();
         let start = RunStart {
             rate: TickRate::HZ_125,
@@ -159,7 +154,15 @@ impl TestCourse {
 fn course_source() -> String {
     let floor = brush(-256.0, -512.0, -32.0, 256.0, 2048.0, 0.0, "straf3/floor");
     let start = brush(-256.0, 0.0, -32.0, 256.0, 32.0, 512.0, "common/trigger");
-    let finish = brush(-256.0, 1024.0, -32.0, 256.0, 1056.0, 512.0, "common/trigger");
+    let finish = brush(
+        -256.0,
+        1024.0,
+        -32.0,
+        256.0,
+        1056.0,
+        512.0,
+        "common/trigger",
+    );
 
     format!(
         "// straf3-records test fixture: a straight line with a clock at each end.\n\

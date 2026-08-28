@@ -251,9 +251,13 @@ impl Jwks {
         // service will not verify with, and saying so beats a signature failure
         // three layers down.
         match &jwk.algorithm {
-            AlgorithmParameters::OctetKeyPair(_) => DecodingKey::from_jwk(jwk).map(Some).map_err(|e| {
-                ApiError::not_authenticated(format!("signing key `{kid}` could not be read: {e}"))
-            }),
+            AlgorithmParameters::OctetKeyPair(_) => {
+                DecodingKey::from_jwk(jwk).map(Some).map_err(|e| {
+                    ApiError::not_authenticated(format!(
+                        "signing key `{kid}` could not be read: {e}"
+                    ))
+                })
+            }
             other => Err(ApiError::not_authenticated(format!(
                 "signing key `{kid}` is a {} key; this service verifies Ed25519 (OKP) only.",
                 key_type_name(other)
@@ -491,12 +495,11 @@ async fn allocate_display_name(pool: &PgPool, claims: &Claims, id: Uuid) -> ApiR
             let stem: String = base.chars().take(28).collect();
             format!("{stem}-{suffix}")
         };
-        let taken: Option<i32> = sqlx::query_scalar(
-            "select 1 from players where lower(display_name) = lower($1)",
-        )
-        .bind(&candidate)
-        .fetch_optional(pool)
-        .await?;
+        let taken: Option<i32> =
+            sqlx::query_scalar("select 1 from players where lower(display_name) = lower($1)")
+                .bind(&candidate)
+                .fetch_optional(pool)
+                .await?;
         if taken.is_none() {
             return Ok(candidate);
         }
@@ -517,7 +520,11 @@ pub fn sanitize_display_name(raw: &str) -> String {
         .filter(|c| c.is_ascii_alphanumeric() || matches!(c, ' ' | '_' | '-' | '.'))
         .collect();
     let collapsed = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
-    collapsed.trim_matches(['-', '.', ' ']).chars().take(32).collect()
+    collapsed
+        .trim_matches(['-', '.', ' '])
+        .chars()
+        .take(32)
+        .collect()
 }
 
 #[cfg(test)]
@@ -536,7 +543,10 @@ mod tests {
 
     #[test]
     fn a_bearer_token_is_read_and_nothing_else_is() {
-        assert_eq!(bearer_token(&headers_with("Bearer abc.def.ghi")).unwrap(), "abc.def.ghi");
+        assert_eq!(
+            bearer_token(&headers_with("Bearer abc.def.ghi")).unwrap(),
+            "abc.def.ghi"
+        );
         assert_eq!(bearer_token(&headers_with("bearer abc")).unwrap(), "abc");
         assert!(bearer_token(&HeaderMap::new()).is_err());
         assert!(bearer_token(&headers_with("Basic dXNlcjpwdw==")).is_err());
