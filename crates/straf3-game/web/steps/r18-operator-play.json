@@ -1,0 +1,36 @@
+[
+  { "do": "cdp", "method": "Page.bringToFront" },
+  { "do": "navigate", "url": "http://127.0.0.1:8790/play/coil?p=cpm" },
+  {
+    "do": "wait",
+    "until": "globalThis.__straf3_module && __straf3_module.straf3_debug_state() !== null",
+    "timeout_ms": 90000
+  },
+  {
+    "do": "eval",
+    "js": "(async () => { const a = await navigator.gpu.requestAdapter({powerPreference:'high-performance'}); const i = a?.info ?? null; return { ready: true, vendor: i?.vendor, architecture: i?.architecture }; })()"
+  },
+
+  { "do": "eval", "js": "(() => { globalThis.__p = { t: [], last: 0 }; const f = (n) => { if (__p.last) __p.t.push(n - __p.last); __p.last = n; requestAnimationFrame(f); }; requestAnimationFrame(f); return 'pacing sampler armed - the human session is now being measured too'; })()" },
+
+  { "do": "eval", "js": "'>>> THE WINDOW IS YOURS. Click the canvas to capture the mouse, then play coil to the finish. Esc releases, R respawns. This step file waits until a run finishes.'" },
+
+  {
+    "do": "wait",
+    "until": "__straf3_module.straf3_last_run() !== null",
+    "timeout_ms": 1800000
+  },
+
+  {
+    "do": "eval",
+    "js": "(() => { const r = __straf3_module.straf3_last_run(); return { time_ms: r.time_ms, run_digest_hex16: r.run_digest_hex16, sim_time_ms: r.sim_time_ms, command_count: r.command_count, map: r.map, physics: r.physics, s3d_bytes: r.s3d.length }; })()"
+  },
+
+  {
+    "do": "eval",
+    "js": "(() => { const t = __p.t.slice(30).sort((a,b)=>a-b); if (t.length < 100) return { frames: t.length, note: 'too few frames' }; const q=(p)=>+t[Math.min(t.length-1,Math.floor(p*t.length))].toFixed(3); const mean=t.reduce((a,b)=>a+b,0)/t.length; const over=(ms)=>+(100*t.filter(d=>d>ms).length/t.length).toFixed(2); return { frames: t.length, mean_ms:+mean.toFixed(3), fps_from_mean:+(1000/mean).toFixed(1), p50_ms:q(0.5), p95_ms:q(0.95), p99_ms:q(0.99), p999_ms:q(0.999), max_ms:+t[t.length-1].toFixed(3), pct_over_8_33ms:over(8.33), pct_over_16_7ms:over(16.7) }; })()"
+  },
+
+  { "do": "save_run", "path": "docs/web/evidence/r6-browser.s3d" },
+  { "do": "screenshot", "path": "docs/web/evidence/r18-operator-run.png", "from_surface": false }
+]

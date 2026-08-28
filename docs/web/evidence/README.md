@@ -97,10 +97,53 @@ visible rather than argued.
 produced by a native x86-64 build stepping `straf3-sim` against a natively
 compiled `assets/maps/coil.map`. The digest in the file's header was folded by
 a `wasm32-unknown-unknown` build in a browser, stepping its own compilation of
-the same source. Two implementations, one number. `--expect-digest` closes the
-last gap by checking the file's header against the digest the browser reported
-to the page out of band, so a header written by a code path that never ran the
-simulation cannot pass.
+the same source. Two implementations, one number. **That is the whole of the
+cross-implementation claim** — the browser's wasm build folded a digest, the
+native build re-folded one from its own stepping, and the two agree.
+
+**What `--expect-digest` does, and what it does not.** It establishes
+*provenance*: the browser reports its run digest to the page through
+`onRunFinished`, out of band from the file, and passing that value binds this
+file to that browser-reported run. That is worth having here for a mundane
+reason — `webcheck from-text` produces a native `.s3d` on the same map under the
+same profile that also agrees and exits 0, so the two artefacts are not
+otherwise distinguishable from the report alone.
+
+It does **not** prove the browser ran the simulation, and no write-up should say
+it does. Both numbers come from a single `Recording::claimed()` inside one wasm
+call, so a header and an out-of-band digest fabricated together would agree.
+The check that does catch a fabricated header lives in
+`crates/straf3-replay/src/codec.rs`, which re-folds the run digest from the
+file's own per-command checksums at load time and refuses with
+`DigestNotDerivedFromTrace`.
+
+**And that check is gated on the trace being present.** It sits inside the
+`if trace_present` arm, so a run written with `to_bytes()` instead of
+`to_bytes_with_checksums()` gets no derivation check at all. The trace is not
+merely how a divergence is *localised* to a command index — it is what makes
+the anti-tamper rule apply to the file in the first place. That is why
+`PageRunSink::finished` writes the trace, and why a traceless evidence run
+should be treated as a bug rather than shipped.
+
+---
+
+## `r8-map-compiler-crosstarget.txt` — the map compiler agrees across targets
+
+| file | what it is |
+|---|---|
+| `r8-map-compiler-crosstarget.txt` | `assets/maps/coil.map` compiled twice — once by a native `x86_64-pc-windows-msvc` build, once by a `wasm32-unknown-unknown` build inside Chrome — producing the same collision digest `0x47263b8845d8bb4b`, 26 hulls, 4 triggers. |
+
+Worth its own entry because it is **not** what r19 asks for and does not need a
+recorded run to exist. `cargo xtask determinism` builds `straf3-det-runner` and
+never compiles a `.map`, so the Valve 220 pipeline had no cross-target evidence
+on any host — while being load-bearing for every run, since a `.s3d` binds a
+`collision_digest` and `commands_for` refuses geometry that compiled
+differently. `crates/straf3-game/src/web.rs` names exactly this gap on
+`install_map`. This is the first host whose browser would start, so it is the
+first time the browser's answer could be read next to a native one.
+
+r19 remains the rolling digest of a recorded run, and still requires a run
+recorded in a browser.
 
 ---
 

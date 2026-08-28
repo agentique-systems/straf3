@@ -1,0 +1,110 @@
+=== The map compiler agrees across wasm32 and native x86-64 ===
+
+A result that stands on its own, and is NOT r18 or r19. It needs no recorded
+run, and it closes a gap the source itself names.
+
+------------------------------------------------------------------------------
+1. THE GAP THIS CLOSES
+
+`crates/straf3-game/src/web.rs`, on `install_map`:
+
+    The digest is logged deliberately and not incidentally: `straf3-sim` is
+    proven bit-identical across four targets, but *map compilation* under
+    `wasm32-unknown-unknown` is not covered by that gate the same way, and a
+    browser that compiled `coil.map` to different hulls would invalidate every
+    run recorded in it. This line is what makes the browser's answer readable
+    next to the native one.
+
+That is accurate about the gate. `cargo xtask determinism` builds
+**`straf3-det-runner`** — the simulation — and runs one reference command
+stream on four targets. It never compiles a `.map`. So the Valve 220 compiler
+in `straf3-map` has had no cross-target evidence at all, on any host, while
+being load-bearing for every recorded run: a `.s3d` binds a `collision_digest`,
+and `Recording::commands_for` refuses to play a run against geometry that
+compiled differently.
+
+Until now nobody could read the browser's answer next to a native one on the
+same machine, because no prior host had a browser that would start.
+
+------------------------------------------------------------------------------
+2. THE TWO COMPILATIONS
+
+Same file, `assets/maps/coil.map` (Valve 220 source, 23,115 bytes), compiled
+twice by two builds of `straf3-map` from the same tree at git f8d8b2e.
+
+  A. NATIVE — x86_64-pc-windows-msvc, rustc 1.97.1
+
+     $ tools/straf3-webcheck/target/debug/webcheck from-text \
+           probes/coil-course/results/coil-run.txt \
+           --map assets/maps/coil.map --out target/webcheck/coil-native.s3d
+     wrote target/webcheck/coil-native.s3d (18241 bytes)
+       map                coil
+       collision digest   0x47263b8845d8bb4b
+       physics            cpm
+
+  B. BROWSER — wasm32-unknown-unknown, compiled at runtime inside Chrome 151
+     after being fetched over HTTP from /assets/maps/coil.map
+
+     map: 26 hulls, 4 triggers, 312 triangles,
+          collision digest 0x47263b8845d8bb4b
+     map `coil` compiled in wasm: collision digest 0x47263b8845d8bb4b,
+          26 hulls, 4 triggers
+
+     (from `docs/web/evidence/r17-browser.txt`, the committed transcript)
+
+  RESULT
+
+     native  x86_64-pc-windows-msvc   0x47263b8845d8bb4b
+     browser wasm32-unknown-unknown   0x47263b8845d8bb4b
+                                      ---- identical ----
+
+     26 hulls and 4 triggers on both sides.
+
+The physics identity check agrees too, which is the weaker of the two but worth
+recording because a `.s3d` binds it as well:
+
+     native  `webcheck physics`   cpm  0x4350ccc31bec5d4c
+     browser startup log          cpm    4350ccc31bec5d4c
+
+------------------------------------------------------------------------------
+3. WHAT THIS IS, AND WHAT IT IS NOT
+
+IT IS: evidence that the Valve 220 -> collision hull pipeline is bit-identical
+across two targets with different pointer widths, different backends and
+different floating-point code generation. The collision digest folds the
+compiled geometry, so agreement means the browser is not merely *playing* the
+same map, it is *building* the same hulls. Two implementations, one number.
+
+IT IS NOT r19. r19 asks whether the ROLLING DIGEST of a recorded run survives
+the browser-to-native round trip — a fold over every command's simulation state
+checksum, in order. That still requires a run recorded in a browser, and no
+such run exists in this tree. Nothing here substitutes for it.
+
+It is also not a claim that map compilation is deterministic in general. It is
+one map, two targets, one host, at one commit. What it retires is the specific
+worry `web.rs` raises: that the browser might be compiling `coil.map` to
+different geometry than the native build, silently invalidating browser runs.
+On this evidence it is not.
+
+------------------------------------------------------------------------------
+4. THE INSTRUMENT, SHOWN TO WORK AND TO FAIL, ON THIS HOST
+
+Every number above is read through `webcheck`, so the harness was exercised
+here rather than trusted from a previous machine's transcript:
+
+    $ tools/straf3-webcheck/selftest.sh
+
+    building the harness ... 6 tests, ok
+    the harness must accept a run that reproduces
+      ok    a native .s3d re-simulates to its own digest   (exit 0)
+    the harness must refuse each of these
+      ok    a digest the recording does not claim          (exit 1)
+      ok    one flipped byte                               (exit 1)
+      ok    a map recompiled to different hulls            (exit 1)
+      ok    a harness out of lockstep with the workspace   (exit 1)
+
+    5 passed, 0 failed
+
+The third refusal is the one that matters for section 2: the harness does
+detect a map that compiled to different hulls, so the agreement reported above
+is a measurement and not an absence of checking.

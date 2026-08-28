@@ -586,7 +586,11 @@ retire it.
   `http://127.0.0.1:8790/play/coil?p=cpm` opens in a stock Chrome 151 and
   **runs**. A hardware WebGPU adapter is acquired (`adapter.info` reports vendor
   `nvidia`, architecture `ampere`); `coil.map` is fetched and compiled by the
-  wasm build to collision digest `0x47263b8845d8bb4b`; the session runs `cpm`
+  wasm build to collision digest `0x47263b8845d8bb4b` — **the same digest a
+  native `x86_64-pc-windows-msvc` build compiles it to**, which is a
+  cross-target result the determinism gate does not cover, because that gate
+  builds `straf3-det-runner` and never compiles a `.map`
+  (`docs/web/evidence/r8-map-compiler-crosstarget.txt`). The session runs `cpm`
   physics (`4350ccc31bec5d4c`) at 125 Hz. Pointer lock is taken, mouse-look
   turns the view, and strafejumping accelerates past ground speed to 470 ups
   down the full strafe corridor. Frame pacing while playing: median 6.1 ms
