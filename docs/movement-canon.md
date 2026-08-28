@@ -939,6 +939,16 @@ which four rounds of this argument got wrong before anyone opened the files.**
   is the weakest-supported constant in this tree, and **Part 3 should treat it
   as a value Straf3 must choose deliberately rather than one it can cite.**
 
+  > **Superseded in part — see §3.7.** This paragraph's reasoning rested on the
+  > upstream being unreachable. It has since been read from bytes, and it does
+  > carry the 400. §3.7 splits the constant: the *magnitude* is cited to the
+  > upstream, and the *quantity* — a window opened by the landing rather than by
+  > the previous jump — remains Straf3's own deliberate choice, for a reason the
+  > upstream's own code makes concrete. **No threshold has been edited and no
+  > criterion has moved**; this note records a change in the evidence, not in
+  > Part 1. The text above is left standing as the historical record of what was
+  > known when the criteria were frozen.
+
 *The structure is better attested than either number, and that is worth more to
 Part 3.* The same file's vq3 branch reads `cpm_pm_jump_z = 0; // turn off
 double-jump in vq3` — an independent port spelling "VQ3 is CPM with the
@@ -1293,14 +1303,24 @@ warmly. Part 3 uses four:
 | Grade | Means | What it is not |
 |---|---|---|
 | **A — id source** | Read from id Software's Quake 3 GPL release | — |
-| **B — two reconstructions agree** | Two community reconstructions with no *stated* shared lineage carry the same value | **Not** verification against CPMA. CPMA's source is not public and no constant in this tree has been checked against it |
-| **C — one reconstruction, or a shared lineage** | A single reconstruction, or two that trace to the same upstream | Not corroboration. Two copies of one document are one witness |
-| **S — Straf3's choice** | No citable source at a usable grade; the value is chosen and the reason recorded | Not an admission of ignorance — §4.1 makes choosing the default, not the fallback |
+| **U — the CPM upstream** | Read from `cpm1_dev_docs`, the document every CPM reconstruction descends from | **Not** CPMA. It is the *design document CPM was built from*, not the shipped game, and its own author called it "old and outdated" |
+| **B — two reconstructions agree** | Two community reconstructions with no *stated* shared lineage carry the same value | Not verification. Two copies of one document are one witness, and this wave found that most of them are copies |
+| **S — Straf3's choice** | The value is chosen and the reason recorded — including where a source exists but attests a *different quantity* | Not an admission of ignorance. §4.1 makes choosing the default, not the fallback |
 
-Grade B is new to this wave and it is the most easily overstated thing in this
-document, so its ceiling is stated twice: **B is agreement between two
-reconstructions, and it is not verification.** A future wave that finds a CPMA
-demo can raise these; nobody has.
+**Grade U is new to this wave and it changes most of the table below.** The
+previous wave recorded `cpm1_dev_docs` as the single upstream every
+reconstruction traces to, and treated it as unreachable — which made every
+reconstruction a copy of a document nobody could read. It has now been read from
+bytes (§3.6), and six constants move to Grade U.
+
+**The ceiling on Grade U, stated before it is used.** It is not CPMA. CPMA's
+source has never been public and no constant in this tree has been checked
+against the shipped game. Worse for one constant and better for another, the
+upstream **disagrees with modern CPMA about `friction`** — §3.3 — which is
+direct evidence that Grade U is not the top of the ladder. Where the
+reconstructions agree with each other and disagree with the upstream, the
+upstream is the *weaker* citation, and Part 3 says which of the two each
+constant is cited to.
 
 ### 3.2 The sixteen constants at Grade A
 
@@ -1325,63 +1345,98 @@ taken against, and no candidate this wave proposes needs any of them to move.
 Changing one would invalidate 2211 published measurements to buy nothing this
 wave can name. That is the reason; it is not "they were in Quake".
 
-### 3.3 `friction` 6, which is now justified rather than merely inherited
+### 3.3 `friction` 6 is a deliberate divergence, not an inheritance
 
-Grade A, and it needed the argument anyway. `cpm1_dev_docs` used **8**;
-Xonotic's reconstruction states that "friction is 6 in all modern CPMA releases,
-and in DeFRaG CPM", which is why GPP-1-1's CPM branch carries 8 and this tree
-correctly does not.
+**This is the constant whose story the primary source inverted, and it is the
+best worked example in Part 3 of why reading bytes matters.**
 
-This wave adds the observation behind that assertion. `ratoa_gamecode`'s
-`bg_pmove.c` declares `const float pm_friction = 6.0f` as its **base**, and —
-the load-bearing half — **there is no `pm_cpm_friction` anywhere in the file**.
-A CPM-capable port carries 6 and never overrides it in its CPM branch. That is
-Xonotic's claim *observed* rather than asserted, which is a better thing to
-have. Read from bytes by `canon`; custody in §3.6.
+The previous wave's Part 3 said `friction` 6 "can now be justified rather than
+merely inherited", resting on Xonotic's *claim* that `cpm1_dev_docs` used 8 "but
+friction is 6 in all modern CPMA releases, and in DeFRaG CPM". That claim is now
+checked against the bytes it is a claim about, and **it is true**:
 
-### 3.4 The six CPM constants, and what changed for four of them
+| Source | VQ3 | CPM |
+|---|---|---|
+| `cpm1_dev_docs` `bg_promode.c:113` / `:210` | `pm_friction = 6` | **`pm_friction = 8`** |
+| This tree | 6 | **6** |
+
+So Straf3 does **not** inherit its CPM friction. The upstream's CPM branch says
+8; Straf3 carries 6, which is the upstream's *VQ3* value and modern CPMA's CPM
+value. **That is r1's second clause, not its first — a value Straf3 chose, with
+the reason recorded — and it is a stronger sentence than any citation would have
+been**, because the citation would have said 8.
+
+*The reason, stated as §1.8 point 5 requires:* Straf3 follows the game as it is
+actually played rather than the design document it was built from. Xonotic's
+reconstruction states 6 is what modern CPMA and DeFRaG CPM ship; `ratoa` carries
+`const float pm_friction = 6.0f` as its base and — the load-bearing half —
+**declares no `pm_cpm_friction` at all**, so a CPM-capable port never overrides
+it. That is Xonotic's claim observed rather than asserted, in a third
+independent place. An unexamined inheritance would have given Straf3 an 8 that
+no CPM player has felt in twenty years.
+
+**And it is the standing warning about Grade U.** The one constant where the
+upstream can be checked against the living game, the upstream is wrong. Nothing
+else in §3.4 should be read as though Grade U were the top of the ladder.
+
+### 3.4 The CPM constants, now cited to CPM's own document
 
 These are the `TODO(wave2)` block: the values `cpm()` adds on top of the VQ3
 base. None is Grade A and none ever will be without a CPMA demo.
 
-| Constant | Value | Grade | On what |
+Every value below is now cited to the **assignment site** in the upstream, never
+to a file-scope declaration — see §3.6 for why that distinction is the whole
+ball game here.
+
+| Constant | Value | Grade | Cited to |
 |---|---|---|---|
-| `accelerate` (CPM) | 15 | **B** | GPP-1-1's `bg_promode.c`; `ratoa` `pm_cpm_accelerate 15.0f` |
-| `air_stop_accelerate` | 2.5 | **B** | as above; `ratoa` `pm_cpm_airstopaccelerate 2.5f` |
-| `strafe_accelerate` | 70 | **B** | as above; `ratoa` `pm_cpm_airstrafeaccelerate 70.0f` |
-| `strafe_wish_speed_cap` | 30 | **B** | as above; `ratoa` `pm_cpm_airstrafewishspeed 30.0f` |
-| `air_control` | 150 | **C** | `ratoa` carries 150 but **declares itself Xonotic-derived** — same lineage, not a second witness |
-| `double_jump_window_ms` | 400 | **S** | §3.7 |
-| `double_jump_boost` | 100 | **S** | §3.7 |
+| `accelerate` (CPM) | 15 | **U** | `bg_promode.c:209` `pm_accelerate = 15;` |
+| `air_stop_accelerate` | 2.5 | **U** | `bg_promode.c:205` `cpm_pm_airstopaccelerate = 2.5;` |
+| `air_control` | 150 | **U** | `bg_promode.c:206` `cpm_pm_aircontrol = 150;` |
+| `strafe_accelerate` | 70 | **U** | `bg_promode.c:207` `cpm_pm_strafeaccelerate = 70;` |
+| `strafe_wish_speed_cap` | 30 | **U** | `bg_promode.c:208` `cpm_pm_wishspeed = 30;` |
+| `double_jump_boost` | 100 | **U** | `bg_promode.c:202` `cpm_pm_jump_z = 100;` |
+| `double_jump_window_ms` | 400 | **U** for the magnitude, **S** for the quantity | §3.7 — and the split is real, not a hedge |
+| `friction` | 6 | **S** | §3.3 — the upstream says 8 |
 
-**Why `air_control` did not move with the other four, stated because the
-temptation to move it was real.** `ratoa`'s `bg_pmove.c` carries
-`pm_cpm_aircontrol = 150.0f`, which is this tree's value exactly. But the
-function that consumes it is headed *"Copied with edits from `cl_input.c` from
-Xonotic's Darkplaces engine"*. It is the lineage canon already cites, arriving a
-second time — and §1.6's whole finding about the double jump was that repeated
-copies of one upstream are one witness. Applying that finding only where it is
-convenient would be worse than not having made it. `air_control` stays at
-Grade C.
+**`air_control` 150 is the constant this read rescued, and the near-miss is
+worth recording.** Before the upstream was reachable it stood at one
+reconstruction; `ratoa` appeared to add a second, but `ratoa`'s consuming
+function is headed *"Copied with edits from `cl_input.c` from Xonotic's
+Darkplaces engine"* — the lineage canon already cited, arriving a second time
+wearing different clothes. Part 3 was about to record 150 at the *weakest* grade
+in the table. It is in fact one of the best-attested constants here, because the
+upstream both assigns 150 **and carries the formula this tree implements**:
 
-One structural difference in the same function, recorded so that a later reader
-does not find it and think it was missed. `ratoa` computes
-`k = 32 · clamp(0, 1, wishspeed / airstrafewishspeed) · dot² · dt · aircontrol`;
-this tree (`step.rs:947`) computes `k = 32 · air_control · dot² · dt`, without
-the clamp factor. Stated precisely rather than alarmingly: with the cap at 30
-and an ordinary wishspeed near 320 that factor saturates at 1, so the two agree
-in all normal play and diverge only below wishspeed 30 — a barely-touched stick.
-The value is corroborated; the formulas are not identical, and Part 3 does not
-claim they are.
+> `k = 32;`
+> `k *= cpm_pm_aircontrol*dot*dot*pml.frametime;`
 
-**And the ceiling on all of Grade B, once more.** Four constants moved from one
-reconstruction to two. Neither reconstruction is CPMA. Nothing in either
-`bg_pmove.c` or `bg_public.h` states where `ratoa` got its values, and no README
-claiming independent derivation was found — so **independence from
-`cpm1_dev_docs` is unestablished even for the four that moved**, and four
-matching numbers must not be read as implying a provenance none of them carries.
-What Grade B says is: two people reconstructing CPM wrote down the same number.
-That is worth having and it is not verification.
+against `step.rs:947`'s `k = 32 * air_control * dot² * dt`. The `movementDir`
+gate matches too. So the constant *and* the expression it lives in are cited
+together, which is worth more than the number alone — a number is only meaningful
+inside the formula that reads it.
+
+*One divergence, recorded so a later reader does not find it and think it was
+missed:* `ratoa` scales `k` by an additional `clamp(0, 1, wishspeed /
+airstrafewishspeed)`. **The upstream does not, and neither does this tree** — so
+that factor is Xonotic's addition and this tree matches CPM's own document
+rather than Xonotic's variant. (Its practical effect is nil either way: with the
+cap at 30 and an ordinary wishspeed near 320 it saturates at 1.)
+
+**What this read cost as well as gave: GPP-1-1 is demoted.** §1.6 cites GPP-1-1's
+`bg_promode.c` for `double_jump_boost`. It is now clear that GPP-1-1 *is a copy
+of this upstream file*, third-hand and patched for Tremulous — it was never an
+independent witness, so every "GPP-1-1 plus X" reads as one more source than it
+is. The gain is real anyway, because 100 is now cited to the original rather than
+to the copy, and the copy's self-contradicting file-scope `0.5` is explained: the
+upstream declares a bare `float cpm_pm_jump_z;` with **no initialiser at all**,
+so the `0.5` is GPP-1-1's own patch and not a defect in CPM.
+
+**The ceiling, once more, because it is the sentence most likely to be dropped
+when this table is quoted.** Grade U is the design document, not the shipped
+game. §3.3 shows it disagreeing with modern CPMA on the one constant where the
+comparison can be made. Nothing here has been verified against CPMA, and nobody
+on this run has seen CPMA's source, because it does not exist publicly.
 
 ### 3.5 The jump, measured
 
@@ -1430,26 +1485,76 @@ at **48.528 units over 720 ms**. Straf3 is lower and shorter. Neither figure is
 evidence about the other, because the integrators differ; the comparison is
 recorded because a reader who knows Quake will otherwise wonder.
 
-### 3.6 §3.0's unexplored source, now explored
+### 3.6 The sources, read from bytes
+
+Two sources were opened this wave. §1.6's closing rule governs both: a constant
+may be cited only against a source someone read **from bytes**, and the citation
+records who read it.
+
+*Chain of custody. All eleven files below were fetched raw with `curl`, hashed,
+and read by* **`canon`** *— not through a summarising fetch.*
+
+| File | Source | sha256 | Size |
+|---|---|---|---|
+| `bg_promode.c` | `cpm1_dev_docs`, Wayback `id_` capture 2017-01-25 | `589f1e89…` | 7455 b, 370 lines |
+| `bg_promode.h` | same archive | `989b9ec6…` | 2718 b |
+| `step1`–`step6.txt`, `main.txt` | same archive | recorded in the seat journal | 2298 lines total |
+| `bg_pmove.c` | `rdntcntrl/ratoa_gamecode`, branch `ratoa` | `d10e1335…` | 59241 b, 2514 lines |
+| `bg_public.h` | same repo | `7a699cfe…` | 27721 b |
+
+The `id_` modifier matters and is not decoration: it returns the original bytes
+with no Archive.org HTML wrapper. A citation to a wrapped page would be a
+citation to Archive.org's rendering.
+
+#### 3.6.1 `cpm1_dev_docs` — the upstream, and the trap it set
+
+§1.6 recorded this document as the single upstream every CPM reconstruction
+descends from, and treated it as unreachable. **It is reachable**, and reading it
+is what produced §3.3, §3.4 and §3.7.
+
+**The trap fired exactly where §1.6 predicted, and against the primary source,
+which is the worst place for it.** The first twelve lines declare, at file
+scope:
+
+    float	cpm_pm_airstopaccelerate = 1;
+    float	cpm_pm_aircontrol = 0;
+    float	cpm_pm_strafeaccelerate = 1;
+    float	cpm_pm_wishspeed = 400;
+
+Not 2.5, 150, 70, 30. **`aircontrol = 0` is air control switched off**, and
+`wishspeed = 400` is an order of magnitude from 30. A Part 3 that cited these
+would have committed §1.6's own documented mistake a third time — and it would
+have looked unimpeachable, because the source is the original. The real values
+are assigned in `CPM_UpdateSettings`'s pro-mode branch at lines 202-210, and
+**every citation in §3.4 is to the assignment site**.
+
+*Why the declarations exist at all, since it explains the whole pattern:*
+`CPM_UpdateSettings(num)` is called with `num = 0` for VQ3 and `num = 1` for
+pro-mode. Lines 105-113 write the VQ3 values unconditionally; lines 202-210 then
+overwrite them if `num`. The file-scope initialisers are never the ruleset — they
+are placeholders before either branch runs. Reading only the top of the file
+gives a confident, precise, wrong answer, which is the failure mode §1.6 names.
+
+**The structural point §1.6 rates above the magnitudes is confirmed at the
+source.** `bg_promode.c:105` reads `cpm_pm_jump_z = 0; // turn off double-jump
+in vq3`. "VQ3 is CPM with the extensions switched off", spelled as a zero on the
+very field, in CPM's own document — not in a port's copy of it. That is the
+relationship `profile.rs` encodes and defends.
+
+#### 3.6.2 `ratoa_gamecode` — §3.0's named source, mostly a negative
 
 The previous Part 3 named `rdntcntrl/ratoa_gamecode` (OpenArena Ratmod) as the
 one reconstruction nobody had examined — recommended over freepromode by
-freepromode's own author, and "the obvious next place to look before Part 3
-argues `double_jump_window_ms` or `double_jump_boost`". It has now been looked
-at, and the result is mostly a **negative**, which is why it is written up at
-length rather than dropped.
+freepromode's own author. It has now been read, and the result is mostly a
+**negative**, which is why it is written up rather than dropped.
 
-*Chain of custody, per §1.6's closing rule.* `code/game/bg_pmove.c` and
-`code/game/bg_public.h` from branch **`ratoa`** (`master` 404s), fetched raw with
-`curl`, hashed, and read in full by **`canon`** — `sha256 d10e1335…` (2514 lines)
-and `sha256 7a699cfe…`. Not through a summarising fetch.
+**The declare-then-overwrite trap is absent here, and that was checked rather
+than assumed.** Every movement constant is `const float` at file scope, so it
+*cannot* be reassigned, and every other occurrence is a read inside the
+`PM_Get*` accessors.
 
-**The `bg_promode.c` trap is absent here, and it was checked rather than
-assumed.** Every movement constant is declared `const float` at file scope, so
-it *cannot* be reassigned, and every other occurrence of each identifier is a
-read inside the `PM_Get*` accessors. There is no `CPM_UpdateSettings` equivalent.
-
-**What it gave: §3.4's Grade B for four constants, and §3.3's observation.**
+**What it gave:** §3.3's third leg for `friction` 6 — the base is 6 and there is
+no `pm_cpm_friction` override anywhere in 2514 lines.
 
 **What it did not give, which is what §3.0 actually hoped for.** `ratoa` does
 contain a 400 and a 100 together, in `PM_CheckJump`, which looks at first exactly
@@ -1474,39 +1579,88 @@ independent reasons, any one of which is sufficient:
 
 This is the right number attached to a different mechanism — the `bg_promode.c`
 failure in a new costume, caught this time because the file was read rather than
-summarised. **§1.6's instruction therefore stands unchanged**, and §3.7 applies
-it.
+summarised.
 
-### 3.7 The two constants Straf3 chooses
+**And `ratoa` is not doing anything idiosyncratic: it is a faithful copy of the
+upstream.** `cpm1_dev_docs`' `step2.txt` sets `STAT_JUMPTIME = 400` in exactly
+the same place and in exactly the same way. So the finding above is a finding
+about **CPM's own double jump**, not about Ratmod — which is why §3.7 is written
+the way it is rather than as a simple citation.
 
-Grade S. Neither is cited, and after §3.6 that is a demonstrated conclusion
-rather than an absence of evidence — which is a materially stronger position
-than the previous wave's.
+### 3.7 `double_jump_window_ms` — one constant, two grades
 
-**`double_jump_window_ms` = 400.** Chosen. Every attestation traces to
-`cpm1_dev_docs`; freepromode's README gives the number verbatim but describes
-itself as a *less accurate* imitation after its author "tried to purge" that
-upstream; Xonotic sets `sv_doublejump 0`; and `ratoa`'s matching 400 measures a
-different quantity (§3.6). *The reason Straf3 chooses 400:* it is the value the
-tree's entire published measurement corpus was taken under, the value
-`docs/movement-lab.md`'s bunnyhop and double-jump tables describe, and no
-evidence recommends a different one. Moving it would invalidate those tables to
-express a preference nobody has stated. **Straf3 keeps 400 because it is the
-incumbent and nothing argues against it — not because CPM had it.**
+**§1.6 instructed Part 3 to treat this as a value Straf3 must choose rather than
+one it can cite. That instruction was conditioned on evidence that has since
+changed, and this section supersedes it — on its own terms, not by overruling
+it.** §1.6's reasoning was that every attestation traced to an upstream nobody
+could read. The upstream has now been read. **No threshold in Part 1 has been
+edited**, no criterion has moved, and §1.7 gains no amendment: what changed is a
+fact about the world, and Part 3 is where facts about constants belong.
 
-**`double_jump_boost` = 100.** Chosen, at Grade C-going-on-S. GPP-1-1's
-`bg_promode.c` assigns `cpm_pm_jump_z = 100/*/230*/; // enable double-jump //100`
-inside the pro-mode branch of `CPM_UpdateSettings` — a port's own CPM
-configuration, but third-hand about CPMA, and the same file declares the same
-variable at file scope as `0.5` with a comment whose arithmetic disagrees with
-itself. `ratoa`'s `+100` is a `RAT_RAMPJUMP` boost and does not corroborate it.
-*The reason Straf3 chooses 100:* the same incumbency argument, plus the
-structural one §1.6 rates above both magnitudes — GPP-1-1's vq3 branch sets the
-same field to zero, spelling "VQ3 is CPM with the extensions switched off" as
-data on the very field `profile.rs` uses. `ratoa` spells the same relationship a
-second way, carrying `pm_accelerate 10.0f` beside `pm_cpm_accelerate 15.0f` and
-switching between them on movement mode. **The relationship is better attested
-than either magnitude, and it is the relationship `profile.rs` encodes.**
+The honest answer is a split, and the split is real rather than a hedge.
+
+**The magnitude: Grade U.** `cpm1_dev_docs`' `step2.txt` line 42 carries
+`pm->ps->stats[STAT_JUMPTIME] = 400;`. The 400 ms double-jump window is in CPM's
+own document, verbatim, and §1.6's "no millisecond window anywhere" was a fact
+about GPP-1-1's 372-line copy rather than about CPM.
+
+**The quantity: Grade S — Straf3's own, deliberately.** The upstream sets its
+timer like this, in `PM_CheckJump`, after `velocity[2] = JUMP_VELOCITY`:
+
+    if (cpm_pm_jump_z) {
+        if (pm->ps->stats[STAT_JUMPTIME] > 0) {
+            pm->ps->velocity[2] += cpm_pm_jump_z;
+        }
+        pm->ps->stats[STAT_JUMPTIME] = 400;
+    }
+
+The window is set **at the jump, unconditionally, on every jump**, and the boost
+is granted when the *previous jump* was under 400 ms ago. Straf3's window opens
+**on the landing**, and only if the landing ended a jump
+(`step.rs:740-742`, gated on `left_ground_by_jumping`). Those are different
+quantities wearing the same number, and the difference is not academic:
+
+> §3.5 measured this tree's jump at **680 ms airborne**. Under the upstream's
+> own rule the timer has expired long before the player lands, so a flat-ground
+> jump→land→jump can never receive the boost at all. The upstream's 400 ms is
+> reachable only when air time is short — landing on higher ground, or a ramp.
+
+*The reason Straf3 chose the landing-gated quantity*, which `profile.rs` already
+records: walking off a ledge and jumping on contact should not be a double jump,
+and a window measured from the landing is the one a player can actually feel and
+aim for. **A citation to the upstream's 400 would therefore be the right number
+attached to the wrong mechanism** — precisely the error §1.6 exists to prevent,
+and the reason this section publishes two grades instead of one.
+
+*And the magnitude's reason, now that it is separable:* 400 is what the tree's
+entire published corpus was measured under, it matches CPM's document, and
+nothing argues for a different number. Straf3 keeps it on both counts.
+
+**`double_jump_boost` = 100 — Grade U, and the messiest citation in the tree is
+now the cleanest.** `cpm1_dev_docs`' `bg_promode.c:202` assigns
+`cpm_pm_jump_z = 100; // enable double-jump` in `CPM_UpdateSettings`'s pro-mode
+branch. That is the primary source, plainly.
+
+This retires the caveat §1.6 attached to it. §1.6 cited GPP-1-1's
+`cpm_pm_jump_z = 100/*/230*/` and noted, correctly, that the same file declared
+the variable at file scope as `0.5` with a comment whose arithmetic disagreed
+with itself. **The upstream declares a bare `float cpm_pm_jump_z;` with no
+initialiser at all** — so the `0.5` and its broken comment are GPP-1-1's own
+patch, not a defect in CPM, and the confusion §1.6 could not resolve dissolves
+once the original is read. GPP-1-1 is a *copy* of this file and never was an
+independent witness; the number is cited to the original instead.
+
+Unlike the window, the boost has no quantity problem: it is extra upward velocity
+added to a jump, and that is exactly what `profile.rs` carries.
+
+**The structural point, which §1.6 rates above both magnitudes, is confirmed at
+the source rather than in a copy.** `bg_promode.c:105` reads `cpm_pm_jump_z = 0;
+// turn off double-jump in vq3` — "VQ3 is CPM with the extensions switched off",
+spelled as a zero on the very field `profile.rs` uses, in CPM's own document.
+`ratoa` spells the same relationship a second way, carrying `pm_accelerate 10.0f`
+beside `pm_cpm_accelerate 15.0f` and switching on movement mode. **The
+relationship is better attested than any magnitude, and it is the relationship
+`profile.rs` encodes.**
 
 ### 3.8 The candidate constants
 
@@ -1517,16 +1671,46 @@ than either magnitude, and it is the relationship `profile.rs` encodes.**
 unjudgeable verdict leaves them at the disabling values `vq3()` and `cpm()`
 carry. This section is written when the verdicts are.
 
-One thing is settled ahead of them, under §1.5's pre-registration rule and
-recorded here because a retune registered after its measurement is not evidence:
-**the dash's single permitted retune is a new `dash_entry_speed` = 400**,
-mirroring `slide_entry_speed`, tested against horizontal speed at the arming
-landing. It is predicted to move G5(a) from fail to pass, possibly to lower W4's
-context count, and to move no other gate. This is the one route to a new field
-on `PhysicsProfile` that Part 3's previous draft identified, and it lands **only
-if the dash is admitted** — a field that exists is folded into the physics digest
-by `identity.rs` whether or not canon uses it, so a rejected dash must not leave
-one behind.
+#### The dash's single retune, pre-registered
+
+Recorded here because a retune registered *after* its measurement is not
+evidence but a search for a number that passes — §1.5's words, and the reason
+this paragraph was written before any dash number existed.
+
+**The constant:** a new `dash_entry_speed` = 400, mirroring `slide_entry_speed`
+exactly, tested against horizontal speed at the arming landing. **The
+direction:** above `max_speed` 320, so ground acceleration alone cannot arm a
+dash. **The prediction:** G5(a) moves from fail to pass; W4's context count may
+*fall*, because the dash becomes unavailable wherever the player cannot arrive
+at speed; W1 may move in either direction and no sign is predicted; G3, G4, G6,
+G7 and G8 should not move at all, and if any of them does that is a finding about
+the retune rather than a pass.
+
+This is the one route to a new field that Part 3's earlier draft identified, and
+it is **the one retune the dash gets**. If the retuned dash fails a required
+criterion it is rejected, and there is no second attempt.
+
+*Status:* implemented and measured on branch commit `cd64b05`, which the lab
+cherry-picks for the retuned-dash cells and publishes beside the unretuned ones.
+`crates/straf3-sim/tests/canon_gates.rs` asserts **both** states from the shipped
+tree — ten armings out of ten at zero speed before the retune, zero after — so
+the gate failure that justifies the retune stays reproducible rather than
+surviving only as a claim in this document.
+
+**It lands in `straf3-sim` only if the dash is admitted, and the reason is
+sharper than "dead weight".** `identity.rs` folds an *exhaustive destructure* of
+`PhysicsProfile`, so a new field moves the physics digest of **`vq3()` and
+`cpm()` as well** — a rejected candidate would permanently alter the digest of
+two profiles it has nothing to do with. Three separate exhaustive destructures
+had to learn the field when it was added, every one of them by compiler error
+rather than by being remembered: `canon_frozen.rs`, `straf3-replay`'s
+`physics_digest`, and `straf3-records`' `profile_bits`. That is the seam working,
+and it is also the measure of what a field costs.
+
+**A consequence the freeze report owes the operator either way:** a moved
+physics digest orphans anything pinned to the old one, including seeded
+leaderboards in `crates/straf3-records`. The digest moves when `straf3()` lands
+regardless of the dash; the dash only changes by how much.
 
 ---
 
