@@ -1,0 +1,2 @@
+[      96ms] [WARNING] No available adapters. @ http://127.0.0.1:8788/play/coil:0
+[      96ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:8788/favicon.ico:0

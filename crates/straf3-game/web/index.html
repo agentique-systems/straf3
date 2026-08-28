@@ -3,6 +3,10 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- `/play/coil` and `/watch/<run>` are client-side routes served by this
+         same file, so relative URLs below them would resolve to `/play/pkg/…`
+         and fetch this page back instead of the module. -->
+    <base href="/" />
     <title>straf3</title>
     <style>
       html, body { margin: 0; height: 100%; overflow: hidden;
@@ -162,6 +166,10 @@
         try {
           const module = await import("./pkg/straf3_game.js");
           await module.default();
+          // For `drive.mjs`, which needs `straf3_last_run()` from an evaluated
+          // expression and cannot reach an ES module's exports otherwise. It
+          // is the shell's handle on its own module, not an API.
+          globalThis.__straf3_module = module;
           // From here the module owns the status line: it clears it once it
           // has actually started, and writes its own message if it refuses.
           module.start_web(JSON.stringify(configFromUrl(backend)));

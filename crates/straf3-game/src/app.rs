@@ -964,6 +964,38 @@ impl App {
         }
 
         self.report_telemetry(delta.timing.elapsed_ms);
+        #[cfg(target_arch = "wasm32")]
+        self.publish_debug_state();
+    }
+
+    /// Hand this frame's state to [`crate::web::straf3_debug_state`].
+    ///
+    /// After the frame is drawn and the telemetry taken, so what a harness
+    /// reads is the state the frame it just watched was drawn from.
+    #[cfg(target_arch = "wasm32")]
+    fn publish_debug_state(&self) {
+        let state = self.game.state();
+        crate::web::publish_debug_state(crate::web::DebugState {
+            tick: state.tick,
+            time_ms: state.time_ms,
+            origin: (
+                state.player.origin.x,
+                state.player.origin.y,
+                state.player.origin.z,
+            ),
+            pitch: self.game.input.look.pitch(),
+            yaw: self.game.input.look.yaw(),
+            speed: self.game.horizontal_speed(),
+            grounded: state.player.ground.is_grounded(),
+            pointer_locked: self.grab == PointerGrab::Grabbed,
+            run: match state.run {
+                straf3_sim::RunState::NotStarted => 0,
+                straf3_sim::RunState::Running { .. } => 1,
+                straf3_sim::RunState::Finished { .. } => 2,
+            },
+            run_ms: state.run.elapsed_ms(state.time_ms).unwrap_or(0),
+            fps: self.last_fps,
+        });
     }
 
     /// Say, once, that the recorded stream has run out.
@@ -1160,9 +1192,28 @@ impl App {
         if self.grab == PointerGrab::Grabbed {
             return;
         }
-        if let Some(window) = &self.window {
-            self.grab = straf3_platform::grab_pointer(window);
+        let Some(window) = &self.window else {
+            return;
+        };
+        let grab = straf3_platform::grab_pointer(window);
+        // Natively the call has either grabbed the pointer or not by the time
+        // it returns, so its answer is the answer.
+        //
+        // On the web it is a *request*: `requestPointerLock()` resolves later,
+        // and winit reports success as soon as it has asked. Believing it
+        // would mean flipping to `Grabbed` before the browser had agreed —
+        // measured, that produced an `onPointerLock(true)` immediately
+        // followed by `onPointerLock(false)` as the next frame's
+        // reconciliation found `document.pointerLockElement` still null, and
+        // only then a second `true` when it was granted 30 ms later. So on the
+        // web nothing but `sync_pointer_lock` writes this flag, and the
+        // browser's own answer is the only one anybody sees.
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.grab = grab;
         }
+        #[cfg(target_arch = "wasm32")]
+        let _ = grab;
     }
 
     fn release_pointer(&mut self) {
@@ -1322,7 +1373,24 @@ impl ApplicationHandler for App {
                 self.grab_pointer();
             }
             WindowEvent::Focused(false) => {
+                // Natively, losing focus must drop the grab: nothing else
+                // would, and a window that kept the mouse after the player
+                // alt-tabbed would be holding their cursor hostage.
+                //
+                // On the web the browser owns that decision and has already
+                // made it — pointer lock is released when the document loses
+                // focus, by specification. Calling `exitPointerLock()` here as
+                // well only adds a second opinion, and it is the one that
+                // loses: a page that regains focus without a fresh click would
+                // stay released even where the browser would have kept the
+                // lock. The held keys are still let go, for the reason they
+                // always were — a player who leaves mid-strafe should not come
+                // back still strafing — and `sync_pointer_lock` reconciles the
+                // flag on the next frame either way.
+                #[cfg(not(target_arch = "wasm32"))]
                 self.release_pointer();
+                #[cfg(target_arch = "wasm32")]
+                self.game.input.release_all();
                 return;
             }
             // The two keys the game itself answers, rather than passing to the

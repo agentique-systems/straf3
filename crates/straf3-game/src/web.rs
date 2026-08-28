@@ -401,6 +401,75 @@ pub fn straf3_last_run() -> JsValue {
     })
 }
 
+/// A snapshot of the session, for a harness driving the browser.
+///
+/// # Why this exists
+///
+/// Everything requirement r5 is about — that the view turns when the mouse
+/// moves, that a key produces movement in the direction the player is
+/// facing — is a fact about the *simulation state*, and on a software-only
+/// host it cannot be read off a screenshot: this box's headless Chrome does
+/// not hand a WebGPU layer back to `Page.captureScreenshot` at all. Without
+/// this, driving the browser would mean inferring the game's state from a
+/// once-a-second log line.
+///
+/// It is a snapshot and not a handle: nothing here can *change* the session,
+/// so no test written against it can accidentally become a second way to
+/// drive the game.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct DebugState {
+    pub tick: u32,
+    pub time_ms: u32,
+    pub origin: (f32, f32, f32),
+    pub pitch: f32,
+    pub yaw: f32,
+    pub speed: f32,
+    pub grounded: bool,
+    pub pointer_locked: bool,
+    /// `0` not started, `1` running, `2` finished.
+    pub run: u8,
+    pub run_ms: u32,
+    pub fps: u32,
+}
+
+thread_local! {
+    static DEBUG_STATE: RefCell<Option<DebugState>> = const { RefCell::new(None) };
+}
+
+/// Publish this frame's snapshot. Called once a frame from the event loop.
+pub(crate) fn publish_debug_state(state: DebugState) {
+    DEBUG_STATE.with(|slot| *slot.borrow_mut() = Some(state));
+}
+
+/// The session as of the last drawn frame, or `null` before the first one.
+#[wasm_bindgen]
+#[must_use]
+pub fn straf3_debug_state() -> JsValue {
+    DEBUG_STATE.with(|slot| {
+        slot.borrow().map_or(JsValue::NULL, |state| {
+            let object = Object::new();
+            let mut set = |key: &str, value: JsValue| {
+                let _ = Reflect::set(&object, &JsValue::from_str(key), &value);
+            };
+            let number = |v: f64| JsValue::from_f64(v);
+            set("tick", number(f64::from(state.tick)));
+            set("time_ms", number(f64::from(state.time_ms)));
+            set("x", number(f64::from(state.origin.0)));
+            set("y", number(f64::from(state.origin.1)));
+            set("z", number(f64::from(state.origin.2)));
+            set("pitch", number(f64::from(state.pitch)));
+            set("yaw", number(f64::from(state.yaw)));
+            set("speed", number(f64::from(state.speed)));
+            set("grounded", JsValue::from_bool(state.grounded));
+            set("pointer_locked", JsValue::from_bool(state.pointer_locked));
+            set("run", number(f64::from(state.run)));
+            set("run_ms", number(f64::from(state.run_ms)));
+            set("fps", number(f64::from(state.fps)));
+            object.into()
+        })
+    })
+}
+
 async fn boot(config: Config) {
     if config.backend != "webgpu" {
         refuse(&format!(
