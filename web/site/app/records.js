@@ -162,11 +162,18 @@ export async function resolve(runRef) {
     return { source: 'service', record, recording, notes };
   }
 
-  notes.push(
-    fromService.status === 'absent'
-      ? `the records service was not asked: ${fromService.detail}`
-      : `the records service could not answer (HTTP ${fromService.code}): ${fromService.detail}`,
-  );
+  // "The service said no" and "the service did not say" are different notes,
+  // for the same reason an empty board and an unreachable one are different
+  // pages. A 404 `unknown_run` is an answer — a complete, authoritative one —
+  // and filing it under "could not answer" would make the service look broken
+  // every time someone followed a link to a run it has never held.
+  if (fromService.status === 'absent') {
+    notes.push(`the records service was not asked: ${fromService.detail}`);
+  } else if (fromService.code === 404 && fromService.error === 'unknown_run') {
+    notes.push(`the records service answered, and it has no run by this name: ${fromService.detail}`);
+  } else {
+    notes.push(`the records service could not answer (HTTP ${fromService.code}): ${fromService.detail}`);
+  }
 
   if (/^[0-9a-f]{16}$/.test(runRef)) {
     const local = await findLocalByDigest(runRef);
