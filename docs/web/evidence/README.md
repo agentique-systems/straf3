@@ -22,6 +22,58 @@ would retire its largest gap.
 | `r6-browser.s3d` | the run recorded **in the browser**, if one exists. Absent means no browser run has been captured; see `PLAYING.md`. |
 | `r6-browser.txt` | the comparison for that run. |
 
+**Still absent as of the browser wave.** `r6-browser.s3d` was not captured, and
+the reason is worth recording because it is not a browser limitation.
+`RunSink::finished` fires only on crossing the finish trigger, and `coil` cannot
+be walked to that trigger: its last jump clears 288 units onto a ledge whose
+front face is 272 units tall and unclimbable, so the run needs ~425 ups, and the
+ramp wave before it needs ~575 ups to avoid the speed trap coil's own header
+documents. A scripted `drive.mjs` run reaches 470 ups and the ramp wave, and
+stops there. What is missing is a *player*, not a capability —
+`r17-browser.txt` §3 shows the client taking pointer lock, turning with the
+mouse and strafejumping past ground speed under that same driver.
+
+---
+
+## `r17-*` — straf3 runs in a browser, on a real GPU, at a URL
+
+| file | what it is |
+|---|---|
+| `r17-browser.txt` | the transcript: URL, Chrome version, WebGPU adapter, bundle size, map compile, frame pacing in two windows with the host contention measured beside each, and the swiftshader flag comparison. |
+| `r17-browser-window.png` | coil's strafe corridor, rendered by the wasm build through WebGPU and captured out of the browser window. |
+
+Reproduce:
+
+```sh
+crates/straf3-game/web/build.sh
+node crates/straf3-game/web/serve.mjs 8790 &
+CHROME="C:/Program Files/Google/Chrome/Application/chrome.exe" \
+CHROME_FLAGS="--no-first-run --no-default-browser-check" \
+  node crates/straf3-game/web/drive.mjs \
+       crates/straf3-game/web/steps/r17-evidence.json --headful
+```
+
+**`CHROME_FLAGS` must be overridden.** `drive.mjs` defaults it to
+`--enable-unsafe-webgpu --use-angle=swiftshader`, written for a GPU-less WSL2
+box. Measured here (§5 of the transcript): with those flags Chrome offers **no**
+WebGPU adapter at all on this host and the client refuses — so the default fails
+loudly rather than silently recording on software, but it still tests nothing.
+
+**Why the adapter is named from `adapter.info` and not from the render log.**
+`crates/straf3-render/src/gfx.rs` prints wgpu's `AdapterInfo`, and on the WebGPU
+backend that is `adapter="" type=Other` — the WebGPU spec exposes neither an
+adapter name nor a device type to wgpu, so that line structurally cannot
+identify the GPU in a browser. `navigator.gpu.requestAdapter()` then
+`adapter.info` gives `vendor "nvidia" / architecture "ampere"`, which is what a
+stock Chrome will say about a GA104.
+
+**Pacing numbers carry their contention.** Both windows are published: a quiet
+one (p99.9 = 7.3 ms, 0.05 % of frames over budget) and one taken while the host
+sat at 100 % CPU (p99.9 = 24.3 ms, 0.36 % over). The median is 6.1 ms in both.
+A pacing number without the contention beside it is not a measurement, and
+`probes/pacing`'s contention watcher was never committed, so `typeperf` by hand
+is the instrument.
+
 Reproduce:
 
 ```sh

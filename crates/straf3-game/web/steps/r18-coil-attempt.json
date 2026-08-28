@@ -1,0 +1,522 @@
+[
+ {
+  "do": "cdp",
+  "method": "Page.bringToFront"
+ },
+ {
+  "do": "navigate",
+  "url": "http://127.0.0.1:8790/play/coil?p=cpm"
+ },
+ {
+  "do": "wait",
+  "until": "globalThis.__straf3_module && __straf3_module.straf3_debug_state() !== null",
+  "timeout_ms": 60000
+ },
+ {
+  "do": "cdp",
+  "method": "Emulation.setFocusEmulationEnabled",
+  "params": {
+   "enabled": true
+  }
+ },
+ {
+  "do": "cdp",
+  "method": "Page.bringToFront"
+ },
+ {
+  "do": "click",
+  "x": 640,
+  "y": 360
+ },
+ {
+  "do": "sleep",
+  "ms": 500
+ },
+ {
+  "do": "hold",
+  "keys": [
+   "KeyW"
+  ],
+  "ms": 520,
+  "sample_ms": 600
+ },
+ {
+  "do": "look_to",
+  "yaw": 123,
+  "pitch": 0
+ },
+ {
+  "do": "recenter",
+  "x": 380,
+  "y": 360
+ },
+ {
+  "do": "hold",
+  "keys": [
+   "KeyW"
+  ],
+  "tap": [
+   "Space"
+  ],
+  "ms": 400,
+  "sample_ms": 400
+ },
+ {
+  "do": "hold",
+  "keys": [
+   "KeyD"
+  ],
+  "tap": [
+   "Space"
+  ],
+  "mouse": [
+   200,
+   0
+  ],
+  "ms": 450,
+  "sample_ms": 400
+ },
+ {
+  "do": "hold",
+  "keys": [
+   "KeyA"
+  ],
+  "tap": [
+   "Space"
+  ],
+  "mouse": [
+   -200,
+   0
+  ],
+  "ms": 450,
+  "sample_ms": 400
+ },
+ {
+  "do": "hold",
+  "keys": [
+   "KeyD"
+  ],
+  "tap": [
+   "Space"
+  ],
+  "mouse": [
+   200,
+   0
+  ],
+  "ms": 450,
+  "sample_ms": 400
+ },
+ {
+  "do": "hold",
+  "keys": [
+   "KeyA"
+  ],
+  "tap": [
+   "Space"
+  ],
+  "mouse": [
+   -200,
+   0
+  ],
+  "ms": 450,
+  "sample_ms": 400
+ },
+ {
+  "do": "hold",
+  "keys": [
+   "KeyD"
+  ],
+  "tap": [
+   "Space"
+  ],
+  "mouse": [
+   200,
+   0
+  ],
+  "ms": 450,
+  "sample_ms": 400
+ },
+ {
+  "do": "hold",
+  "keys": [
+   "KeyA"
+  ],
+  "tap": [
+   "Space"
+  ],
+  "mouse": [
+   -200,
+   0
+  ],
+  "ms": 450,
+  "sample_ms": 400
+ },
+ {
+  "do": "hold",
+  "keys": [
+   "KeyD"
+  ],
+  "tap": [
+   "Space"
+  ],
+  "mouse": [
+   200,
+   0
+  ],
+  "ms": 450,
+  "sample_ms": 400
+ },
+ {
+  "do": "hold",
+  "keys": [
+   "KeyA"
+  ],
+  "tap": [
+   "Space"
+  ],
+  "mouse": [
+   -200,
+   0
+  ],
+  "ms": 450,
+  "sample_ms": 400
+ },
+ {
+  "do": "hold",
+  "keys": [
+   "KeyD"
+  ],
+  "tap": [
+   "Space"
+  ],
+  "mouse": [
+   200,
+   0
+  ],
+  "ms": 450,
+  "sample_ms": 400
+ },
+ {
+  "do": "hold",
+  "keys": [
+   "KeyA"
+  ],
+  "tap": [
+   "Space"
+  ],
+  "mouse": [
+   -200,
+   0
+  ],
+  "ms": 450,
+  "sample_ms": 400
+ },
+ {
+  "do": "hold",
+  "keys": [
+   "KeyD"
+  ],
+  "tap": [
+   "Space"
+  ],
+  "mouse": [
+   200,
+   0
+  ],
+  "ms": 450,
+  "sample_ms": 400
+ },
+ {
+  "do": "hold",
+  "keys": [
+   "KeyA"
+  ],
+  "tap": [
+   "Space"
+  ],
+  "mouse": [
+   -200,
+   0
+  ],
+  "ms": 450,
+  "sample_ms": 400
+ },
+ {
+  "do": "hold",
+  "keys": [
+   "KeyD"
+  ],
+  "tap": [
+   "Space"
+  ],
+  "mouse": [
+   200,
+   0
+  ],
+  "ms": 450,
+  "sample_ms": 400
+ },
+ {
+  "do": "hold",
+  "keys": [
+   "KeyA"
+  ],
+  "tap": [
+   "Space"
+  ],
+  "mouse": [
+   -200,
+   0
+  ],
+  "ms": 450,
+  "sample_ms": 400
+ },
+ {
+  "do": "hold",
+  "keys": [
+   "KeyD"
+  ],
+  "tap": [
+   "Space"
+  ],
+  "mouse": [
+   200,
+   0
+  ],
+  "ms": 450,
+  "sample_ms": 400
+ },
+ {
+  "do": "hold",
+  "keys": [
+   "KeyA"
+  ],
+  "tap": [
+   "Space"
+  ],
+  "mouse": [
+   -200,
+   0
+  ],
+  "ms": 450,
+  "sample_ms": 400
+ },
+ {
+  "do": "hold",
+  "keys": [
+   "KeyD"
+  ],
+  "tap": [
+   "Space"
+  ],
+  "mouse": [
+   200,
+   0
+  ],
+  "ms": 450,
+  "sample_ms": 400
+ },
+ {
+  "do": "hold",
+  "keys": [
+   "KeyA"
+  ],
+  "tap": [
+   "Space"
+  ],
+  "mouse": [
+   -200,
+   0
+  ],
+  "ms": 450,
+  "sample_ms": 400
+ },
+ {
+  "do": "hold",
+  "keys": [
+   "KeyD"
+  ],
+  "tap": [
+   "Space"
+  ],
+  "mouse": [
+   200,
+   0
+  ],
+  "ms": 450,
+  "sample_ms": 400
+ },
+ {
+  "do": "hold",
+  "keys": [
+   "KeyA"
+  ],
+  "tap": [
+   "Space"
+  ],
+  "mouse": [
+   -200,
+   0
+  ],
+  "ms": 450,
+  "sample_ms": 400
+ },
+ {
+  "do": "hold",
+  "keys": [
+   "KeyD"
+  ],
+  "tap": [
+   "Space"
+  ],
+  "mouse": [
+   200,
+   0
+  ],
+  "ms": 450,
+  "sample_ms": 400
+ },
+ {
+  "do": "hold",
+  "keys": [
+   "KeyA"
+  ],
+  "tap": [
+   "Space"
+  ],
+  "mouse": [
+   -200,
+   0
+  ],
+  "ms": 450,
+  "sample_ms": 400
+ },
+ {
+  "do": "hold",
+  "keys": [
+   "KeyD"
+  ],
+  "tap": [
+   "Space"
+  ],
+  "mouse": [
+   200,
+   0
+  ],
+  "ms": 450,
+  "sample_ms": 400
+ },
+ {
+  "do": "hold",
+  "keys": [
+   "KeyA"
+  ],
+  "tap": [
+   "Space"
+  ],
+  "mouse": [
+   -200,
+   0
+  ],
+  "ms": 450,
+  "sample_ms": 400
+ },
+ {
+  "do": "hold",
+  "keys": [
+   "KeyD"
+  ],
+  "tap": [
+   "Space"
+  ],
+  "mouse": [
+   200,
+   0
+  ],
+  "ms": 450,
+  "sample_ms": 400
+ },
+ {
+  "do": "hold",
+  "keys": [
+   "KeyA"
+  ],
+  "tap": [
+   "Space"
+  ],
+  "mouse": [
+   -200,
+   0
+  ],
+  "ms": 450,
+  "sample_ms": 400
+ },
+ {
+  "do": "hold",
+  "keys": [
+   "KeyD"
+  ],
+  "tap": [
+   "Space"
+  ],
+  "mouse": [
+   200,
+   0
+  ],
+  "ms": 450,
+  "sample_ms": 400
+ },
+ {
+  "do": "hold",
+  "keys": [
+   "KeyA"
+  ],
+  "tap": [
+   "Space"
+  ],
+  "mouse": [
+   -200,
+   0
+  ],
+  "ms": 450,
+  "sample_ms": 400
+ },
+ {
+  "do": "hold",
+  "keys": [
+   "KeyD"
+  ],
+  "tap": [
+   "Space"
+  ],
+  "mouse": [
+   200,
+   0
+  ],
+  "ms": 450,
+  "sample_ms": 400
+ },
+ {
+  "do": "hold",
+  "keys": [
+   "KeyA"
+  ],
+  "tap": [
+   "Space"
+  ],
+  "mouse": [
+   -200,
+   0
+  ],
+  "ms": 450,
+  "sample_ms": 400
+ },
+ {
+  "do": "eval",
+  "js": "__straf3_module.straf3_debug_state()"
+ },
+ {
+  "do": "save_run",
+  "path": "docs/web/evidence/r6-browser.s3d"
+ }
+]

@@ -1,0 +1,348 @@
+=== r17 — straf3 running in a browser, on a real GPU ===
+
+The first time in this project's history that a browser number means anything.
+Every prior wave ran under WSL2, where Chrome had no hardware WebGPU adapter and
+`drive.mjs` reached for `--use-angle=swiftshader` to get a software one. This
+host is native Windows with a discrete GPU, so the adapter, the frame pacing and
+the present mode below are measurements rather than placeholders.
+
+  host      DESKTOP-G99TTEO — Windows 10 19045, 12 logical cores,
+            NVIDIA GeForce RTX 3060 Ti, 1920x1080 @ 165 Hz
+  captured  2026-08-28 (UTC), git HEAD f8d8b2e
+  URL       http://127.0.0.1:8790/play/coil?p=cpm
+
+------------------------------------------------------------------------------
+1. THE URL, AND HOW IT IS SERVED
+
+  crates/straf3-game/web/build.sh          # builds the bundle into web/pkg
+  node crates/straf3-game/web/serve.mjs    # serves it on 127.0.0.1:8790
+
+`serve.mjs` mounts `/client/` and `/assets/maps/` and routes `/play/*` to the
+shell, so the URL above is opened by hand in any browser on this machine. It is
+not a fixture: the same path shape is what `web/dev/serve.mjs` serves on 8787.
+
+Bundle actually downloaded by a visitor (build.sh's own measurement, with
+wasm-opt -Oz present — binaryen 132, installed on this host for the purpose):
+
+    straf3_game_bg.wasm      512413 B      213656 B gzipped
+    straf3_game.js            99200 B       16405 B gzipped
+    TOTAL                                   230724 B gzipped
+
+The `egui`/`epaint`/`ecolor` byte-scan gate in build.sh passed: none present.
+
+------------------------------------------------------------------------------
+2. THE BROWSER AND THE ADAPTER
+
+    Chrome/151.0.0.0  (Mozilla/5.0 (Windows NT 10.0; Win64; x64)
+                       AppleWebKit/537.36 (KHTML, like Gecko) Safari/537.36)
+    navigator.hardwareConcurrency = 12, devicePixelRatio = 1
+    screen 1920x1080, canvas 1264x625 CSS px
+
+`navigator.gpu.requestAdapter({powerPreference:'high-performance'})` then
+`adapter.info`:
+
+    vendor        "nvidia"
+    architecture  "ampere"
+    device        ""            <- masked by Chrome (see note)
+    description   ""            <- masked by Chrome
+    subgroupMinSize 32, subgroupMaxSize 32
+    featureCount 19, maxTextureDimension2D 16384
+
+The 3060 Ti is GA104, which is Ampere, so `nvidia`/`ampere` identifies it as far
+as the browser will say. `device` and `description` are empty by Chrome's
+default privacy policy, not because the adapter is anonymous — revealing them
+needs `--enable-webgpu-developer-features`, which was deliberately NOT set so
+that this transcript reflects a stock browser.
+
+WHAT `straf3-render` LOGS, and why it cannot be the adapter evidence here:
+
+    straf3-render: backend=BrowserWebGpu adapter="" type=Other
+    straf3-render: present_mode=fifo (requested adapter's first)
+                   frame_latency=2 available=[fifo]
+    straf3-render: map is 312 triangles
+
+`gfx.rs` prints wgpu's `AdapterInfo`, and on the WebGPU backend wgpu can only
+report what the WebGPU spec exposes — which does not include an adapter name or
+a device type. So `adapter=""` and `type=Other` are structural, not a failure,
+and on this backend that line CANNOT name the GPU. The `adapter.info` block
+above is the admissible evidence, together with the flag comparison in §5.
+
+    available=[fifo] is a finding in its own right: the browser offers no
+    present mode but vsync. There is no mailbox and no immediate, so a browser
+    player cannot trade latency for tearing the way the native build can.
+
+------------------------------------------------------------------------------
+3. THE CLIENT ACTUALLY STARTED
+
+    [straf3 loading] loading coil...
+    map: 26 hulls, 4 triggers, 312 triangles, collision digest 0x47263b8845d8bb4b
+    map `coil` compiled in wasm: collision digest 0x47263b8845d8bb4b,
+        26 hulls, 4 triggers
+    [straf3 ready]
+    straf3 0.1.0 in the browser - coil, `cpm` physics (4350ccc31bec5d4c), 125 Hz
+
+`coil.map` is fetched over HTTP and compiled by the wasm build at runtime; the
+collision digest above is the browser's own answer. Physics is `cpm`
+(4350ccc31bec5d4c) at the canonical 125 Hz, taken from an unqualified
+`?p=cpm` link — no `?backend=` was passed, so `pickBackend()` really did call
+`requestAdapter()` rather than being told the answer.
+
+Interaction, all confirmed under CDP against the running client:
+  - pointer lock taken (`document.pointerLockElement === "straf3-canvas"`)
+  - mouse-look turns the view (`look_to` closes the loop on the client's own
+    reported yaw, reaching 128.04 deg against a 128 deg request)
+  - WASD moves, Space jumps, and strafejumping accelerates past ground speed:
+    320 ups walking, 452.9 ups peak in this transcript and 470 ups in a
+    sibling run, sustained down the full 1536-unit strafe corridor
+  - the run clock started at the start trigger (`run 0:00.776` in telemetry)
+
+------------------------------------------------------------------------------
+4. FRAME PACING — TWO WINDOWS, EACH WITH ITS CONTENTION MEASURED
+
+Sampled in the page from consecutive `requestAnimationFrame` timestamps, which
+is the cadence winit's web backend drives the game on, so these are presented
+frames. First 30 discarded. Taken WHILE PLAYING (strafejumping down the
+corridor), not standing still.
+
+  (a) QUIET WINDOW  - CPU before the run: 7.9 / 8.3 / 30.9 / 41.0 %
+
+        frames            1874
+        mean              6.093 ms   -> 164.1 fps
+        p50               6.1 ms
+        p95               6.1 ms
+        p99               6.2 ms
+        p99.9             7.3 ms
+        min / max         4.8 / 66.8 ms
+        over 8.33 ms      0.05 %
+        over 16.7 ms      0.05 %
+        client's own fps counter: 165
+
+  (b) SATURATED WINDOW - CPU during the run: 30 samples, mean 100.0 %,
+      max 100.0 % (a sibling seat's cargo build, 14 rustc processes)
+
+        frames             839
+        mean              6.140 ms   -> 162.9 fps
+        p50               6.1 ms
+        p95               6.2 ms
+        p99               6.3 ms
+        p99.9            24.3 ms
+        min / max         5.8 / 24.3 ms
+        over 8.33 ms      0.83 %
+        over 16.7 ms      0.36 %
+        client's own fps counter: 157
+
+The pair is more informative than either alone. A 165 Hz display has a 6.06 ms
+budget; the median frame hits it in both windows, and full CPU saturation moves
+the median by 0.05 ms. What saturation costs is the TAIL: p99.9 goes 7.3 -> 24.3
+ms and the missed-frame rate goes 0.05 % -> 0.36 %, roughly a dropped frame
+every 1.5 seconds. That is the honest shape of the risk in a browser.
+
+Both numbers are from a HEADFUL Chrome window on the real display. A headless
+number would be a different claim and is not made here.
+
+------------------------------------------------------------------------------
+5. THE DEFAULT DRIVER FLAGS DO NOT SILENTLY GIVE SOFTWARE HERE
+
+`drive.mjs` defaults CHROME_FLAGS to `--enable-unsafe-webgpu
+--use-angle=swiftshader`, written for a GPU-less WSL2 box. Whether that forces a
+software WebGPU adapter on native Windows was an open question, so it was
+measured rather than reasoned about. Same URL, same build, flags the only
+difference:
+
+  with `--enable-unsafe-webgpu --use-angle=swiftshader`
+      navigator.gpu present, requestAdapter() returned NULL
+      the client refused, showing its own message:
+        "straf3 needs WebGPU, and this browser did not offer an adapter."
+
+  with those flags omitted (what every run above used)
+      adapter.info -> vendor "nvidia", architecture "ampere"
+
+So on this host the bad flags produce NO adapter rather than a software one:
+the failure is loud and the client stops, rather than quietly recording a run on
+a software rasteriser. That is the safe direction, and it is now measured.
+All runs above were taken with:
+
+  CHROME="C:/Program Files/Google/Chrome/Application/chrome.exe" \
+  CHROME_FLAGS="--no-first-run --no-default-browser-check" \
+  node crates/straf3-game/web/drive.mjs \
+       crates/straf3-game/web/steps/r17-evidence.json --headful
+
+------------------------------------------------------------------------------
+6. THE VERDICT r17 ASKS FOR: PLAYABLE, OR MERELY RUNNING?
+
+Merely running is comfortably beaten. It loads, takes the pointer, turns with
+the mouse, and strafejumps to 450+ ups down a real course at a locked 165 Hz
+with a 6.1 ms median. On the evidence here the rendering and input path are not
+what would stop someone competing in a browser.
+
+What this transcript does NOT establish, and neither should anything citing it:
+
+  - NOBODY HAS PLAYED IT. Every input above was dispatched by `drive.mjs` over
+    CDP. Input latency as felt by a hand is not measured, and `frame_latency=2`
+    with fifo as the only present mode is exactly where a browser would be
+    expected to lose to the native build. A scripted driver cannot notice that.
+  - NO RUN WAS FINISHED, so this is not r18 or r19 evidence. `RunSink` fires
+    only on crossing the finish trigger. The scripted driver reaches the ramp
+    wave at ~450 ups and is stopped by the optimisation coil's own header
+    documents ("575 ups lands you flat on the pad ... below it you land on
+    ramp_c's 45-degree face and the clip into that plane takes most of your
+    speed away"). The bot is defeated by the course's difficulty, which is a
+    statement about the bot, not about the browser.
+  - The 120 Hz browser class in VISION section 9 is not settled by one machine
+    with a discrete GPU on localhost. This is an existence proof on good
+    hardware, not a claim about the median visitor.
+
+------------------------------------------------------------------------------
+7. FULL TRANSCRIPT
+
+Every line below is `drive.mjs` output: one JSON object per step, then the
+page's console. `samples` inside a `hold` step are the client's own
+`straf3_debug_state()` readings - time, position, yaw, speed, ground/air, run
+state - so the player's motion is visible rather than asserted.
+
+### run A - the evidence run (quiet window, pacing 4a) ###
+{"step":"cdp","cdp":"Page.bringToFront","result":{}}
+{"step":"eval","value":{"userAgent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36","hardwareConcurrency":12,"dpr":1}}
+{"step":"navigate","url":"http://127.0.0.1:8790/play/coil?p=cpm"}
+{"step":"wait","waited":"globalThis.__straf3_module && __straf3_module.straf3_debug_state() !== null"}
+{"step":"eval","value":{"vendor":"nvidia","architecture":"ampere","device":"","description":"","subgroupMinSize":32,"subgroupMaxSize":32,"isFallbackAdapter":null,"featureCount":19,"maxTextureDimension2D":16384,"maxComputeWorkgroupStorageSize":32768}}
+{"step":"eval","value":{"screen":[1920,1080],"canvas":[1264,625]}}
+{"step":"cdp","cdp":"Emulation.setFocusEmulationEnabled","result":{}}
+{"step":"cdp","cdp":"Page.bringToFront","result":{}}
+{"step":"click","clicked":[640,360]}
+{"step":"sleep","slept":500}
+{"step":"eval","value":{"pointerLockElement":"straf3-canvas"}}
+{"step":"hold","held":["KeyW"],"ms":520,"samples":["t656 (-312,-736,24) yaw0 230ups gnd run0:0"]}
+{"step":"look_to","look_to":{"yaw":128,"pitch":0},"reached":{"yaw":128.04,"pitch":0},"attempts":["err(128.0,0.0) move(-580,0)","err(85.9,-6.2) move(0,-56)","err(64.2,6.2) move(0,56)","err(64.2,0.0) move(0,0)","err(64.2,0.0) move(-584,0)"]}
+{"step":"recenter","recentered":[640,360]}
+{"step":"eval","value":"sampler armed"}
+{"step":"hold","held":["KeyW"],"ms":400,"samples":["t6160 (-113,-735,46) yaw128 28ups air run0:0"]}
+{"step":"hold","held":["KeyD"],"ms":450,"samples":["t6624 (-135,-699,50) yaw113 144ups air run0:0"]}
+{"step":"hold","held":["KeyA"],"ms":450,"samples":["t7080 (-60,-644,95) yaw66 221ups air run0:0"]}
+{"step":"hold","held":["KeyD"],"ms":450,"samples":["t7552 (-90,-542,78) yaw113 250ups air run0:0"]}
+{"step":"hold","held":["KeyA"],"ms":450,"samples":["t8008 (-56,-433,95) yaw66 278ups air run0:0"]}
+{"step":"hold","held":["KeyD"],"ms":450,"samples":["t8480 (-90,-306,78) yaw113 305ups air run0:0"]}
+{"step":"hold","held":["KeyA"],"ms":450,"samples":["t8944 (-52,-173,96) yaw66 327ups air run0:0"]}
+{"step":"hold","held":["KeyD"],"ms":450,"samples":["t9408 (-90,-28,78) yaw113 350ups air run0:0"]}
+{"step":"hold","held":["KeyA"],"ms":450,"samples":["t9872 (-48,125,96) yaw66 372ups air run1:328"]}
+{"step":"hold","held":["KeyD"],"ms":450,"samples":["t10336 (-89,289,78) yaw113 392ups air run1:792"]}
+{"step":"hold","held":["KeyA"],"ms":450,"samples":["t10808 (-43,463,98) yaw66 411ups air run1:1264"]}
+{"step":"hold","held":["KeyD"],"ms":450,"samples":["t11256 (-87,637,80) yaw113 429ups air run1:1712"]}
+{"step":"hold","held":["KeyA"],"ms":450,"samples":["t11736 (-41,826,96) yaw66 430ups air run1:2192"]}
+{"step":"hold","held":["KeyD"],"ms":450,"samples":["t12208 (-85,1015,76) yaw113 424ups air run1:2664"]}
+{"step":"hold","held":["KeyA"],"ms":450,"samples":["t12664 (-35,1197,96) yaw66 441ups air run1:3120"]}
+{"step":"hold","held":["KeyD"],"ms":450,"samples":["t13112 (-76,1384,81) yaw113 457ups air run1:3568"]}
+{"step":"hold","held":["KeyA"],"ms":450,"samples":["t13584 (-22,1584,95) yaw66 470ups air run1:4040"]}
+{"step":"hold","held":["KeyD"],"ms":450,"samples":["t14040 (-63,1766,157) yaw113 348ups air run1:4496"]}
+{"step":"hold","held":["KeyA"],"ms":450,"samples":["t14504 (-19,1918,180) yaw66 367ups air run1:4960"]}
+{"step":"hold","held":["KeyD"],"ms":450,"samples":["t14960 (-41,2034,57) yaw113 85ups gnd run1:5416"]}
+{"step":"hold","held":["KeyA"],"ms":450,"samples":["t15432 (-10,2040,142) yaw66 77ups air run1:5888"]}
+{"step":"hold","held":["KeyD"],"ms":450,"samples":["t15904 (-34,2057,119) yaw113 30ups air run1:6360"]}
+{"step":"hold","held":["KeyA"],"ms":450,"samples":["t16368 (-17,2067,169) yaw66 62ups air run1:6824"]}
+{"step":"hold","held":["KeyD"],"ms":450,"samples":["t16832 (-28,2071,158) yaw113 79ups air run1:7288"]}
+{"step":"hold","held":["KeyA"],"ms":450,"samples":["t17296 (-7,2052,185) yaw66 30ups air run1:7752"]}
+{"step":"eval","value":{"frames":1874,"mean_ms":6.093,"fps_from_mean":164.1,"p50_ms":6.1,"p95_ms":6.1,"p99_ms":6.2,"p999_ms":7.3,"max_ms":66.8,"min_ms":4.8,"pct_over_8_33ms":0.05,"pct_over_16_7ms":0.05,"game_fps":165}}
+{"step":"eval","value":{"tick":2208,"time_ms":17664,"x":-19.101917266845703,"y":2056.4814453125,"z":82.87467193603516,"pitch":4.76837158203125e-7,"yaw":128.0399627685547,"speed":45.016258239746094,"grounded":false,"pointer_locked":true,"run":1,"run_ms":8120,"fps":165}}
+{"step":"screenshot","screenshot":"docs/web/evidence/r17-browser-window.png"}
+{"step":"save_run","saved":null}
+{
+ "console": [
+  "log: [straf3 loading] loading coil…",
+  "info: map: 26 hulls, 4 triggers, 312 triangles, collision digest 0x47263b8845d8bb4b",
+  "info: map `coil` compiled in wasm: collision digest 0x47263b8845d8bb4b, 26 hulls, 4 triggers",
+  "log: [straf3 ready] ",
+  "info: straf3 0.1.0 in the browser — coil, `cpm` physics (4350ccc31bec5d4c), 125 Hz",
+  "info: straf3 0.1.0 — world Map, cpm profile, 125 Hz (8 ms commands). Click to capture the mouse, Esc to release, R to respawn.",
+  "log: straf3-render: backend=BrowserWebGpu adapter=\"\" type=Other",
+  "log: straf3-render: present_mode=fifo (requested adapter's first) frame_latency=2 available=[fifo]",
+  "log: straf3-render: map is 312 triangles",
+  "info: pointer lock taken",
+  "log: [straf3] pointer lock taken",
+  "info: speed  320.0 ups   origin (  -208.3   -736.0     24.1)   ground   tick 123   sim 984 ms   150 fps   clear 0.125",
+  "info: speed    0.0 ups   origin (  -111.7   -736.0     24.1)   ground   tick 249   sim 1992 ms   166 fps   clear 0.125",
+  "info: pointer lock released",
+  "log: [straf3] pointer lock released",
+  "info: speed    0.0 ups   origin (  -111.7   -736.0     24.1)   ground   tick 374   sim 2992 ms   165 fps   clear 0.125",
+  "info: pointer lock taken",
+  "log: [straf3] pointer lock taken",
+  "info: speed    0.0 ups   origin (  -111.7   -736.0     24.1)   ground   tick 499   sim 3992 ms   165 fps   clear 0.125",
+  "info: pointer lock released",
+  "log: [straf3] pointer lock released",
+  "info: speed    0.0 ups   origin (  -111.7   -736.0     24.1)   ground   tick 624   sim 4992 ms   165 fps   clear 0.125",
+  "info: pointer lock taken",
+  "log: [straf3] pointer lock taken",
+  "info: speed    0.0 ups   origin (  -111.7   -736.0     24.1)   ground   tick 749   sim 5992 ms   165 fps   clear 0.125",
+  "info: speed  281.0 ups   origin (   -76.6   -657.1     78.7)   air      tick 874   sim 6992 ms   164 fps   clear 54.663",
+  "info: speed  276.7 ups   origin (   -57.1   -436.9     92.6)   air      tick 999   sim 7992 ms   165 fps   clear 68.631",
+  "info: speed  328.1 ups   origin (   -47.8   -157.7    102.5)   air      tick 1124   sim 8992 ms   164 fps   clear 78.451",
+  "info: speed  375.7 ups   origin (   -39.4    169.2    108.1)   air      tick 1249   sim 9992 ms   165 fps   run 0:00.448   clear 84.125",
+  "info: speed  419.3 ups   origin (   -36.4    538.2    109.7)   air      tick 1374   sim 10992 ms   165 fps   run 0:01.448   clear 85.651",
+  "info: speed  438.9 ups   origin (   -39.9    934.6    107.5)   air      tick 1499   sim 11992 ms   163 fps   run 0:02.448   clear 83.527",
+  "info: speed  452.9 ups   origin (   -47.7   1337.2    101.2)   air      tick 1624   sim 12992 ms   165 fps   run 0:03.448   clear 77.219",
+  "info: speed  355.4 ups   origin (   -54.3   1751.6    144.8)   air      tick 1749   sim 13992 ms   164 fps   run 0:04.448   clear 21.467",
+  "info: speed   85.4 ups   origin (   -38.6   2031.5     70.9)   air      tick 1875   sim 15000 ms   155 fps   run 0:05.456   clear 16.319",
+  "info: speed   41.7 ups   origin (   -30.2   2055.7    143.6)   air      tick 2000   sim 16000 ms   164 fps   run 0:06.456   clear 64.894",
+  "info: speed   78.5 ups   origin (   -18.2   2062.1    187.8)   air      tick 2125   sim 17000 ms   165 fps   run 0:07.456   clear 102.722"
+ ]
+}
+
+### run B - the saturated window (pacing 4b) ###
+{"step":"cdp","cdp":"Page.bringToFront","result":{}}
+{"step":"navigate","url":"http://127.0.0.1:8790/play/coil?p=cpm"}
+{"step":"wait","waited":"globalThis.__straf3_module && __straf3_module.straf3_debug_state() !== null"}
+{"step":"eval","value":{"vendor":"nvidia","architecture":"ampere","device":"","description":""}}
+{"step":"cdp","cdp":"Emulation.setFocusEmulationEnabled","result":{}}
+{"step":"cdp","cdp":"Page.bringToFront","result":{}}
+{"step":"click","clicked":[640,360]}
+{"step":"sleep","slept":400}
+{"step":"hold","held":["KeyW"],"ms":520}
+{"step":"look_to","look_to":{"yaw":128,"pitch":0},"reached":{"yaw":128.04,"pitch":0},"attempts":["err(128.0,0.0) move(-580,0)","err(64.2,0.0) move(0,0)","err(64.2,0.0) move(-584,0)"]}
+{"step":"recenter","recentered":[640,360]}
+{"step":"eval","value":"armed"}
+{"step":"hold","held":["KeyW"],"ms":400}
+{"step":"hold","held":["KeyD"],"ms":450,"samples":["t6840 (-132,-697,48) yaw116 151ups air run0:0"]}
+{"step":"hold","held":["KeyA"],"ms":450,"samples":["t7288 (-109,-629,103) yaw59 180ups air run0:0"]}
+{"step":"hold","held":["KeyD"],"ms":450,"samples":["t7776 (-132,-542,57) yaw116 207ups air run0:0"]}
+{"step":"hold","held":["KeyA"],"ms":450,"samples":["t8240 (-103,-448,105) yaw66 236ups air run0:0","t8664 (-134,-357,68) yaw143 261ups air run0:0"]}
+{"step":"hold","held":["KeyD"],"ms":450,"samples":["t8776 (-155,-338,35) yaw132 261ups air run0:0"]}
+{"step":"hold","held":["KeyA"],"ms":450,"samples":["t9264 (-156,-215,110) yaw78 271ups air run0:0","t9688 (-205,-115,40) yaw143 289ups air run0:0"]}
+{"step":"hold","held":["KeyD"],"ms":450,"samples":["t9792 (-221,-92,24) yaw128 306ups gnd run0:0"]}
+{"step":"hold","held":["KeyA"],"ms":450,"samples":["t10272 (-192,58,110) yaw82 328ups air run1:128"]}
+{"step":"hold","held":["KeyD"],"ms":450,"samples":["t10736 (-209,161,24) yaw128 85ups air run1:592"]}
+{"step":"hold","held":["KeyA"],"ms":450,"samples":["t11208 (-104,254,106) yaw82 269ups air run1:1064"]}
+{"step":"eval","value":{"frames":839,"mean_ms":6.14,"fps_from_mean":162.9,"p50_ms":6.1,"p95_ms":6.2,"p99_ms":6.3,"p999_ms":24.3,"max_ms":24.3,"min_ms":5.8,"pct_over_8_33ms":0.83,"pct_over_16_7ms":0.36,"game_fps":157}}
+{"step":"eval","value":{"tick":1450,"time_ms":11600,"x":-153.71719360351562,"y":340.66595458984375,"z":74.28514099121094,"pitch":0,"yaw":143.43995666503906,"speed":281.45269775390625,"grounded":false,"pointer_locked":true,"run":1,"run_ms":1456,"fps":157}}
+{
+ "console": [
+  "log: [straf3 loading] loading coil…",
+  "info: map: 26 hulls, 4 triggers, 312 triangles, collision digest 0x47263b8845d8bb4b",
+  "info: map `coil` compiled in wasm: collision digest 0x47263b8845d8bb4b, 26 hulls, 4 triggers",
+  "log: [straf3 ready] ",
+  "info: straf3 0.1.0 in the browser — coil, `cpm` physics (4350ccc31bec5d4c), 125 Hz",
+  "info: straf3 0.1.0 — world Map, cpm profile, 125 Hz (8 ms commands). Click to capture the mouse, Esc to release, R to respawn.",
+  "log: straf3-render: backend=BrowserWebGpu adapter=\"\" type=Other",
+  "log: straf3-render: present_mode=fifo (requested adapter's first) frame_latency=2 available=[fifo]",
+  "log: straf3-render: map is 312 triangles",
+  "info: pointer lock taken",
+  "log: [straf3] pointer lock taken",
+  "info: speed  320.0 ups   origin (  -280.0   -736.0     24.1)   ground   tick 114   sim 912 ms   124 fps   clear 0.125",
+  "info: speed    0.0 ups   origin (  -106.6   -736.0     24.1)   ground   tick 240   sim 1920 ms   148 fps   clear 0.125",
+  "info: pointer lock released",
+  "log: [straf3] pointer lock released",
+  "info: speed    0.0 ups   origin (  -106.6   -736.0     24.1)   ground   tick 365   sim 2920 ms   162 fps   clear 0.125",
+  "info: pointer lock taken",
+  "log: [straf3] pointer lock taken",
+  "info: speed    0.0 ups   origin (  -106.6   -736.0     24.1)   ground   tick 490   sim 3920 ms   163 fps   clear 0.125",
+  "info: pointer lock released",
+  "log: [straf3] pointer lock released",
+  "info: speed    0.0 ups   origin (  -106.6   -736.0     24.1)   ground   tick 615   sim 4920 ms   161 fps   clear 0.125",
+  "info: pointer lock taken",
+  "log: [straf3] pointer lock taken",
+  "info: speed    0.0 ups   origin (  -106.6   -736.0     24.1)   ground   tick 740   sim 5920 ms   162 fps   clear 0.125",
+  "info: speed  157.7 ups   origin (  -133.9   -684.7     31.1)   air      tick 865   sim 6920 ms   164 fps   clear 7.123",
+  "info: speed  215.7 ups   origin (  -134.6   -511.9     38.3)   air      tick 990   sim 7920 ms   161 fps   clear 14.285",
+  "info: speed  265.1 ups   origin (  -171.8   -304.2     60.5)   air      tick 1115   sim 8920 ms   163 fps   clear 36.547",
+  "info: speed  317.2 ups   origin (  -215.3    -51.3     62.8)   air      tick 1240   sim 9920 ms   164 fps   clear 38.765",
+  "info: speed  330.1 ups   origin (  -171.5    193.6     51.2)   air      tick 1365   sim 10920 ms   157 fps   run 0:00.776   clear 27.165"
+ ]
+}
