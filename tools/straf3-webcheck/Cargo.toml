@@ -1,0 +1,50 @@
+# Standalone on purpose — the empty `[workspace]` table excludes this crate
+# from the root workspace, the same pattern every crate under `probes/` uses.
+#
+# `tools/det-runner` is a workspace *member* and says why: so it resolves its
+# dependencies through the root `Cargo.lock`, because "a check built against a
+# different resolution would be verifying a different tree". That reasoning
+# applies here word for word, and this crate is standalone anyway for a reason
+# that has nothing to do with correctness: the root `Cargo.toml` belongs to
+# another seat this wave and a member line would be an edit outside this one's
+# scope.
+#
+# The reasoning is answered rather than ignored. `webcheck` reads both lock
+# files on every run and refuses to report a verdict when a package the
+# simulation depends on resolved to a different version here than in the
+# workspace — see `lockstep.rs`. That turns "verifying a different tree" from
+# an assumption into a checked precondition, which is stronger than the
+# membership it stands in for: a member crate shares a lock file and never
+# says so out loud.
+[workspace]
+
+[package]
+name = "straf3-webcheck"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.87"
+publish = false
+description = "Re-simulate a .s3d natively and compare the rolling digest, command by command."
+
+[[bin]]
+name = "webcheck"
+path = "src/main.rs"
+
+[dependencies]
+# The real crates by path, not a transcription of them. The whole value of this
+# tool is that the number it computes comes from the code the browser build and
+# the records service also run.
+straf3-sim = { path = "../../crates/straf3-sim" }
+straf3-replay = { path = "../../crates/straf3-replay" }
+straf3-map = { path = "../../crates/straf3-map" }
+
+# No argument parser, no serialiser, no colour crate. Every dependency added
+# here is another package that has to agree with the workspace's resolution,
+# and the three above already bring in everything the simulation touches.
+
+[profile.release]
+# Matches the workspace's release profile. The tool is not timed and this
+# changes no result — it is here so that a `--release` build of the harness is
+# built the same way as a `--release` build of what it checks.
+lto = "thin"
+codegen-units = 1
