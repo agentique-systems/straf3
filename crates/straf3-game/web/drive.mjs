@@ -215,6 +215,14 @@ async function step(s) {
         // silently stop moving part-way through and look like a physics bug.
         // winit ignores OS key repeats, and these are not repeats.
         for (const code of s.keys ?? []) await keyEvent("keyDown", code);
+        // Tapped rather than held. Q3's jump is edge-triggered — holding
+        // +moveup jumps once and then does nothing — so a bunny hop is a
+        // press-release cycle, not a key you lean on.
+        for (const code of s.tap ?? []) {
+          await keyEvent("keyDown", code);
+          await sleep(20);
+          await keyEvent("keyUp", code);
+        }
         if (s.mouse) cursor = await mouseMove(cursor, s.mouse[0], s.mouse[1], 4, 10);
         else await sleep(60);
         if (s.sample_ms && Date.now() >= nextSample) {
