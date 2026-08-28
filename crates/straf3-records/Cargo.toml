@@ -1,0 +1,52 @@
+[package]
+name = "straf3-records"
+description = "The straf3 records service: the /v1 API, and a verifier that re-simulates a run before it ranks."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+# Two binaries, one library, one `cargo build`. The verifier is a separate
+# process from the API for the reason ARCHITECTURE §7.1 gives — re-simulation
+# is unbounded CPU driven by untrusted input and does not belong in the request
+# path — but it is not a separate crate, because it must link exactly the same
+# `straf3-sim` the API's intake decoded against.
+[[bin]]
+name = "straf3-records-api"
+path = "src/bin/api.rs"
+
+[[bin]]
+name = "straf3-records-verifier"
+path = "src/bin/verifier.rs"
+
+[[bin]]
+name = "straf3-records-seed"
+path = "src/bin/seed.rs"
+
+[dependencies]
+# Below the seam. This crate depends downward and never the other way; that is
+# architecture decision D2, and it is the whole reason server-side verification
+# is a link rather than a reimplementation.
+straf3-sim.workspace = true
+straf3-map.workspace = true
+straf3-replay.workspace = true
+
+axum.workspace = true
+tokio.workspace = true
+sqlx.workspace = true
+reqwest.workspace = true
+jsonwebtoken.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+sha2.workspace = true
+zstd.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+log.workspace = true
+env_logger.workspace = true
+
+[dev-dependencies]
+http-body-util.workspace = true
+tower.workspace = true

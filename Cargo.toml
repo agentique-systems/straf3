@@ -11,6 +11,12 @@ members = [
     "crates/straf3-render",
     "crates/straf3-devtools",
     "crates/straf3-game",
+    # The records service. Above the line and firmly so — it links axum, sqlx
+    # and a TLS stack. It depends *downward* on straf3-sim, straf3-replay and
+    # straf3-map because verifying a submitted run means re-simulating it
+    # (architecture decision D2), and the crates below the seam are pure and
+    # headless, which is exactly what makes that legal.
+    "crates/straf3-records",
     # ── automation ──────────────────────────────────────────────────────
     "xtask",
     # The cross-target determinism reference stream (architecture item C2).
@@ -103,6 +109,31 @@ web-sys = "0.3.104"
 js-sys = "0.3.104"
 console_error_panic_hook = "0.1.7"
 console_log = "1.1.0"
+
+# The records service. Above the line, and every one of these is unreachable
+# from below it — `cargo xtask check-seam` is what says so rather than this
+# comment. Versions are what cargo's MSRV-aware resolver picks against the
+# `rust-version` above, which is why sqlx is 0.8 and not 0.9 (0.9 declares
+# 1.94) and jsonwebtoken is 10 and not 11 (11 declares 1.88).
+#
+# Every TLS path here is rustls over *ring*, deliberately: the default
+# `aws-lc-rs` provider needs cmake and a C toolchain to build, and a records
+# service that cannot be built without them is a records service nobody on
+# this team can build.
+axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "query", "tokio"] }
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "signal", "time", "sync"] }
+sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "postgres", "uuid", "chrono", "migrate", "macros"] }
+reqwest = { version = "0.12.28", default-features = false, features = ["rustls-tls", "json"] }
+# EdDSA only — the Neon Auth JWKS signs Ed25519 (OKP), verified against the
+# live endpoint, not assumed. `rust_crypto` keeps that pure Rust.
+jsonwebtoken = { version = "10.3.0", default-features = false, features = ["rust_crypto"] }
+uuid = { version = "1.26.0", features = ["v4", "serde"] }
+chrono = { version = "0.4.45", default-features = false, features = ["std", "clock", "serde"] }
+sha2 = "0.11.0"
+zstd = "0.13.3"
+serde_json = "1.0.151"
+http-body-util = "0.1.3"
+tower = "0.5.2"
 
 [profile.dev]
 opt-level = 1        # the simulation is unusable to feel at opt-level 0
