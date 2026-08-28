@@ -137,7 +137,6 @@ pub fn profile_bits(profile: &PhysicsProfile) -> Vec<u8> {
         slide_duration_ms,
         dash_speed,
         dash_window_ms,
-        dash_entry_speed,
         wall_jump_velocity,
         wall_contact_window_ms,
         wall_normal_max,
@@ -178,9 +177,6 @@ pub fn profile_bits(profile: &PhysicsProfile) -> Vec<u8> {
     out.extend_from_slice(&slide_duration_ms.to_le_bytes());
     scalar(dash_speed, &mut out);
     out.extend_from_slice(&dash_window_ms.to_le_bytes());
-    // canon §1.5's pre-registered dash retune. Must stay byte-for-byte in
-    // step with `straf3_replay::physics_digest`, which this function mirrors.
-    scalar(dash_entry_speed, &mut out);
     scalar(wall_jump_velocity, &mut out);
     out.extend_from_slice(&wall_contact_window_ms.to_le_bytes());
     scalar(wall_normal_max, &mut out);

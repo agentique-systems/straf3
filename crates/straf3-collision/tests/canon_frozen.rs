@@ -1190,7 +1190,6 @@ fn a_new_profile_field_must_declare_its_canon_value() {
             slide_duration_ms,
             dash_speed,
             dash_window_ms,
-            dash_entry_speed,
             wall_jump_velocity,
             wall_contact_window_ms,
             wall_normal_max,
@@ -1208,14 +1207,6 @@ fn a_new_profile_field_must_declare_its_canon_value() {
             // ── dash ──────────────────────────────────────────────────────
             ("dash_speed", dash_speed),
             ("dash_window_ms", s(dash_window_ms as f32)),
-            // The §1.5 retune's field. Like `wall_normal_max` below it is a
-            // *threshold* rather than an on/off number — zero means "no speed
-            // floor", which is the pre-retune behaviour, so zero does not
-            // disable the dash and `dash_speed`/`dash_window_ms` still do.
-            // Listed here for the same reason `wall_normal_max` is: canon does
-            // carry zero, and an edit that changed that should have to argue
-            // for itself in this test.
-            ("dash_entry_speed", dash_entry_speed),
             // ── wall interaction ──────────────────────────────────────────
             ("wall_jump_velocity", wall_jump_velocity),
             ("wall_contact_window_ms", s(wall_contact_window_ms as f32)),
