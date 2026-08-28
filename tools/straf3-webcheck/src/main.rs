@@ -30,11 +30,33 @@
 //! produced different geometry is refused before anything is simulated rather
 //! than showing up as a movement divergence.
 //!
-//! `--expect-digest` closes the remaining gap: the browser reports its run
-//! digest to the page through `onRunFinished`, out of band from the file. Pass
-//! that value and the tool checks the file's header agrees with what the
-//! browser said, so a header written by a code path that never ran the
-//! simulation cannot pass.
+//! `--expect-digest` establishes **provenance**, and that is a smaller claim
+//! than it sounds. The browser reports its run digest to the page through
+//! `onRunFinished`; pass that value and the tool checks the file's header
+//! agrees with it, binding *this file* to *that browser-reported run*. That
+//! matters concretely: `from-text` produces a native `.s3d` on the same map
+//! under the same profile which also re-simulates to agreement and exits 0, so
+//! without this the two are not distinguishable by the report alone.
+//!
+//! It does **not** prove the browser really ran the simulation, and nothing
+//! here should be written as though it does. Both numbers come out of a single
+//! `Recording::claimed()` in one wasm call, so a header and an out-of-band
+//! digest that were fabricated together agree with each other. The check that
+//! actually catches a fabricated header is elsewhere and stronger:
+//! `crates/straf3-replay/src/codec.rs` re-folds the run digest from the file's
+//! own per-command checksums on load and refuses with
+//! `DigestNotDerivedFromTrace` when they disagree.
+//!
+//! **That check is gated on the trace being present** (`codec.rs`, the
+//! `if trace_present` arm), so a run recorded with `to_bytes()` rather than
+//! `to_bytes_with_checksums()` gets no derivation check at all. The trace is
+//! therefore not only what *localises* a divergence to a command index — it is
+//! what makes the anti-tamper rule exist for that file. Record evidence runs
+//! with the trace.
+//!
+//! The cross-implementation claim rests on neither of these. It rests on the
+//! native re-simulation below: the browser's wasm build folded a digest, this
+//! native build re-folded one from its own stepping, and the two agree.
 //!
 //! # Commands
 //!
