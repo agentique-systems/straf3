@@ -12,13 +12,35 @@
 --      bytes live in `runs.demo_bytes_blob`. §5.1's `demo_key` stays, nullable
 --      and unused, so the column is there the day an object store is.
 --   2. `runs.run_digest` is `bigint`, not `bytea`. §5.1 wrote `bytea` for a
---      `canonical_digest()` that was going to be a wide hash; what
---      `straf3-replay` actually folds, and what `docs/web/URLS.md` §5 fixes as
---      the `<digest16>` in a `/watch/` link, is a `u64` — the same width as
+--      `canonical_digest()` that was never built — `crates/straf3-replay/src/
+--      digest.rs` defines exactly two digests, the rolling run digest and the
+--      file's content digest, and both are `u64`. What `docs/web/URLS.md` §5
+--      fixes as the `<digest16>` in a `/watch/` link is that same `u64`, "the
+--      column §5.1 puts a global unique index on" — the same width as
 --      `physics_profiles.digest` and `sim_builds.build_hash`, which §5.1
 --      already stores as `bigint`. Postgres has no unsigned integer, so the
 --      value is stored as the two's-complement reinterpretation of the u64 and
 --      is only ever rendered as 16 lowercase hex digits.
+--
+--      WHAT THAT SUBSTITUTION COSTS, stated rather than claimed away. §8.3
+--      rests first-submitter ownership on this unique index, and §7.2 step 2
+--      has intake decode *without simulating*. The rolling digest cannot be
+--      computed without simulating, so at intake it is only ever **read from
+--      the header** — a client-supplied value. Someone who downloads a ranked
+--      demo, perturbs a checksum in its trace and rewrites the header digest to
+--      match gets a *different* `run_digest`, and therefore a fresh row rather
+--      than the `409` §8.3 promises.
+--
+--      The property that survives is the one that matters: **the index no
+--      longer prevents a duplicate row, but verification still prevents a
+--      duplicate ranked entry.** Two things make that true. `Recording::
+--      from_bytes` re-folds the stored trace and refuses a header digest that
+--      was not derived from it, so a forgery must be internally consistent
+--      rather than merely edited. And the verifier recomputes the rolling
+--      digest from the commands themselves: a header digest that disagrees with
+--      what those commands actually produce is `divergent`, and `runs.time_ms`
+--      is written only for `verified`. A forged row can be created. It cannot
+--      be ranked. `crates/straf3-records/tests/api.rs` asserts exactly that.
 --   3. `identities` carries one row per Neon Auth subject. The table shape is
 --      §5.1's unchanged; `provider` is always 'neon-auth' and
 --      `provider_user_id` is the token's `sub`. Neon Auth supersedes

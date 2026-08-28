@@ -17,6 +17,8 @@
 
 #![allow(dead_code)]
 
+pub mod fixture;
+
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use axum::Router;
@@ -42,9 +44,42 @@ pub struct Harness {
 
 static SEQ: AtomicU32 = AtomicU32::new(0);
 
-/// The connection string, or `None` when the environment has not supplied one.
+/// The connection string these tests use, or `None` when the environment has
+/// not supplied one.
+///
+/// # Why this is not `DATABASE_URL` verbatim
+///
+/// `DATABASE_URL` names Neon's **pooled** endpoint, which is PgBouncer in
+/// transaction-pooling mode. That is the right endpoint for the service: it
+/// runs one statement at a time and holds no session state.
+///
+/// It is the wrong endpoint for these tests, and measurably so — the first run
+/// of this suite against it hung with no output and no CPU. Two things here
+/// need a *session* rather than a transaction:
+///
+/// - `set search_path to <schema>`, which is how each test gets an isolated
+///   schema. A transaction-mode pooler may hand the next transaction a
+///   different backend, where that setting was never made.
+/// - `sqlx`'s migrator, which takes a **session-scoped** `pg_advisory_lock`.
+///   Through a transaction pooler the unlock can land on a different backend
+///   than the lock, and the next migration waits forever on a lock nobody
+///   holds.
+///
+/// So the tests use Neon's direct endpoint, which is the pooled host with
+/// `-pooler` removed — Neon's own convention, and the transformation is done
+/// here rather than by adding a second credential to `.env`. Override with
+/// `STRAF3_TEST_DATABASE_URL` if a deployment spells it differently.
 pub fn database_url() -> Option<String> {
-    std::env::var("DATABASE_URL").ok().filter(|u| !u.is_empty())
+    if let Some(explicit) = std::env::var("STRAF3_TEST_DATABASE_URL")
+        .ok()
+        .filter(|u| !u.is_empty())
+    {
+        return Some(explicit);
+    }
+    std::env::var("DATABASE_URL")
+        .ok()
+        .filter(|u| !u.is_empty())
+        .map(|url| url.replace("-pooler.", "."))
 }
 
 /// Skip the calling test, saying so, when there is no database.
@@ -112,6 +147,25 @@ impl Harness {
 
         let app = Self::router_for(pool.clone(), jwks);
         Self { pool, app, schema }
+    }
+
+    /// A whole service whose database is not there.
+    ///
+    /// The pool is built lazily against a closed port, so every query fails the
+    /// way a real outage fails — at connect — while every other part of the
+    /// service is the real one. This is the only honest way to test r9's
+    /// "could not answer" half: stubbing the handler would test the stub.
+    pub fn unreachable_database() -> Self {
+        let pool = PgPoolOptions::new()
+            .acquire_timeout(std::time::Duration::from_secs(2))
+            .connect_lazy("postgres://nobody:nothing@127.0.0.1:1/nowhere")
+            .expect("a lazy pool does not connect");
+        let app = Self::router_for(pool.clone(), Jwks::new(None, None));
+        Self {
+            pool,
+            app,
+            schema: String::new(),
+        }
     }
 
     fn router_for(pool: PgPool, jwks: Jwks) -> Router {
