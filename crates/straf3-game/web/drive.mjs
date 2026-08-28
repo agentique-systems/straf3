@@ -12,15 +12,33 @@
 // step's result is printed as one line of JSON, so the transcript of a run is
 // greppable and can be committed as evidence.
 //
-// Chrome is launched with the probe's own flags. This box has no hardware GPU
-// (WSL2 resolves Vulkan to lavapipe), and `--enable-unsafe-swiftshader` is
-// what makes Chrome offer a software WebGPU adapter instead of refusing one:
-// it tests the code path rather than the driver. Anything this reports about
-// *timing* is therefore worthless — see the note in the report it produces.
+// Chrome is launched with the probe's own flags, and THE DEFAULTS BELOW ARE
+// WRONG ON ANY MACHINE WITH A GPU. They were written for a WSL2 box where
+// Vulkan resolves to lavapipe and `--use-angle=swiftshader` was what made
+// Chrome offer a software WebGPU adapter instead of refusing one — a way to
+// test the code path rather than the driver, and worthless for timing.
+//
+// On a host with a real GPU, override them:
+//
+//   CHROME="C:/Program Files/Google/Chrome/Application/chrome.exe" \
+//   CHROME_FLAGS="--no-first-run --no-default-browser-check" \
+//   node crates/straf3-game/web/drive.mjs <steps.json> --headful
+//
+// Measured on native Windows with an RTX 3060 Ti (Chrome 151), the swiftshader
+// default does not quietly downgrade to software — it yields NO adapter at all,
+// `requestAdapter()` returns null and the client refuses to start. So the flags
+// fail loudly rather than silently recording a run on a rasteriser. That is the
+// safe direction, but it still means a driver run with the defaults on this
+// host tests nothing. `docs/web/evidence/r17-browser.txt` §5 has both halves of
+// the comparison.
+//
+// `--headful` matters too: it is the only mode in which a number here describes
+// a real window on a real display.
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
+import { tmpdir } from "node:os";
 
 const CHROME = process.env.CHROME || "google-chrome";
 const PORT = 9200 + Math.floor(Math.random() * 300);
@@ -41,6 +59,29 @@ function send(method, params = {}) {
       if (pending.delete(id)) reject(new Error(`${method} timed out`));
     }, 60000);
   });
+}
+
+/// Send an input event without waiting for Chrome to acknowledge it.
+///
+/// `send` writes to the socket synchronously and Chrome processes messages in
+/// order, so ordering is preserved; the only thing dropped is the round trip.
+/// That round trip is not free and it is not constant: measured on this
+/// Windows host, `Input.dispatch*` acknowledges on the order of 80 ms because
+/// the acknowledgement waits on the renderer, which is vsync-bound. A `hold`
+/// step that awaited each of its ~7 events per iteration therefore managed
+/// about 1.5 iterations a second, and delivered its mouse motion as a ~8°
+/// staircase every 640 ms rather than as a turn.
+///
+/// That is not a cosmetic difference. Q3 air acceleration is driven by the
+/// *rate* the view turns, so a driver that can only turn in coarse infrequent
+/// bursts cannot strafejump — measured: 320 ups in, 320 ups out. Awaiting only
+/// the last event of a burst is what makes the input rate a property of the
+/// game loop instead of a property of the protocol.
+function fire(method, params = {}) {
+  // The rejection path still exists (the 60 s timeout), and nothing awaits it
+  // any more, so it has to be swallowed or it surfaces as an unhandled
+  // rejection and kills the process mid-run.
+  send(method, params).catch(() => {});
 }
 
 /// Evaluate an expression in the page and return its value.
@@ -108,7 +149,7 @@ const KEYS = {
 async function keyEvent(type, code) {
   const spec = KEYS[code];
   if (!spec) throw new Error(`no key spec for ${code}`);
-  await send("Input.dispatchKeyEvent", {
+  fire("Input.dispatchKeyEvent", {
     type,
     code,
     key: spec.key,
@@ -138,7 +179,11 @@ async function mouseMove(from, dx, dy, steps = 20, delayMs = 8) {
   for (let i = 0; i < steps; i++) {
     x += dx / steps;
     y += dy / steps;
-    await send("Input.dispatchMouseEvent", {
+    // Fired rather than awaited: `delayMs` is meant to be the spacing between
+    // samples of a hand's motion, and awaiting the acknowledgement added ~80 ms
+    // of vsync-bound latency on top of it — turning a 10 ms cadence into a
+    // 90 ms one and the sweep into a staircase. See `fire`.
+    fire("Input.dispatchMouseEvent", {
       type: "mouseMoved",
       x: Math.round(x),
       y: Math.round(y),
@@ -243,6 +288,21 @@ async function step(s) {
     case "mouse":
       cursor = await mouseMove(cursor, s.dx ?? 0, s.dy ?? 0, s.steps ?? 20, s.delay_ms ?? 8);
       return { moved: [s.dx ?? 0, s.dy ?? 0] };
+    // Put the virtual cursor back in the middle of the viewport without
+    // turning the view.
+    //
+    // `look_to` leaves the cursor wherever aiming happened to end, which is
+    // routinely hard against a bound — a 90-degree turn is 818 counts and the
+    // viewport is 1160 wide. A `hold` that strafes from there then dispatches
+    // coordinates *outside* the viewport, where the deltas stop being the ones
+    // sent (see `look_to`'s note), and it does so asymmetrically: the phase
+    // turning away from the edge is delivered in full and the phase turning
+    // into it is silently truncated. Measured, that reads as a strafe that
+    // drifts steadily to one side for no reason visible in the step file —
+    // which is how a run ends up in a wall.
+    case "recenter":
+      await reanchor(s.x ?? 640, s.y ?? 360);
+      return { recentered: cursor };
     // Aim at an absolute view angle, by measuring rather than by dead
     // reckoning. Two things make open-loop aiming wrong: entering pointer lock
     // emits one warped delta of its own (measured: -16 counts of pitch), and a
@@ -326,7 +386,11 @@ const stepsPath = process.argv[2];
 const headful = process.argv.includes("--headful");
 const steps = JSON.parse(await readFile(stepsPath, "utf8"));
 
-const profile = `/tmp/straf3-chrome-${PORT}`;
+// `os.tmpdir()` rather than a literal `/tmp`: this driver is also run on
+// Windows, where a Windows Chrome handed `/tmp/...` resolves it drive-relative
+// against whatever the current drive is and silently writes its profile
+// somewhere nobody looks.
+const profile = join(tmpdir(), `straf3-chrome-${PORT}`);
 const chrome = spawn(
   CHROME,
   [
@@ -433,5 +497,34 @@ for (const s of steps) {
 
 console.log(JSON.stringify({ console: consoleLines }, null, 1));
 socket.close();
-chrome.kill();
+shutDownChrome();
 process.exit(failed ? 1 : 0);
+
+/// Kill the browser, and mean the whole browser.
+///
+/// `chrome.kill()` signals only the process we spawned. Chrome is
+/// multi-process, and on Windows the launcher hands off to a browser process
+/// that is not in our job object, so killing the launcher orphans the tree:
+/// the renderer, the GPU process and the crashpad handler all survive. Nothing
+/// reaps them, they hold their profile directory, and they keep using the GPU.
+///
+/// Measured here after a dozen driver runs: 82 live `chrome.exe` from this
+/// driver, and the host at 89 % CPU across 12 logical cores. That is not a
+/// tidiness problem — this driver exists to take frame-pacing measurements, and
+/// the leaked processes from earlier runs are contention that lands directly in
+/// the number the next run reports. `taskkill /T` walks the tree; `/F` is
+/// needed because a renderer told to close politely may wait on the browser
+/// process we have already killed.
+/// `spawnSync`, not `spawn`: the caller calls `process.exit()` on the next
+/// line, which tears this process down before an asynchronous child has been
+/// exec'd — measured, that leaves the tree alive exactly as if nothing had
+/// been done. The kill has to complete before we are allowed to leave.
+function shutDownChrome() {
+  if (process.platform === "win32") {
+    const killed = spawnSync("taskkill", ["/PID", `${chrome.pid}`, "/T", "/F"], {
+      stdio: "ignore",
+    });
+    if (!killed.error) return;
+  }
+  chrome.kill();
+}

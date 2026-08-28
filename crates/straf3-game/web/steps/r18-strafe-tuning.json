@@ -1,0 +1,47 @@
+[
+  { "do": "cdp", "method": "Page.bringToFront" },
+  { "do": "navigate", "url": "http://127.0.0.1:8790/play/coil?p=cpm" },
+  {
+    "do": "wait",
+    "until": "globalThis.__straf3_module && __straf3_module.straf3_debug_state() !== null",
+    "timeout_ms": 60000
+  },
+  { "do": "cdp", "method": "Emulation.setFocusEmulationEnabled", "params": { "enabled": true } },
+  { "do": "cdp", "method": "Page.bringToFront" },
+  { "do": "click", "x": 640, "y": 360 },
+  { "do": "sleep", "ms": 500 },
+
+  { "do": "eval", "js": "'=== A: turn 15 counts/iter, strafe right (east, away from west wall) ==='" },
+  { "do": "look_to", "yaw": 90, "pitch": 0 },
+  { "do": "hold", "keys": ["KeyW"], "ms": 500 },
+  { "do": "hold", "keys": ["KeyD"], "tap": ["Space"], "mouse": [15, 0], "ms": 3200, "sample_ms": 500 },
+
+  { "do": "key", "code": "KeyR", "type": "keyDown" },
+  { "do": "key", "code": "KeyR", "type": "keyUp" },
+  { "do": "sleep", "ms": 400 },
+
+  { "do": "eval", "js": "'=== B: turn 35 counts/iter ==='" },
+  { "do": "look_to", "yaw": 90, "pitch": 0 },
+  { "do": "hold", "keys": ["KeyW"], "ms": 500 },
+  { "do": "hold", "keys": ["KeyD"], "tap": ["Space"], "mouse": [35, 0], "ms": 3200, "sample_ms": 500 },
+
+  { "do": "key", "code": "KeyR", "type": "keyDown" },
+  { "do": "key", "code": "KeyR", "type": "keyUp" },
+  { "do": "sleep", "ms": 400 },
+
+  { "do": "eval", "js": "'=== C: turn 70 counts/iter ==='" },
+  { "do": "look_to", "yaw": 90, "pitch": 0 },
+  { "do": "hold", "keys": ["KeyW"], "ms": 500 },
+  { "do": "hold", "keys": ["KeyD"], "tap": ["Space"], "mouse": [70, 0], "ms": 3200, "sample_ms": 500 },
+
+  { "do": "key", "code": "KeyR", "type": "keyDown" },
+  { "do": "key", "code": "KeyR", "type": "keyUp" },
+  { "do": "sleep", "ms": 400 },
+
+  { "do": "eval", "js": "'=== D: turn 70 counts/iter, jump ONCE not spammed ==='" },
+  { "do": "look_to", "yaw": 90, "pitch": 0 },
+  { "do": "hold", "keys": ["KeyW"], "ms": 500 },
+  { "do": "key", "code": "Space", "type": "keyDown" },
+  { "do": "key", "code": "Space", "type": "keyUp" },
+  { "do": "hold", "keys": ["KeyD"], "mouse": [70, 0], "ms": 1600, "sample_ms": 300 }
+]

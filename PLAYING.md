@@ -547,8 +547,11 @@ retire it.
   ground 320 ups, a strafejump to 648 ups, the start trigger firing, and 7.928 s
   on the clock when `--exit-after` ended the session. This document's author did
   not see it, and **no screenshot of that session exists in this repository** —
-  the only images in the tree are from the `wasm-render` probe. *Retired by:* a
-  window-only screenshot committed to the tree and cited here by path.
+  the images in the tree are from the `wasm-render` probe and, since the browser
+  wave, `docs/web/evidence/r17-browser-window.png`, which is the *browser*
+  client on that GPU and says nothing about the native overlay. *Retired by:* a
+  window-only screenshot of the native session committed to the tree and cited
+  here by path.
 
 - **The personal-best and ghost loop has been closed once, and its evidence has
   not been committed.** This is the sharpest remaining gap and it is worth
@@ -573,15 +576,41 @@ retire it.
   captured after those constants are final — not by the loop having worked, which
   it has.
 
-- **No browser client, and no playable URL.** The determinism check above proves
-  the simulation is bit-identical on a wasm target; it does not prove a playable
-  browser build exists, and it does not run the game. A browser client, a
-  records service and leaderboards are **in scope and in progress in a parallel
-  session** — not shipped, and not guaranteed to land this wave. There is a
-  probe (`probes/wasm-render`) that built the whole game for WebGPU and measured
-  it, which is why this is a gap rather than an unknown. *Retired by:* a URL you
-  can play, and a run recorded in the browser that re-simulates natively to the
-  same rolling digest.
+- **No browser run has been recorded, and nobody has played the browser client.**
+  The URL half of this gap is now closed and the run half is not, so read the
+  two separately.
+
+  *What is now shown*, in `docs/web/evidence/r17-browser.txt`, captured on this
+  Windows host against the RTX 3060 Ti: the bundle builds (230,724 B gzipped),
+  `node crates/straf3-game/web/serve.mjs` serves it, and
+  `http://127.0.0.1:8790/play/coil?p=cpm` opens in a stock Chrome 151 and
+  **runs**. A hardware WebGPU adapter is acquired (`adapter.info` reports vendor
+  `nvidia`, architecture `ampere`); `coil.map` is fetched and compiled by the
+  wasm build to collision digest `0x47263b8845d8bb4b`; the session runs `cpm`
+  physics (`4350ccc31bec5d4c`) at 125 Hz. Pointer lock is taken, mouse-look
+  turns the view, and strafejumping accelerates past ground speed to 470 ups
+  down the full strafe corridor. Frame pacing while playing: median 6.1 ms
+  (~164 fps) on a 165 Hz display, p99 6.2 ms, p99.9 7.3 ms, 0.05 % of frames
+  over budget — and, re-measured with the host pinned at 100 % CPU, the same
+  6.1 ms median with the tail degrading to p99.9 24.3 ms and 0.36 % over.
+  There is a screenshot: `docs/web/evidence/r17-browser-window.png`.
+
+  *What is still not shown, and is the whole of what remains.* **No human has
+  played it** — every input in that transcript was dispatched over the DevTools
+  protocol by `crates/straf3-game/web/drive.mjs`, so nothing here measures input
+  latency as a hand feels it. That is exactly where a browser would be expected
+  to lose: the browser offers `fifo` as its **only** present mode, with
+  `frame_latency=2`, so the latency-for-tearing trade the native build can make
+  is unavailable. And **no run has been recorded in the browser**, because
+  `RunSink` fires only at the finish trigger and coil cannot be walked there —
+  its last jump needs ~425 ups onto a ledge that cannot be climbed, and the ramp
+  wave before it needs ~575 ups. The scripted driver reaches 470 ups and is
+  stopped by the course, which is a fact about the bot and not about the
+  browser. So the digest round trip is **unproven in both directions**: no
+  `.s3d` was captured out of a browser and none was re-simulated natively.
+  *Retired by:* a run played in the browser by a person, carried out as a
+  `.s3d`, that `webcheck resim` agrees with — both digests and both commands
+  recorded, and the report's `command rate` line reading 125 Hz.
 
 - **No leaderboards, no records service.** Also in scope in that parallel
   session, for the same reason and with the same caveat. This was previously
