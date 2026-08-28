@@ -1,0 +1,429 @@
+// training-crouch-slide.map — Straf3 training stub, "Lintel"
+//
+// Valve 220 source. This file is the SINGLE source of the geometry:
+// straf3-map compiles it to both the collision hulls and the render mesh, so
+// the thing you see and the thing you hit cannot drift apart. Edit it as a
+// .map (TrenchBroom, Radiant) — do not mirror these numbers into code.
+//
+// ---------------------------------------------------------------------------
+// WHAT THIS IS, AND WHAT IT IS NOT
+//
+// A training stub in the sense of VISION §6: it isolates one movement
+// primitive — the crouch slide — and teaches nothing else. It is NOT a course.
+//
+// It exists because `assets/maps/coil.map` cannot present this mechanic at
+// all. coil's own header, line 9: "No BSP and no PVS, so the world does not
+// need to be sealed and there are no ceilings; brushes exist only where the
+// player can reach them." The crouch slide's whole stated value, from
+// `PhysicsProfile::experimental`, is that "carrying speed under a low ceiling
+// is worth doing" — and on a map with no ceilings anywhere it degenerates into
+// a friction toggle on open ground, which is the exact thing its design set out
+// to avoid. So the operator cannot judge it on coil, whatever the verdict.
+//
+// A stub answers "can I do this, and does it feel good in isolation". It does
+// NOT answer "does this compose inside a real course", which VISION §7 calls
+// the harder and more important question — "movement mechanics cannot be
+// evaluated independently from the spaces in which those mechanics are used".
+// Do not read a good time here as evidence that the mechanic belongs in canon.
+// Read it as evidence about the primitive alone.
+//
+// ---------------------------------------------------------------------------
+// STATUS — what is done and what is not
+//
+// DONE:
+//   - Geometry, entities, spawn, start/finish triggers and two checkpoints:
+//     complete. This is a playable, timeable map.
+//   - Both lines the mechanic admits are present and comparable in one run —
+//     see "THE TWO LINES" below. That was a deliberate build requirement, not
+//     an accident of the shape.
+//   - Every dimension below is derived from a named constant, and the
+//     derivation is written out, so a retune is a tuning pass and not a
+//     redesign. See "WHICH DIMENSION DEPENDS ON WHICH CONSTANT".
+//
+// NOT DONE:
+//   - The speed thresholds in S3/S5 marked "Predicted:" are arithmetic from a
+//     continuous friction model, NOT measurements from the real mover. coil's
+//     header earns the word "Measured:" and this one does not yet. The real
+//     integrator is sub-stepped and discrete and the slide timer decrements per
+//     sub-step, so expect these to move by a few per cent. Whoever measures
+//     them should replace "Predicted:" with "Measured:" and correct the number.
+//   - No wall-jump stub. That is the other half of r26 and it is not built.
+//   - Never played by a human. Never run by a bot. Compilation and geometry
+//     were checked; the route has not been driven end to end.
+//
+// ---------------------------------------------------------------------------
+// PHYSICS THIS WAS BUILT AGAINST
+//
+// Canon (`PhysicsProfile::cpm`, id-verified): gravity 800, jump 270, step 18,
+// friction 6, stop_speed 100, max_speed 320, duck_scale 0.25,
+// min_walk_normal 0.7. Standing hull mins.z −24, maxs.z +32; crouched
+// maxs.z +16. A jump lasts 0.675 s flat and peaks 45.6 units.
+//
+// Candidate (`PhysicsProfile::experimental` only — all zero in canon):
+// slide_entry_speed 400, slide_friction 1.0, slide_duration_ms 600.
+//
+// "ups" below is horizontal speed in units/second.
+//
+// ---------------------------------------------------------------------------
+// THE ONE NUMBER THIS MAP IS ABOUT: z = 48
+//
+// A player resting on a floor whose top is z=0 has their origin at z=24.125 —
+// 24 for `hull_mins.z` and an eighth for `SURFACE_CLIP_EPSILON`, the distance
+// the mover holds the hull off a surface. Crouching lowers the top of the hull
+// and leaves the underside alone (`PM_CheckDuck`), so:
+//
+//     standing head    24.125 + 32 = 56.125
+//     crouched head    24.125 + 16 = 40.125
+//
+// A ceiling admits the crouched hull and refuses the standing one only in the
+// open band (40.125, 56.125). Its midpoint is 48.125. This map uses **48** —
+// an eighth below the exact midpoint, because 48 is on the grid and the eighth
+// is `SURFACE_CLIP_EPSILON` showing up in the player's resting height rather
+// than anything worth chasing. Margins: the crouched hull clears by 7.875
+// units, the standing hull is refused by 8.125. Symmetric to a sixteenth.
+//
+// `crates/straf3-collision/src/testbed.rs`'s `ceiling_at` picks 48 for the same
+// band and its own test says why 20 would be wrong: a crouched player is still
+// 40 units tall, so "low enough to crouch under" is not "low". This map is that
+// fixture's intent in playable geometry, deliberately not its code.
+//
+// ---------------------------------------------------------------------------
+// THE LINE, AND WHY EACH PIECE IS THE SHAPE IT IS
+//
+//   S0  y −768..0     Run-up. 768 units of corridor before the clock starts,
+//                     so the clock measures the technique rather than the
+//                     acceleration. Spawn in the south at angle 90 (+Y).
+//
+//   S1  y 0..2048     Strafe corridor, 448 wide, 2048 long. Pure acceleration,
+//                     and it exists only to clear `slide_entry_speed`.
+//                     448 is coil's corridor width; 2048 is a third longer than
+//                     coil's 1536 because coil enters its corridor already fast
+//                     off a circle jump and this map starts from a standstill.
+//                     Checkpoint 1 at the far end, so the split before it is
+//                     "how fast did I arrive" and the split after it is the
+//                     mechanic.
+//
+//   S2  y 2048..2240  Entry pad. 192 flat units at full height. This is where
+//                     the slide is armed, and it has to be flat and it has to
+//                     be here: `check_slide` arms on the *crouch press edge*
+//                     and reads horizontal speed at that instant, and
+//                     `step.rs` zeroes `slide_ms` the moment the player leaves
+//                     the ground ("a slide banked across a jump is a different
+//                     and worse mechanic"). So the player must LAND, and press
+//                     crouch while grounded, at 400 ups or better. 192 units is
+//                     roughly one bunnyhop cycle at 550 ups — long enough to
+//                     land in, short enough that dawdling costs the clock.
+//
+//   S3  y 2240..2496  THE LINTEL. The ceiling arrives as a 1:1.33 soffit
+//                     descending from z=96 to z=48 over y 2240..2304, then runs
+//                     flat at z=48 for 192 units to y=2496.
+//
+//                     The soffit is a slope and not a lintel face on purpose,
+//                     for two reasons. (1) A player who failed to crouch meets
+//                     a wedge and is squeezed to a stop rather than slamming a
+//                     wall — legible, recoverable, costs seconds not the run;
+//                     they crouch where they stand and carry on at 80 ups.
+//                     (2) A vertical face here would have normal z = 0 and
+//                     would therefore be a **wall-jump surface** under
+//                     `experimental` (`wall_normal_max` 0.3), which would let
+//                     a second candidate mechanic leak into a stub built to
+//                     isolate one. The soffit's normal has |z| = 0.8, five
+//                     hundredths of a unit clear of `min_walk_normal` in the
+//                     other direction and nowhere near 0.3.
+//
+//                     Standing is actually refused from y≈2293.2, where the
+//                     soffit passes below 56.125 — so the refused run is 202.8
+//                     units, not the flat 192.
+//
+//                     Predicted: friction 1.0 decays speed as e^(−t) with t in
+//                     seconds, so a slide entered at v carries v·(1−e^(−0.6))
+//                     = 0.4512·v units before the 600 ms runs out. 202.8 units
+//                     therefore needs about 450 ups to span on the slide alone,
+//                     and a bare-minimum 400 ups entry runs out ~22 units
+//                     inside. That gap between "may enter" (400) and "will get
+//                     through" (~450) is the point of the section: the entry
+//                     speed is a licence, not a pass.
+//
+//   S4  y 2496..3264  Exit run. 768 open units at full height. Checkpoint 2 is
+//                     at the lintel's mouth so this split is exactly "what did
+//                     I leave the tunnel with". A good slide exits here with
+//                     roughly 230 ms still on `slide_ms` at ~410 ups; a
+//                     crouch-walk exits at 80.
+//
+//   S5  y 3264..3296  Finish, then 224 units of run-out so an overshoot at
+//                     speed still lands on floor.
+//
+// ---------------------------------------------------------------------------
+// THE TWO LINES — and why this map presents both
+//
+// `PM_Friction` reads `p.timers.slide_ms`, **not `p.crouched`**. That is not
+// obvious from anywhere a map author would look, and it changes what this map
+// is testing. Consequence: a player can tap crouch to arm the slide, stand
+// straight back up, and keep one-sixth friction for the full 600 ms **at full
+// wish speed** — because standing restores the 320 wish speed that
+// `duck_scale` 0.25 was suppressing to 80.
+//
+//   Line A, stay crouched:  arm on the entry pad, hold crouch, slide the
+//                           lintel, exit. The mechanic as its designer
+//                           described it.
+//   Line B, tap and stand:  arm on the entry pad, release crouch, run the open
+//                           ground at 320 wish speed under 1.0 friction. Cannot
+//                           pass the lintel — `check_duck` refuses to stand
+//                           where there is no headroom, so under the lintel B
+//                           collapses into A.
+//
+// So the geometry makes them meet: the entry pad (S2) and the 768-unit exit run
+// (S4) are both open ground where B is available and strictly better, and the
+// lintel between them is 202.8 units where only A exists. A player who burns
+// the whole slide on B before the lintel crouch-walks the tunnel at 80 ups and
+// loses about two seconds. A player who saves it for A gets through and still
+// has ~230 ms of B on the far side. Both lines are in one run, on one clock.
+//
+// **Whether B dominates A is UNMEASURED.** It is the single most likely thing
+// to decide crouch slide's verdict in a later wave, and no sweep in this tree
+// has answered it. `docs/movement-canon.md` records the mechanism; this map is
+// where it can be felt. If B does dominate, then a low ceiling is not what the
+// mechanic is *for* in play, and this map's central premise needs revisiting
+// rather than its dimensions.
+//
+// ---------------------------------------------------------------------------
+// WHICH DIMENSION DEPENDS ON WHICH CONSTANT
+//
+// The candidate constants are opening positions, not tuned values. If one
+// moves, this is what moves with it:
+//
+//   hull_maxs.z (32) and crouched_height (16)
+//       → the ceiling height 48, and ONLY that. Both are id-verified and will
+//         not move. If they ever do, 48 becomes the midpoint of the new
+//         (−hull_mins.z + crouched_height + ε, −hull_mins.z + hull_maxs.z + ε)
+//         band, rounded to the grid.
+//
+//   slide_entry_speed (400)
+//       → the length of S1, the strafe corridor (2048). It must be long enough
+//         to strafejump past this from a standstill. Raise the constant, extend
+//         the corridor. Nothing else in the map reads it.
+//
+//   slide_duration_ms (600) and slide_friction (1.0)
+//       → the length of the lintel (192 flat / 202.8 refused) and of the exit
+//         run (768). Together they set the slide distance 0.4512·v. Shorten the
+//         duration or raise the friction and the lintel must shorten in step,
+//         or the section stops being crossable on a slide and starts teaching
+//         the wrong thing.
+//
+//   wall_normal_max (0.3)
+//       → the soffit's slope, and nothing else. |normal.z| = 0.8 there, so this
+//         constant would have to more than double before the soffit became a
+//         wall. The corridor walls are a different matter — see below.
+//
+//   gravity (800), jump_velocity (270)
+//       → nothing. There is no jump in this map that has to clear anything.
+//         That is deliberate: a stub isolates one primitive.
+//
+// ---------------------------------------------------------------------------
+// AN HONEST NOTE ABOUT WALLS
+//
+// Every corridor wall in this map is vertical, so |normal.z| = 0 and every one
+// of them is a **wall-jump surface** under `experimental`. That is true of
+// coil's corridor walls too. The operator decision that brought this map into
+// scope says coil "cannot reward wall jump", which is exactly right and is not
+// the same claim as "coil has no wall-jump surfaces" — it has plenty; it has
+// nowhere that pushing off one is the answer. Neither does this map. Nothing
+// here needs a wall jump and nothing here is faster with one, so the primitive
+// stays isolated in practice even though the surfaces exist.
+//
+// The surface families are named for what the simulation does with them, as in
+// coil: straf3/floor and straf3/pad are walkable, straf3/wall is vertical,
+// straf3/lintel is the low ceiling. The NAME decides nothing — the compiler
+// reads the plane normal, and `texture.rs` gives none of these any special
+// meaning. The names are colour and legibility only.
+// ---------------------------------------------------------------------------
+// entity 0 — worldspawn
+{
+"classname" "worldspawn"
+"message" "Lintel"
+"author" "Straf3"
+{
+// brush: floor_runup
+( -224 -768 -32 ) ( 224 -768 -32 ) ( 224 0 -32 ) straf3/floor [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -224 -768 0 ) ( 224 0 0 ) ( 224 -768 0 ) straf3/floor [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -224 -768 -32 ) ( 224 -768 0 ) ( 224 -768 -32 ) straf3/floor [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 0 -32 ) ( 224 0 -32 ) ( 224 0 0 ) straf3/floor [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 -768 -32 ) ( -224 0 0 ) ( -224 -768 0 ) straf3/floor [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 224 -768 -32 ) ( 224 0 0 ) ( 224 0 -32 ) straf3/floor [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+}
+{
+// brush: floor_corridor
+( -224 0 -32 ) ( 224 0 -32 ) ( 224 2048 -32 ) straf3/floor [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -224 0 0 ) ( 224 2048 0 ) ( 224 0 0 ) straf3/floor [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -224 0 -32 ) ( 224 0 0 ) ( 224 0 -32 ) straf3/floor [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 2048 -32 ) ( 224 2048 -32 ) ( 224 2048 0 ) straf3/floor [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 0 -32 ) ( -224 2048 0 ) ( -224 0 0 ) straf3/floor [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 224 0 -32 ) ( 224 2048 0 ) ( 224 2048 -32 ) straf3/floor [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+}
+{
+// brush: pad_entry — flat, and it has to be: a slide is armed on the ground
+( -224 2048 -32 ) ( 224 2048 -32 ) ( 224 2240 -32 ) straf3/pad [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -224 2048 0 ) ( 224 2240 0 ) ( 224 2048 0 ) straf3/pad [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -224 2048 -32 ) ( 224 2048 0 ) ( 224 2048 -32 ) straf3/pad [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 2240 -32 ) ( 224 2240 -32 ) ( 224 2240 0 ) straf3/pad [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 2048 -32 ) ( -224 2240 0 ) ( -224 2048 0 ) straf3/pad [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 224 2048 -32 ) ( 224 2240 0 ) ( 224 2240 -32 ) straf3/pad [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+}
+{
+// brush: floor_lintel — flat under the whole low section
+( -224 2240 -32 ) ( 224 2240 -32 ) ( 224 2496 -32 ) straf3/floor [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -224 2240 0 ) ( 224 2496 0 ) ( 224 2240 0 ) straf3/floor [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -224 2240 -32 ) ( 224 2240 0 ) ( 224 2240 -32 ) straf3/floor [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 2496 -32 ) ( 224 2496 -32 ) ( 224 2496 0 ) straf3/floor [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 2240 -32 ) ( -224 2496 0 ) ( -224 2240 0 ) straf3/floor [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 224 2240 -32 ) ( 224 2496 0 ) ( 224 2496 -32 ) straf3/floor [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+}
+{
+// brush: floor_exit — 768 units of open ground, plus 224 of run-out
+( -224 2496 -32 ) ( 224 2496 -32 ) ( 224 3520 -32 ) straf3/floor [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -224 2496 0 ) ( 224 3520 0 ) ( 224 2496 0 ) straf3/floor [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -224 2496 -32 ) ( 224 2496 0 ) ( 224 2496 -32 ) straf3/floor [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 3520 -32 ) ( 224 3520 -32 ) ( 224 3520 0 ) straf3/floor [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 2496 -32 ) ( -224 3520 0 ) ( -224 2496 0 ) straf3/floor [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 224 2496 -32 ) ( 224 3520 0 ) ( 224 3520 -32 ) straf3/floor [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+}
+{
+// brush: soffit — underside descends z=96 to z=48 over 64 units of y.
+// |normal.z| = 0.8: not a wall (wall_normal_max 0.3), not walkable, and not a
+// face to slam into. A standing player is squeezed to a stop, not stopped dead.
+( -224 2240 96 ) ( 224 2240 96 ) ( 224 2304 48 ) straf3/lintel [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -224 2240 128 ) ( 224 2304 128 ) ( 224 2240 128 ) straf3/lintel [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -224 2240 96 ) ( 224 2240 128 ) ( 224 2240 96 ) straf3/lintel [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 2304 48 ) ( 224 2304 48 ) ( 224 2304 128 ) straf3/lintel [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 2240 96 ) ( -224 2304 128 ) ( -224 2240 128 ) straf3/lintel [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 224 2240 96 ) ( 224 2304 128 ) ( 224 2304 48 ) straf3/lintel [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+}
+{
+// brush: lintel — flat ceiling, underside at z=48. The one number this map is
+// about: the crouched hull clears it by 7.875, the standing hull is refused by
+// 8.125.
+( -224 2304 48 ) ( 224 2304 48 ) ( 224 2496 48 ) straf3/lintel [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -224 2304 128 ) ( 224 2496 128 ) ( 224 2304 128 ) straf3/lintel [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -224 2304 48 ) ( 224 2304 128 ) ( 224 2304 48 ) straf3/lintel [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 2496 48 ) ( 224 2496 48 ) ( 224 2496 128 ) straf3/lintel [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 2304 48 ) ( -224 2496 128 ) ( -224 2304 128 ) straf3/lintel [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 224 2304 48 ) ( 224 2496 128 ) ( 224 2496 48 ) straf3/lintel [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+}
+{
+// brush: wall_s
+( -256 -800 0 ) ( 256 -800 0 ) ( 256 -768 0 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -256 -800 384 ) ( 256 -768 384 ) ( 256 -800 384 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -256 -800 0 ) ( 256 -800 384 ) ( 256 -800 0 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -256 -768 0 ) ( 256 -768 0 ) ( 256 -768 384 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -256 -800 0 ) ( -256 -768 384 ) ( -256 -800 384 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 256 -800 0 ) ( 256 -768 384 ) ( 256 -768 0 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+}
+{
+// brush: wall_w
+( -256 -800 0 ) ( -224 -800 0 ) ( -224 3520 0 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -256 -800 384 ) ( -224 3520 384 ) ( -224 -800 384 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -256 -800 0 ) ( -224 -800 384 ) ( -224 -800 0 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -256 3520 0 ) ( -224 3520 0 ) ( -224 3520 384 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -256 -800 0 ) ( -256 3520 384 ) ( -256 -800 384 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 -800 0 ) ( -224 3520 384 ) ( -224 3520 0 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+}
+{
+// brush: wall_e
+( 224 -800 0 ) ( 256 -800 0 ) ( 256 3520 0 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( 224 -800 384 ) ( 256 3520 384 ) ( 256 -800 384 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( 224 -800 0 ) ( 256 -800 384 ) ( 256 -800 0 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 224 3520 0 ) ( 256 3520 0 ) ( 256 3520 384 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 224 -800 0 ) ( 224 3520 384 ) ( 224 -800 384 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 256 -800 0 ) ( 256 3520 384 ) ( 256 3520 0 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+}
+}
+// entity 1 — spawn, facing +Y down the corridor
+{
+"classname" "info_player_start"
+"origin" "0 -704 24"
+"angle" "90"
+}
+// entity 2 — trigger_start
+{
+"classname" "trigger_multiple"
+"target" "t_start"
+{
+// brush: trigger_start
+( -224 0 -32 ) ( 224 0 -32 ) ( 224 32 -32 ) common/trigger [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -224 0 768 ) ( 224 32 768 ) ( 224 0 768 ) common/trigger [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -224 0 -32 ) ( 224 0 768 ) ( 224 0 -32 ) common/trigger [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 32 -32 ) ( 224 32 -32 ) ( 224 32 768 ) common/trigger [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 0 -32 ) ( -224 32 768 ) ( -224 0 768 ) common/trigger [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 224 0 -32 ) ( 224 32 768 ) ( 224 32 -32 ) common/trigger [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+}
+}
+// entity 3 — trigger_checkpoint_1, at the end of the strafe corridor: the split
+// before it is "how fast did I arrive", the split after it is the mechanic.
+{
+"classname" "trigger_multiple"
+"target" "t_cp1"
+{
+// brush: trigger_checkpoint_1
+( -224 2016 -32 ) ( 224 2016 -32 ) ( 224 2048 -32 ) common/trigger [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -224 2016 768 ) ( 224 2048 768 ) ( 224 2016 768 ) common/trigger [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -224 2016 -32 ) ( 224 2016 768 ) ( 224 2016 -32 ) common/trigger [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 2048 -32 ) ( 224 2048 -32 ) ( 224 2048 768 ) common/trigger [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 2016 -32 ) ( -224 2048 768 ) ( -224 2016 768 ) common/trigger [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 224 2016 -32 ) ( 224 2048 768 ) ( 224 2048 -32 ) common/trigger [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+}
+}
+// entity 4 — trigger_checkpoint_2, at the lintel's mouth: this split is exactly
+// "what did I leave the tunnel with".
+{
+"classname" "trigger_multiple"
+"target" "t_cp2"
+{
+// brush: trigger_checkpoint_2
+( -224 2496 -32 ) ( 224 2496 -32 ) ( 224 2528 -32 ) common/trigger [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -224 2496 768 ) ( 224 2528 768 ) ( 224 2496 768 ) common/trigger [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -224 2496 -32 ) ( 224 2496 768 ) ( 224 2496 -32 ) common/trigger [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 2528 -32 ) ( 224 2528 -32 ) ( 224 2528 768 ) common/trigger [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 2496 -32 ) ( -224 2528 768 ) ( -224 2496 768 ) common/trigger [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 224 2496 -32 ) ( 224 2528 768 ) ( 224 2528 -32 ) common/trigger [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+}
+}
+// entity 5 — trigger_finish
+{
+"classname" "trigger_multiple"
+"target" "t_finish"
+{
+// brush: trigger_finish
+( -224 3264 -32 ) ( 224 3264 -32 ) ( 224 3296 -32 ) common/trigger [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -224 3264 768 ) ( 224 3296 768 ) ( 224 3264 768 ) common/trigger [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -224 3264 -32 ) ( 224 3264 768 ) ( 224 3264 -32 ) common/trigger [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 3296 -32 ) ( 224 3296 -32 ) ( 224 3296 768 ) common/trigger [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -224 3264 -32 ) ( -224 3296 768 ) ( -224 3264 768 ) common/trigger [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 224 3264 -32 ) ( 224 3296 768 ) ( 224 3296 -32 ) common/trigger [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+}
+}
+// entity 6 — target_startTimer t_start
+{
+"classname" "target_startTimer"
+"targetname" "t_start"
+"origin" "0 16 128"
+}
+// entity 7 — target_checkpoint t_cp1
+{
+"classname" "target_checkpoint"
+"targetname" "t_cp1"
+"origin" "0 2032 128"
+"count" "1"
+}
+// entity 8 — target_checkpoint t_cp2
+{
+"classname" "target_checkpoint"
+"targetname" "t_cp2"
+"origin" "0 2512 128"
+"count" "2"
+}
+// entity 9 — target_stopTimer t_finish
+{
+"classname" "target_stopTimer"
+"targetname" "t_finish"
+"origin" "0 3280 128"
+}
