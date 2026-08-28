@@ -27,6 +27,7 @@ use straf3_sim::PhysicsProfile;
 use crate::dataset::Section;
 
 pub mod attribution;
+pub mod candidates;
 pub mod crossvalidate;
 pub mod overbounce;
 pub mod ramps;
@@ -81,6 +82,10 @@ pub fn all() -> Vec<Section> {
     let mut sections = vocabulary(&canon);
     sections.push(crossvalidate::measure(&sections));
     sections.push(substepping::measure());
+    // Last, and much the largest: the candidate sweep is 42 cells per mechanic
+    // and re-runs the whole vocabulary four more times for G2, so it is the
+    // reason this tool now takes minutes rather than seconds.
+    sections.push(candidates::measure());
     sections
 }
 

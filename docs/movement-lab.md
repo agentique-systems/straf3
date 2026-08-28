@@ -2,7 +2,7 @@
 
 # The movement lab
 
-Measured from `6b9d3283a6dbfc558ec4d93d9bffbd8b30d91eb9` **plus uncommitted changes** by `cargo xtask lab`, which runs `tools/straf3-lab`.
+Measured from `f8d8b2e38e33bf98c9f32583915a4e640d4c4af1` **plus uncommitted changes** by `cargo xtask lab`, which runs `tools/straf3-lab`.
 
 Every number below was produced by running the simulation. Nothing here is a constant restated: where a value is also a constant in `PhysicsProfile`, the report says so and prints both, because a constant that is stored and never read is indistinguishable from one that is used until something measures it.
 
@@ -13,7 +13,7 @@ Every number below was produced by running the simulation. Nothing here is a con
 | Command rate | 125 Hz — 8 ms commands, spec D2's default. Not swept; see *Limits*. |
 | Profiles | `vq3`, `cpm` |
 | Worlds | Brushes compiled by `straf3-collision`, traced by the tracer the game uses. The shared `straf3_collision::testbed` fixtures, the same ones the sim tests pin behaviour against. |
-| Measurements | 2211 named values, in the machine-readable section at the end. |
+| Measurements | 7168 named values, in the machine-readable section at the end. |
 | Determinism | No clock, no randomness, no parallelism, no libm on any path that feeds a number. Same invocation, same bytes. |
 
 ## Limits
@@ -516,11 +516,6147 @@ One thing **neither seat had measured** when this section was written — whethe
 **What is measured here and what is cited.** The single-step column of the friction table is the sim seat's published number, restated in the same way section 7 restates that seat's other figures. The lab cannot re-measure it: the superseded integration is reachable only through `step_bounded`, which is private on purpose so that the comparison runs through the shipped code rather than through a copy of it, and writing a second integrator here to get at it would produce a comparison against a game nobody runs. Every other number in this section is this crate's own.
 
 
+## 9. The candidates
+
+**This section measures. It does not judge.** `docs/movement-canon.md` Part 1 sets eight gates and seven weighed criteria, and §1.2 defines one sweep that four of the weighed criteria are scored from. Everything below is that sweep and the instruments the gates need beside it. No number here is called a pass or a fail, and no mechanic here is recommended: Part 1's thresholds were fixed before any of these numbers existed, and the only way that immunity survives is if the seat producing the numbers does not also decide what they mean.
+
+**§1.10's four conditions on the evidence**, each checked rather than asserted.
+
+| condition | how it is met here |
+|---|---|
+| 1. Measured under the integration canon will ship with | Nothing in `candidate.rs` chooses an integration; every run calls `straf3_sim::step`, which is `step_bounded(…, PMOVE_SUBSTEP_MAX_MS)` with the bound at 66 ms, and the bound is reachable from nowhere above that function. **The precise version, because the loose one would overstate it:** at the 125 Hz these measurements are taken at, an 8 ms command is one sub-step, so the shipping integrator and the single-step integrator it replaced coincide here by construction. The condition is met because these runs go through the mover canon will ship — not because sub-stepping changed a candidate number, which at this rate it cannot. |
+| 2. Measured against the real fixtures | `tools/straf3-lab/src/geometry.rs` is one `pub use` of `straf3_collision::testbed`, so the seven contexts below are the module itself and not a mirror of it. `geometry::MIRRORED` is `false`, and the document's *Limits* 4 records the swap moving no measurement. |
+| 3. One variable | Each candidate carries its own profile with that mechanic's constants and nothing else, not `PhysicsProfile::experimental()`, which carries all three. `the_candidate_profiles_change_one_mechanic_each` holds each one to `experimental()`'s own values and holds the three composed together equal to it, so a candidate profile cannot drift into being a fourth tuning. |
+| 4. Against a stated control | Every run is taken twice in lockstep from the same state on the same command script, once under the candidate profile and once under `PhysicsProfile::cpm()`. The control is not a similar run; it is the same run with the mechanic absent. |
+
+**The grid, and the horizon.** Seven contexts crossed with six entry speeds — 320/400/500/640/800/1000 ups — is 42 cells per mechanic. Inside each cell the invocation timing is swept across the whole availability window at one command (8 ms) and the wish direction is swept at 5° around the **whole** circle (72 aims), because `corner()` is not mirror-symmetric and a half sweep would report the wrong side's answer for it. The horizon is 125 commands — one second — after the window closes, counted from the **anchor** rather than from the press, so every timing inside one cell is compared at the same instant.
+
+**Outcome, absolute exit speed, and materiality.** §1.1 defines *outcome* as the candidate run's horizontal speed at the horizon minus the control's at the same horizon, in ups, and that is what every column headed Δ below is. Where a criterion needs the un-differenced quantity — W3's entry-speed sensitivity, G7 — it is published separately and by name as **absolute exit speed**. *Material* is 16 ups everywhere, and where a criterion also states a percentage both apply and the larger governs.
+
+**The anchor is not the entry speed, and several cells turn on that.** A run is placed so the mechanic's arming event happens at the context's feature, which for the dash and the wall jump means falling or flying there first. The geometry charges for the trip. The `anchor` columns below publish what the player actually had when the window opened — in the corner at 640 ups nominal entry the dash's anchor speed is single digits, because the wall stopped them — and any reading of a delta in such a cell has to start from that number rather than from the column heading. §1.2 calls this a passage result rather than a speed result, and the two anchor columns are what let a reader tell them apart. The naive neighbourhood is every timing in the window crossed with every aim within ±30° of the current heading.
+
+**G7 asks whether a mechanic hides a cliff the player cannot see coming, and the rule that answers it needs checking before it is believed.** A step measured between adjacent points of a fixed grid is a fact about the grid: at the 5° aim spacing this report sweeps on, §1's own `vq3`/`forward` curve at 320 ups steps about 40 ups between 40° and 50°, which is the slope times the spacing and nothing else. A rule that calls that a cliff has rejected strafejumping. So a discontinuity is defined as a step that **does not shrink when the grid is refined**, and the two rows below are the check that the definition can tell the difference — one curve that must come out smooth, and one that must not.
+
+**Self-test.** `coarse` is the largest step on the sweep grid; `refined` is what is left of it across one refinement floor. A gradient shrinks; a cliff does not.
+
+| curve | coarse step | floor | refined step | survives 16 ups | required |  |
+|---|---|---|---|---|---|---|
+| strafejump, worst at vq3/strafe at 1000 ups | 83.19 ups | 1.0000 | 56.75 ups | yes | no | ✗ |
+| strafejump, worst at vq3/strafe at 1000 ups | 83.19 ups | 0.2500 | 14.60 ups | no | no | ✓ |
+| overbounce, drop height 16–128 units, vq3 | 447.55 ups | 0.0625 | 447.55 ups | yes | yes | ✓ |
+
+The cliff the instrument found in overbounce sits at a drop height of 125.344 units and is worth 447.55 ups across 0.0625 of a unit — a distance no map can express and no player can judge by eye. That is what G7 is looking for, and it is in canon rather than in a candidate. §1.8 of `docs/movement-canon.md` says outright that overbounce would fail G7 if it were proposed today, and is exempt only because it is inherited.
+
+**The starting floor was not fine enough, and that is a finding rather than a failure.** `docs/movement-canon.md` G7 states the refinement floor as *a parameter of the rule, not a constant*: if a step is still above threshold at the starting floor, refine further and record the floor that was needed. It was. At the stated starting floor of 1.00° the steepest step in **strafejump, worst at vq3/strafe at 1000 ups** still measures 56.75 ups — above the 16 ups threshold — so the instrument would have reported a cliff in strafejumping and, with it, rejected the technique the game is named after. Refined to 0.25° the same step measures 14.60 ups. **It halved with the grid, which is what a gradient does**, so the finding is that the floor was too coarse and not that canon's own technique hides a cliff. Every G7 number in this section is taken at 0.25°.
+
+Canon predicted this exposure and named a different curve for it: §1's `vq3`/`forward` at 500 ups entry, where gain is pinned at zero until the wish-speed clamp opens between 50° and 60°. That band is not the worst one. The worst is the row above, and a reader checking canon's prediction against this table should know that the *prediction was right about the mechanism and wrong about the curve*.
+
+**The instrument passes both halves of its self-test**, refining aim to 0.25° and geometry to 0.0625 of a unit. Every G7 number below is taken with it.
+
+### Crouch slide
+
+**Crouch slide — the sweep.** `Δ` is the outcome delta in ups; `abs` is absolute exit speed; `control` is the best absolute exit speed the existing vocabulary reached in the same cell with the same freedom of aim and timing.
+
+| context | entry | anchor cmds | anchor ups | avail | best Δ | best abs | control abs | at ms | at aim | Δ at aim 0 | latency |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| floor | 320 | 0 | 320.00 | 25 | 13.13 | 440.09 | 480.28 | 248 | 300 | — | 0 |
+| floor | 400 | 0 | 400.00 | 32 | 13.11 | 440.09 | 480.31 | 248 | 300 | 0.00 | 0 |
+| floor | 500 | 0 | 500.00 | 32 | 20.47 | 392.55 | 480.34 | 224 | 295 | 0.00 | 0 |
+| floor | 640 | 0 | 640.00 | 32 | 26.35 | 342.98 | 480.36 | 200 | 70 | 0.00 | 0 |
+| floor | 800 | 0 | 800.00 | 32 | 36.67 | 353.34 | 480.36 | 248 | 290 | 0.00 | 0 |
+| floor | 1000 | 0 | 1000.00 | 32 | 36.66 | 353.36 | 480.37 | 248 | 70 | 0.00 | 0 |
+| ramp26 | 320 | 0 | 320.00 | 25 | 13.13 | 440.09 | 480.28 | 248 | 300 | — | 0 |
+| ramp26 | 400 | 0 | 400.00 | 32 | 13.11 | 440.09 | 480.61 | 248 | 300 | 0.00 | 0 |
+| ramp26 | 500 | 0 | 500.00 | 32 | 44.87 | 467.70 | 479.90 | 112 | 310 | 0.00 | 0 |
+| ramp26 | 640 | 0 | 640.00 | 32 | 41.41 | 467.70 | 480.85 | 224 | 50 | 0.00 | 0 |
+| ramp26 | 800 | 0 | 800.00 | 32 | 47.68 | 396.10 | 482.01 | 248 | 295 | 0.00 | 0 |
+| ramp26 | 1000 | 0 | 1000.00 | 32 | 61.70 | 346.06 | 475.36 | 216 | 70 | 0.00 | 0 |
+| ramp50 | 320 | 0 | 320.00 | 25 | 13.13 | 440.09 | 480.28 | 248 | 300 | — | 0 |
+| ramp50 | 400 | 0 | 400.00 | 32 | 49.16 | 432.73 | 482.62 | 128 | 45 | 0.00 | 0 |
+| ramp50 | 500 | 0 | 500.00 | 29 | 98.28 | 432.73 | 482.98 | 112 | 45 | -95.65 | 0 |
+| ramp50 | 640 | 0 | 640.00 | 15 | 192.12 | 467.70 | 431.13 | 96 | 310 | -197.00 | 0 |
+| ramp50 | 800 | 0 | 800.00 | 12 | 231.26 | 475.19 | 381.98 | 0 | 305 | -202.88 | 0 |
+| ramp50 | 1000 | 0 | 1000.00 | 10 | 303.03 | 435.80 | 432.73 | 8 | 270 | -5.64 | 0 |
+| step18 | 320 | 0 | 320.00 | 25 | 19.83 | 452.56 | 480.28 | 88 | 315 | — | 0 |
+| step18 | 400 | 0 | 400.00 | 32 | 30.12 | 497.81 | 504.15 | 72 | 310 | 0.00 | 0 |
+| step18 | 500 | 0 | 500.00 | 32 | 32.08 | 512.69 | 480.63 | 72 | 55 | 0.00 | 0 |
+| step18 | 640 | 0 | 640.00 | 32 | 36.25 | 517.12 | 480.89 | 120 | 55 | 0.00 | 0 |
+| step18 | 800 | 0 | 800.00 | 32 | 55.31 | 483.18 | 481.33 | 120 | 300 | 0.00 | 0 |
+| step18 | 1000 | 0 | 1000.00 | 32 | 61.87 | 490.54 | 482.29 | 168 | 60 | 0.00 | 0 |
+| ledge256 | 320 | 0 | 320.00 | 25 | 13.13 | 440.09 | 480.28 | 248 | 300 | — | 0 |
+| ledge256 | 400 | 0 | 400.00 | 32 | 212.83 | 639.83 | 480.31 | 8 | 60 | 0.00 | 0 |
+| ledge256 | 500 | 0 | 500.00 | 32 | 581.54 | 1008.57 | 880.54 | 48 | 60 | 0.00 | 0 |
+| ledge256 | 640 | 0 | 640.00 | 32 | 382.64 | 754.77 | 799.19 | 56 | 295 | 0.00 | 0 |
+| ledge256 | 800 | 0 | 800.00 | 26 | 553.54 | 815.62 | 571.83 | 200 | 75 | 0.00 | 0 |
+| ledge256 | 1000 | 0 | 1000.00 | 18 | 185.68 | 234.45 | 813.58 | 136 | 265 | 0.00 | 0 |
+| corner | 320 | 0 | 320.00 | 25 | 4.99 | 462.28 | 480.28 | 168 | 55 | — | 0 |
+| corner | 400 | 0 | 400.00 | 32 | 261.33 | 363.87 | 479.62 | 0 | 30 | 0.00 | 0 |
+| corner | 500 | 0 | 500.00 | 32 | 337.17 | 432.72 | 467.70 | 80 | 315 | 0.00 | 0 |
+| corner | 640 | 0 | 640.00 | 15 | 316.66 | 431.17 | 466.08 | 72 | 60 | 0.00 | 0 |
+| corner | 800 | 0 | 800.00 | 12 | 240.43 | 276.04 | 466.08 | 48 | 290 | 0.00 | 0 |
+| corner | 1000 | 0 | 1000.00 | 12 | 239.13 | 264.85 | 466.08 | 16 | 285 | 0.00 | 0 |
+| ceiling48 | 320 | 0 | 320.00 | 0* | never | — | 120.09 | — | — | — | 0 |
+| ceiling48 | 400 | 0 | 400.00 | 32* | 26.36 | 56.08 | 120.10 | 0 | 290 | 0.00 | 0 |
+| ceiling48 | 500 | 0 | 500.00 | 32* | 29.06 | 59.35 | 120.10 | 0 | 290 | 0.00 | 0 |
+| ceiling48 | 640 | 0 | 640.00 | 32* | 32.52 | 63.60 | 120.10 | 0 | 70 | 0.00 | 0 |
+| ceiling48 | 800 | 0 | 800.00 | 32* | 35.68 | 67.63 | 120.11 | 0 | 290 | 0.00 | 0 |
+| ceiling48 | 1000 | 0 | 1000.00 | 32* | 38.83 | 71.83 | 120.11 | 0 | 70 | 0.00 | 0 |
+
+A cell marked `*` in `avail` is one where every invocation timing produced the identical run, so the timing axis selected nothing and the count is not a window. That is measured by comparing the rows rather than inferred from the context's name.
+
+**A delta of zero has two causes and they are not the same fact.** Either the mechanic did nothing, or it did something and the second of simulation between the window closing and the horizon erased it. On flat ground the second is what happens: a player holding a direction converges to the ground terminal speed whether or not they slid, so a run measured a full second later shows nothing however much speed the slide carried in between. `peak_gain_ups` in the machine-readable section is the largest advantage the candidate held at any command of that cell's best run, with `peak_gain_at_ms` saying when. **It is a diagnostic and no criterion is scored on it** — §1.1 defines the outcome at the horizon and this document does not get to move the horizon because it dislikes an answer. It is published so that a zero can be read correctly, and a verdict that wants to say "this mechanic is worth 300 ups for half a second and nothing at the horizon" has the number for both halves of the sentence.
+
+**Crouch slide — W1's naive neighbourhood.** Every timing in the window crossed with every aim within ±30° of the heading. `harmed` counts the points whose outcome delta is negative by more than 16 ups; `n` is the size of the neighbourhood, published because a percentage over it without its count is false precision.
+
+| context | entry | mean Δ | harmed | n | harm rate |
+|---|---|---|---|---|---|
+| floor | 320 | 0.00 | 0 | 416 | 0.0% |
+| floor | 400 | -0.00 | 0 | 416 | 0.0% |
+| floor | 500 | -0.00 | 0 | 416 | 0.0% |
+| floor | 640 | -0.00 | 0 | 416 | 0.0% |
+| floor | 800 | 0.00 | 0 | 416 | 0.0% |
+| floor | 1000 | -0.00 | 0 | 416 | 0.0% |
+| ramp26 | 320 | 0.00 | 0 | 416 | 0.0% |
+| ramp26 | 400 | -0.31 | 4 | 416 | 1.0% |
+| ramp26 | 500 | -0.75 | 20 | 416 | 4.8% |
+| ramp26 | 640 | -1.37 | 36 | 416 | 8.7% |
+| ramp26 | 800 | -1.27 | 20 | 416 | 4.8% |
+| ramp26 | 1000 | 0.67 | 60 | 416 | 14.4% |
+| ramp50 | 320 | 0.00 | 0 | 416 | 0.0% |
+| ramp50 | 400 | -0.00 | 0 | 416 | 0.0% |
+| ramp50 | 500 | -0.53 | 3 | 416 | 0.7% |
+| ramp50 | 640 | -2.42 | 9 | 416 | 2.2% |
+| ramp50 | 800 | -1.39 | 10 | 416 | 2.4% |
+| ramp50 | 1000 | -0.37 | 17 | 416 | 4.1% |
+| step18 | 320 | 0.00 | 0 | 416 | 0.0% |
+| step18 | 400 | -0.00 | 0 | 416 | 0.0% |
+| step18 | 500 | -0.09 | 0 | 416 | 0.0% |
+| step18 | 640 | -0.17 | 0 | 416 | 0.0% |
+| step18 | 800 | -0.41 | 0 | 416 | 0.0% |
+| step18 | 1000 | -0.51 | 0 | 416 | 0.0% |
+| ledge256 | 320 | 0.00 | 0 | 416 | 0.0% |
+| ledge256 | 400 | -1.04 | 2 | 416 | 0.5% |
+| ledge256 | 500 | -11.58 | 12 | 416 | 2.9% |
+| ledge256 | 640 | 2.39 | 6 | 416 | 1.4% |
+| ledge256 | 800 | -0.53 | 6 | 416 | 1.4% |
+| ledge256 | 1000 | -2.27 | 4 | 416 | 1.0% |
+| corner | 320 | 0.00 | 0 | 416 | 0.0% |
+| corner | 400 | 0.63 | 0 | 416 | 0.0% |
+| corner | 500 | 0.41 | 0 | 416 | 0.0% |
+| corner | 640 | 1.22 | 0 | 416 | 0.0% |
+| corner | 800 | 0.00 | 0 | 416 | 0.0% |
+| corner | 1000 | 0.00 | 0 | 416 | 0.0% |
+| ceiling48 | 320 | 0.00 | 0 | 416 | 0.0% |
+| ceiling48 | 400 | -0.00 | 0 | 416 | 0.0% |
+| ceiling48 | 500 | -0.00 | 0 | 416 | 0.0% |
+| ceiling48 | 640 | -0.00 | 0 | 416 | 0.0% |
+| ceiling48 | 800 | -0.00 | 0 | 416 | 0.0% |
+| ceiling48 | 1000 | -0.00 | 0 | 416 | 0.0% |
+
+Pooled over every reachable cell: **209 of 17472 points harm the player by more than 16 ups**, which is 1.2%. The pooled figure is published beside the per-cell rows and not instead of them: W1 states one rate and does not say over what, and a mechanic can be harmless where it is available often and harmful where it is available twice.
+
+**Crouch slide — W2's gap and execution window, and G5(b)'s point-naive ratio.** The raw `best` and `naive` deltas in ups sit beside every ratio, and a cell whose best delta is not positive and material is marked *not meaningful* rather than printed as a number. `window` is the count of timings reaching ≥95% of the best delta, in ms; `span` is the distance from the first such timing to the last.
+
+| context | entry | best Δ | naive Δ | gap | point-naive Δ | point/best | window | span |
+|---|---|---|---|---|---|---|---|---|
+| floor | 320 | 13.13 | 0.00 | not meaningful | — | not meaningful | 8 | 8 |
+| floor | 400 | 13.11 | -0.00 | not meaningful | 0.00 | not meaningful | 8 | 8 |
+| floor | 500 | 20.47 | -0.00 | 100.0% | 0.00 | 0.0000 | 8 | 8 |
+| floor | 640 | 26.35 | -0.00 | 100.0% | 0.00 | 0.0000 | 8 | 8 |
+| floor | 800 | 36.67 | 0.00 | 100.0% | 0.00 | 0.0000 | 8 | 8 |
+| floor | 1000 | 36.66 | -0.00 | 100.0% | 0.00 | 0.0000 | 8 | 8 |
+| ramp26 | 320 | 13.13 | 0.00 | not meaningful | — | not meaningful | 8 | 8 |
+| ramp26 | 400 | 13.11 | -0.31 | not meaningful | 0.00 | not meaningful | 16 | 256 |
+| ramp26 | 500 | 44.87 | -0.75 | 101.7% | 0.00 | 0.0000 | 152 | 152 |
+| ramp26 | 640 | 41.41 | -1.37 | 103.3% | 0.00 | 0.0000 | 72 | 72 |
+| ramp26 | 800 | 47.68 | -1.27 | 102.7% | 0.00 | 0.0000 | 24 | 32 |
+| ramp26 | 1000 | 61.70 | 0.67 | 98.9% | 0.00 | 0.0000 | 16 | 16 |
+| ramp50 | 320 | 13.13 | 0.00 | not meaningful | — | not meaningful | 8 | 8 |
+| ramp50 | 400 | 49.16 | -0.00 | 100.0% | 0.00 | 0.0000 | 8 | 8 |
+| ramp50 | 500 | 98.28 | -0.53 | 100.5% | -95.65 | -0.9733 | 16 | 16 |
+| ramp50 | 640 | 192.12 | -2.42 | 101.3% | -197.00 | -1.0254 | 104 | 104 |
+| ramp50 | 800 | 231.26 | -1.39 | 100.6% | -202.88 | -0.8773 | 80 | 80 |
+| ramp50 | 1000 | 303.03 | -0.37 | 100.1% | -5.64 | -0.0186 | 16 | 16 |
+| step18 | 320 | 19.83 | 0.00 | 100.0% | — | not meaningful | 32 | 32 |
+| step18 | 400 | 30.12 | -0.00 | 100.0% | 0.00 | 0.0000 | 16 | 16 |
+| step18 | 500 | 32.08 | -0.09 | 100.3% | 0.00 | 0.0000 | 8 | 8 |
+| step18 | 640 | 36.25 | -0.17 | 100.5% | 0.00 | 0.0000 | 16 | 48 |
+| step18 | 800 | 55.31 | -0.41 | 100.7% | 0.00 | 0.0000 | 8 | 8 |
+| step18 | 1000 | 61.87 | -0.51 | 100.8% | 0.00 | 0.0000 | 16 | 64 |
+| ledge256 | 320 | 13.13 | 0.00 | not meaningful | — | not meaningful | 8 | 8 |
+| ledge256 | 400 | 212.83 | -1.04 | 100.5% | 0.00 | 0.0000 | 8 | 8 |
+| ledge256 | 500 | 581.54 | -11.58 | 102.0% | 0.00 | 0.0000 | 8 | 8 |
+| ledge256 | 640 | 382.64 | 2.39 | 99.4% | 0.00 | 0.0000 | 8 | 8 |
+| ledge256 | 800 | 553.54 | -0.53 | 100.1% | 0.00 | 0.0000 | 8 | 8 |
+| ledge256 | 1000 | 185.68 | -2.27 | 101.2% | 0.00 | 0.0000 | 16 | 40 |
+| corner | 320 | 4.99 | 0.00 | not meaningful | — | not meaningful | 16 | 16 |
+| corner | 400 | 261.33 | 0.63 | 99.8% | 0.00 | 0.0000 | 8 | 8 |
+| corner | 500 | 337.17 | 0.41 | 99.9% | 0.00 | 0.0000 | 72 | 72 |
+| corner | 640 | 316.66 | 1.22 | 99.6% | 0.00 | 0.0000 | 8 | 8 |
+| corner | 800 | 240.43 | 0.00 | 100.0% | 0.00 | 0.0000 | 8 | 8 |
+| corner | 1000 | 239.13 | 0.00 | 100.0% | 0.00 | 0.0000 | 8 | 8 |
+| ceiling48 | 320 | — | 0.00 | not meaningful | — | not meaningful | 0 | 0 |
+| ceiling48 | 400 | 26.36 | -0.00 | 100.0% | 0.00 | 0.0000 | 256 | 256 |
+| ceiling48 | 500 | 29.06 | -0.00 | 100.0% | 0.00 | 0.0000 | 256 | 256 |
+| ceiling48 | 640 | 32.52 | -0.00 | 100.0% | 0.00 | 0.0000 | 256 | 256 |
+| ceiling48 | 800 | 35.68 | -0.00 | 100.0% | 0.00 | 0.0000 | 256 | 256 |
+| ceiling48 | 1000 | 38.83 | -0.00 | 100.0% | 0.00 | 0.0000 | 256 | 256 |
+
+**7 qualifying contexts**, and the medians are taken over those. *An aggregation this document had to choose, and says so:* W2 and G5(b) both define their number **per cell** and then score it on *the median across contexts*, and a context here holds six cells — one per entry speed. Nothing in Part 1 says how the six become one. The medians published above collapse each context by taking the median of its qualifying entry speeds first, then the median across contexts. The per-cell numbers are all in the table and in the machine-readable section, so a verdict that wants a different collapse can take one without re-running anything.
+
+**Crouch slide — W3.** `both` is the best absolute exit speed with the mechanic and a held angle; `mechanic alone` is the best with the mechanic and no angle held (aim 0); `technique alone` is the best the control reached over every aim. `d(abs)/d(entry)` is the slope of `both` against entry speed across each adjacent pair.
+
+| context | entry | both | mechanic alone | technique alone | both − best alone | d(abs)/d(entry) |
+|---|---|---|---|---|---|---|
+| floor | 320 | 440.09 | never fires at aim 0 | 480.28 | -40.19 | — |
+| floor | 400 | 440.09 | 320.00 | 480.31 | -40.22 | 0.0000 |
+| floor | 500 | 392.55 | 320.00 | 480.34 | -87.80 | -0.4755 |
+| floor | 640 | 342.98 | 320.00 | 480.36 | -137.38 | -0.3540 |
+| floor | 800 | 353.34 | 320.00 | 480.36 | -127.02 | 0.0648 |
+| floor | 1000 | 353.36 | 320.00 | 480.37 | -127.00 | 0.0001 |
+| ramp26 | 320 | 440.09 | never fires at aim 0 | 480.28 | -40.19 | — |
+| ramp26 | 400 | 440.09 | 287.61 | 480.61 | -40.51 | 0.0000 |
+| ramp26 | 500 | 467.70 | 287.61 | 479.90 | -12.19 | 0.2761 |
+| ramp26 | 640 | 467.70 | 287.61 | 480.85 | -13.15 | -0.0000 |
+| ramp26 | 800 | 396.10 | 287.61 | 482.01 | -85.91 | -0.4475 |
+| ramp26 | 1000 | 346.06 | 287.61 | 475.36 | -129.30 | -0.2502 |
+| ramp50 | 320 | 440.09 | never fires at aim 0 | 480.28 | -40.19 | — |
+| ramp50 | 400 | 432.73 | 320.00 | 482.62 | -49.89 | -0.0920 |
+| ramp50 | 500 | 432.73 | 320.00 | 482.98 | -50.25 | -0.0000 |
+| ramp50 | 640 | 467.70 | 320.00 | 431.13 | 36.56 | 0.2497 |
+| ramp50 | 800 | 475.19 | 187.09 | 381.98 | 93.21 | 0.0468 |
+| ramp50 | 1000 | 435.80 | 54.03 | 432.73 | 3.08 | -0.1969 |
+| step18 | 320 | 452.56 | never fires at aim 0 | 480.28 | -27.72 | — |
+| step18 | 400 | 497.81 | 320.00 | 504.15 | -6.34 | 0.5657 |
+| step18 | 500 | 512.69 | 320.00 | 480.63 | 32.05 | 0.1487 |
+| step18 | 640 | 517.12 | 320.00 | 480.89 | 36.23 | 0.0317 |
+| step18 | 800 | 483.18 | 320.00 | 481.33 | 1.85 | -0.2122 |
+| step18 | 1000 | 490.54 | 320.00 | 482.29 | 8.25 | 0.0368 |
+| ledge256 | 320 | 440.09 | never fires at aim 0 | 480.28 | -40.19 | — |
+| ledge256 | 400 | 639.83 | 320.00 | 480.31 | 159.52 | 2.4967 |
+| ledge256 | 500 | 1008.57 | 320.00 | 880.54 | 128.03 | 3.6873 |
+| ledge256 | 640 | 754.77 | 320.00 | 799.19 | -44.42 | -1.8128 |
+| ledge256 | 800 | 815.62 | 320.00 | 571.83 | 243.79 | 0.3803 |
+| ledge256 | 1000 | 234.45 | 320.00 | 813.58 | -579.13 | -2.9058 |
+| corner | 320 | 462.28 | never fires at aim 0 | 480.28 | -18.00 | — |
+| corner | 400 | 363.87 | 320.00 | 479.62 | -115.74 | -1.2301 |
+| corner | 500 | 432.72 | 320.00 | 467.70 | -34.98 | 0.6885 |
+| corner | 640 | 431.17 | 320.00 | 466.08 | -34.91 | -0.0111 |
+| corner | 800 | 276.04 | 320.00 | 466.08 | -190.04 | -0.9696 |
+| corner | 1000 | 264.85 | 320.00 | 466.08 | -201.23 | -0.0560 |
+| ceiling48 | 320 | — | never fires at aim 0 | 120.09 | — | — |
+| ceiling48 | 400 | 56.08 | 80.00 | 120.10 | -64.02 | — |
+| ceiling48 | 500 | 59.35 | 80.00 | 120.10 | -60.75 | 0.0327 |
+| ceiling48 | 640 | 63.60 | 80.00 | 120.10 | -56.51 | 0.0303 |
+| ceiling48 | 800 | 67.63 | 80.00 | 120.11 | -52.48 | 0.0252 |
+| ceiling48 | 1000 | 71.83 | 80.00 | 120.11 | -48.28 | 0.0210 |
+
+**Levelling** — W3's third number, whether the mechanic ever sets absolute exit speed to a value independent of the entry speed — is read off the slope column: a slope of zero across an adjacent pair is a pair of entry speeds the mechanic returned the same exit speed for. The minimum and maximum slope per context are in the machine-readable section under `w3_entry_slope_min` and `_max`.
+
+**Crouch slide — W4.** A context counts when its best outcome delta over the six entry speeds is material (16 ups).
+
+| context | kind | best Δ over entries | material |
+|---|---|---|---|
+| floor | surface | 36.67 | yes |
+| ramp26 | surface | 61.70 | yes |
+| ramp50 | surface | 303.03 | yes |
+| step18 | edge | 61.87 | yes |
+| ledge256 | edge | 581.54 | yes |
+| corner | wall | 337.17 | yes |
+| ceiling48 | ceiling | 38.83 | yes |
+
+**7 of 7 contexts material, spanning 4 distinct kind(s)**: `surface`, `edge`, `wall`, `ceiling`.
+
+**W5 needs a technique menu the candidate sweep cannot produce, and measuring one turned up a fact about §1.2's harness worth stating first.** On the harness §1.2 specifies — one context, one entry speed, an angle held off the current velocity and a jump the player may or may not press — **four of the seven named techniques are the same command policy**. `ground_turn`, `ramp traversal`, `step-up` and the `drop launch` are each *hold a direction and press nothing*; so is `air_forward`. What distinguishes them is which context they are named in, because in each case the geometry supplies the technique. Only the strafe axis and the jump-on-landing rhythm are separate things for the player's hands to do. The menu below therefore measures three policies per cell and maps the seven names onto them. That is a finding rather than a shortcut, and scoring W5 as though there were seven independent measurements would overstate the evidence by four.
+
+**Crouch slide — the canonical technique menu**, measured from the candidate's own anchors and to the candidate's own horizon, under the control profile, with the held angle swept 0–90° at 5°. Absolute exit speed in ups. `candidate` is the candidate's best absolute exit speed in the same cell.
+
+| context | entry | held_forward | held_strafe | bunnyhop | candidate | beats best technique by |
+|---|---|---|---|---|---|---|
+| floor | 320 | 480.29 @55° | 480.29 @55° | 555.73 @55° | 440.09 | -115.64 |
+| floor | 400 | 480.32 @55° | 480.32 @55° | 600.17 @60° | 440.09 | -160.08 |
+| floor | 500 | 480.35 @55° | 480.35 @55° | 661.56 @65° | 392.55 | -269.01 |
+| floor | 640 | 480.36 @55° | 480.36 @55° | 759.56 @70° | 342.98 | -416.58 |
+| floor | 800 | 480.36 @55° | 480.36 @55° | 910.94 @70° | 353.34 | -557.59 |
+| floor | 1000 | 480.36 @55° | 480.36 @55° | 1065.16 @75° | 353.36 | -711.79 |
+| ramp26 | 320 | 480.29 @55° | 480.29 @55° | 555.73 @55° | 440.09 | -115.64 |
+| ramp26 | 400 | 480.32 @55° | 480.32 @55° | 600.17 @60° | 440.09 | -160.08 |
+| ramp26 | 500 | 477.83 @55° | 477.83 @55° | 640.02 @60° | 467.70 | -172.31 |
+| ramp26 | 640 | 471.71 @55° | 471.71 @55° | 713.01 @65° | 467.70 | -245.31 |
+| ramp26 | 800 | 482.01 @55° | 482.01 @55° | 806.06 @70° | 396.10 | -409.97 |
+| ramp26 | 1000 | 437.00 @50° | 437.00 @50° | 465.52 @50° | 346.06 | -119.46 |
+| ramp50 | 320 | 480.29 @55° | 480.29 @55° | 555.73 @55° | 440.09 | -115.64 |
+| ramp50 | 400 | 480.32 @55° | 480.32 @55° | 536.43 @55° | 432.73 | -103.70 |
+| ramp50 | 500 | 482.98 @55° | 479.05 @55° | 546.02 @55° | 432.73 | -113.29 |
+| ramp50 | 640 | 421.42 @60° | 461.76 @50° | 538.01 @55° | 467.70 | -70.32 |
+| ramp50 | 800 | 381.98 @35° | 423.54 @45° | 558.63 @60° | 475.19 | -83.43 |
+| ramp50 | 1000 | 432.72 @45° | 351.55 @85° | 634.61 @60° | 435.80 | -198.80 |
+| step18 | 320 | 480.29 @55° | 480.29 @55° | 555.73 @55° | 452.56 | -103.17 |
+| step18 | 400 | 480.32 @55° | 480.32 @55° | 600.17 @60° | 497.81 | -102.36 |
+| step18 | 500 | 480.62 @55° | 480.37 @55° | 661.56 @65° | 512.69 | -148.87 |
+| step18 | 640 | 480.87 @55° | 480.41 @55° | 759.31 @70° | 517.12 | -242.18 |
+| step18 | 800 | 481.32 @55° | 480.42 @55° | 910.06 @70° | 483.18 | -426.88 |
+| step18 | 1000 | 482.22 @55° | 480.44 @55° | 1064.49 @75° | 490.54 | -573.95 |
+| ledge256 | 320 | 480.29 @55° | 480.29 @55° | 555.73 @55° | 440.09 | -115.64 |
+| ledge256 | 400 | 480.32 @55° | 480.32 @55° | 557.88 @55° | 639.83 | 81.95 |
+| ledge256 | 500 | 809.49 @20° | 480.35 @55° | 661.56 @65° | 1008.57 | 199.08 |
+| ledge256 | 640 | 480.53 @55° | 492.83 @55° | 759.56 @70° | 754.77 | -4.80 |
+| ledge256 | 800 | 571.83 @65° | 489.62 @55° | 910.94 @70° | 815.62 | -95.32 |
+| ledge256 | 1000 | 488.12 @55° | 488.01 @55° | 1065.16 @75° | 234.45 | -830.70 |
+| corner | 320 | 466.08 @50° | 466.08 @50° | 331.29 @15° | 462.28 | -3.79 |
+| corner | 400 | 466.08 @50° | 466.08 @50° | 324.94 @10° | 363.87 | -102.21 |
+| corner | 500 | 466.08 @50° | 466.08 @50° | 324.94 @10° | 432.72 | -33.35 |
+| corner | 640 | 466.06 @50° | 466.06 @50° | 321.22 @5° | 431.17 | -34.89 |
+| corner | 800 | 466.08 @50° | 466.08 @50° | 321.22 @5° | 276.04 | -190.04 |
+| corner | 1000 | 466.08 @50° | 466.08 @50° | 321.22 @5° | 264.85 | -201.23 |
+| ceiling48 | 320 | 120.09 @55° | 120.09 @55° | 525.45 @55° | — | — |
+| ceiling48 | 400 | 120.10 @55° | 120.10 @55° | 572.68 @60° | 56.08 | -516.60 |
+| ceiling48 | 500 | 120.10 @55° | 120.10 @55° | 640.00 @60° | 59.35 | -580.65 |
+| ceiling48 | 640 | 120.10 @55° | 120.10 @55° | 756.95 @65° | 63.60 | -693.35 |
+| ceiling48 | 800 | 120.11 @55° | 120.11 @55° | 890.82 @70° | 67.63 | -823.20 |
+| ceiling48 | 1000 | 120.11 @55° | 120.11 @55° | 1049.85 @75° | 71.83 | -978.02 |
+
+**Crouch slide — W5's survival test.** For each named technique, over the cells of *its own* domain: how many the candidate fails to beat by 16 ups or more. A technique survives if that count is not zero.
+
+| technique | policy | domain cells | not beaten materially |
+|---|---|---|---|
+| `ground_turn` | `held_forward` | 12 | 12 |
+| `air_forward` | `held_forward` | 41 | 32 |
+| `air_strafe` | `held_strafe` | 41 | 32 |
+| `bunnyhop` | `bunnyhop` | 12 | 12 |
+| `drop_launch` | `held_forward` | 6 | 2 |
+| `ramp_traversal` | `held_forward` | 12 | 10 |
+| `step_up` | `held_forward` | 6 | 3 |
+
+**Crouch slide — W6's ≥95%-of-best sets**, the same sets W2's execution window is read off. Aims are signed offsets from the heading. Centroids are compared against 10% of each swept range: 25 ms of timing and 36° of aim.
+
+| context | entry | timings | timing span ms | timing centroid ms | aims | aim span | aim centroid |
+|---|---|---|---|---|---|---|---|
+| floor | 320 | 1 | 8 | 248 | 2 | 120 | 0.0 |
+| ramp26 | 320 | 1 | 8 | 248 | 2 | 120 | 0.0 |
+| ramp50 | 320 | 1 | 8 | 248 | 2 | 120 | 0.0 |
+| step18 | 320 | 4 | 32 | 76 | 2 | 90 | 0.0 |
+| ledge256 | 320 | 1 | 8 | 248 | 2 | 120 | 0.0 |
+| corner | 320 | 2 | 16 | 164 | 1 | 0 | 55.0 |
+| ceiling48 | 320 | 0 | 0 | — | 0 | 0 | — |
+| floor | 400 | 1 | 8 | 248 | 2 | 120 | 0.0 |
+| ramp26 | 400 | 2 | 256 | 124 | 4 | 120 | 0.0 |
+| ramp50 | 400 | 1 | 8 | 128 | 2 | 90 | 0.0 |
+| step18 | 400 | 2 | 16 | 68 | 2 | 100 | 0.0 |
+| ledge256 | 400 | 1 | 8 | 8 | 2 | 120 | 0.0 |
+| corner | 400 | 1 | 8 | 0 | 1 | 0 | 30.0 |
+| ceiling48 | 400 | 32 | 256 | 124 | 2 | 140 | 0.0 |
+| floor | 500 | 1 | 8 | 224 | 2 | 130 | 0.0 |
+| ramp26 | 500 | 19 | 152 | 176 | 2 | 100 | 0.0 |
+| ramp50 | 500 | 2 | 16 | 108 | 2 | 90 | 0.0 |
+| step18 | 500 | 1 | 8 | 72 | 2 | 110 | 0.0 |
+| ledge256 | 500 | 1 | 8 | 48 | 2 | 120 | 0.0 |
+| corner | 500 | 9 | 72 | 48 | 1 | 0 | -45.0 |
+| ceiling48 | 500 | 32 | 256 | 124 | 2 | 140 | 0.0 |
+| floor | 640 | 1 | 8 | 200 | 2 | 140 | 0.0 |
+| ramp26 | 640 | 9 | 72 | 216 | 2 | 100 | 0.0 |
+| ramp50 | 640 | 13 | 104 | 48 | 4 | 100 | 0.0 |
+| step18 | 640 | 2 | 48 | 100 | 4 | 120 | 0.0 |
+| ledge256 | 640 | 1 | 8 | 56 | 2 | 130 | 0.0 |
+| corner | 640 | 1 | 8 | 72 | 1 | 0 | 60.0 |
+| ceiling48 | 640 | 32 | 256 | 124 | 2 | 140 | 0.0 |
+| floor | 800 | 1 | 8 | 248 | 2 | 140 | 0.0 |
+| ramp26 | 800 | 3 | 32 | 235 | 2 | 130 | 0.0 |
+| ramp50 | 800 | 10 | 80 | 36 | 6 | 110 | 0.0 |
+| step18 | 800 | 1 | 8 | 120 | 2 | 120 | 0.0 |
+| ledge256 | 800 | 1 | 8 | 200 | 2 | 150 | 0.0 |
+| corner | 800 | 1 | 8 | 48 | 1 | 0 | -70.0 |
+| ceiling48 | 800 | 32 | 256 | 124 | 2 | 140 | 0.0 |
+| floor | 1000 | 1 | 8 | 248 | 2 | 140 | 0.0 |
+| ramp26 | 1000 | 2 | 16 | 212 | 2 | 140 | 0.0 |
+| ramp50 | 1000 | 2 | 16 | 4 | 2 | 180 | 0.0 |
+| step18 | 1000 | 2 | 64 | 140 | 4 | 130 | 0.0 |
+| ledge256 | 1000 | 2 | 40 | 120 | 4 | 200 | 0.0 |
+| corner | 1000 | 1 | 8 | 16 | 1 | 0 | -75.0 |
+| ceiling48 | 1000 | 32 | 256 | 124 | 2 | 140 | 0.0 |
+
+The pair counts W6 is scored on — how many pairs of contexts have disjoint sets, and how many have centroids more than 10% of the swept range apart, in timing and in aim, at each entry speed — are in the machine-readable section under `w6.e<entry>.*`. They are counts of pairs rather than a yes/no, because W6 asks for *at least two contexts* and the number of pairs that satisfy it is the evidence for that.
+
+**Crouch slide — G3's two counts.** The first is the commands between the command carrying the input and the first command on which velocity differs from the control, over every press that fired: the worst across all 42 cells is **0**. The second is the commands on which the mechanic causes an input to be ignored, measured by rotating one command's wish direction by 90° at a time over the 32 commands after the press and counting the commands that changed nothing. The cell where the candidate ignores the most *more than its own control does* is **corner at 320 ups**: **32 unresponsive in the candidate against 0 in the control**, out of 32 probed. The control's count is the reading that matters — a command the control also ignores was never the mechanic's doing, and at 640 ups a crouched player's wish speed of 80 is below `PM_Accelerate`'s projection in every direction, so steering stops mattering for reasons that predate every candidate. 
+
+What that instrument does *not* cover, stated rather than left to be assumed: it measures whether a command's **steering** reached the outcome. It cannot measure a spent *jump press*, because under canon an airborne jump press does nothing at all, so there is no control behaviour to differ from. Read from `step.rs` instead: the dash and the wall jump both set `jump_held` when they fire, exactly as a floor jump does, so the following command's jump press is refused until the input is released. Whether that is a press *spent* or a press *ignored* is a reading of the gate, not a measurement, and it is left to the verdict.
+
+**Crouch slide — G5(a).** A player who accelerates on the ground only, jumps and lands freely, holds one world direction so they never strafejump, and never invokes the mechanic — run for 30 seconds in each context. `armed` counts the transitions from unavailable to available. **Flat ground decides the gate; the other six are the evidence** (amendment 2, change 18).
+
+| context | armed | commands available | peak speed | over max_speed |
+|---|---|---|---|---|
+| floor | 0 | 0 | 320.00 | no |
+| ramp26 | 0 | 0 | 320.00 | no |
+| ramp50 | 0 | 0 | 320.00 | no |
+| step18 | 0 | 0 | 320.00 | no |
+| ledge256 | 0 | 0 | 320.00 | no |
+| corner | 0 | 0 | 320.00 | no |
+| ceiling48 | 0 | 0 | 320.00 | no |
+
+**Crouch slide — G2.** Sections 1 to 6 re-taken under the candidate profile and diffed against the same six families under the control: **1059 measurements, and none of them moved**. G2's scope is every measurement in which the mechanic's activation preconditions are not all met on every command; since no value moved at all, the question of which measurements are exempt does not arise.
+
+*What 1059 is and is not, because G2 names the whole published set.* This document publishes 2211 values: 1059 under `cpm`, 1059 under `vq3`, 74 in section 8 and 19 in section 7. The 1059 compared here are the `cpm` half, because the candidate constants sit on top of `cpm` — `experimental()` is `..Self::cpm()` — so a `vq3` re-measurement would be a measurement of a profile nobody has proposed. Section 7 restates other sections' numbers rather than taking its own, and section 8 is not parameterised by profile at all. The unmeasured half is named here rather than folded into a claim about "the whole set".
+
+**Crouch slide — G7 part 2.** The outcome delta swept against aim at the cell's best timing, refined to 0.25° — the floor the instrument's own self-test needed — and against the approach offset refined to 0.0625 of a unit. A step that survives is a cliff; one that halves with the grid is a gradient.
+
+| context | entry | aim: coarse | aim: refined | geometry: coarse | geometry: refined |
+|---|---|---|---|---|---|
+| floor | 320 | none | — | none | — |
+| floor | 400 | none | — | none | — |
+| floor | 500 | 20.47 | 20.36 @ 294.92° | none | — |
+| floor | 640 | 26.34 | 26.55 @ 289.77° | none | — |
+| floor | 800 | 36.67 | 39.00 @ 71.02° | none | — |
+| floor | 1000 | 33.66 | 33.79 @ 284.92° | none | — |
+| ramp26 | 320 | none | — | none | — |
+| ramp26 | 400 | none | — | none | — |
+| ramp26 | 500 | 46.06 | 20.56 @ 50.70° | 37.58 | 36.19 @ +13.031u |
+| ramp26 | 640 | 20.63 | 23.56 @ 67.73° | none | — |
+| ramp26 | 800 | 23.00 | 81.37 @ 41.95° | 24.82 | 20.07 @ -11.969u |
+| ramp26 | 1000 | 25.95 | 50.67 @ 298.67° | none | — |
+| ramp50 | 320 | none | — | none | — |
+| ramp50 | 400 | 49.15 | 59.52 @ 44.14° | 52.75 | 52.75 @ +1.094u |
+| ramp50 | 500 | 98.27 | 130.07 @ 318.52° | 111.25 | 111.25 @ +1.844u |
+| ramp50 | 640 | 192.12 | 191.39 @ 52.73° | 146.70 | 202.12 @ +0.844u |
+| ramp50 | 800 | 220.31 | 222.94 @ 39.30° | 215.67 | 276.19 @ +0.719u |
+| ramp50 | 1000 | 258.43 | 252.11 @ 311.80° | 19.23 | 131.18 @ -10.156u |
+| step18 | 320 | 19.84 | 10.44 @ 314.92° | none | — |
+| step18 | 400 | 30.12 | 18.85 @ 311.95° | none | — |
+| step18 | 500 | 32.06 | 34.03 @ 54.61° | 27.53 | 26.26 @ -11.969u |
+| step18 | 640 | 36.24 | 37.28 @ 305.08° | none | — |
+| step18 | 800 | 54.85 | 47.55 @ 300.08° | 27.50 | 28.93 @ +8.781u |
+| step18 | 1000 | 61.88 | 47.63 @ 59.77° | 16.50 | 9.85 @ +6.156u |
+| ledge256 | 320 | none | — | none | — |
+| ledge256 | 400 | 247.83 | 404.33 @ 59.30° | 22.98 | 396.57 @ +8.281u |
+| ledge256 | 500 | 618.06 | 83.46 @ 59.92° | 53.00 | 391.76 @ +0.031u |
+| ledge256 | 640 | 586.93 | 373.52 @ 295.70° | 253.20 | 485.54 @ +4.281u |
+| ledge256 | 800 | 553.54 | 554.86 @ 75.08° | 582.11 | 582.11 @ +4.219u |
+| ledge256 | 1000 | 185.68 | 187.28 @ 93.83° | 248.25 | 249.80 @ -0.531u |
+| corner | 320 | none | — | none | — |
+| corner | 400 | 261.33 | 293.22 @ 29.61° | 261.33 | 261.32 @ +0.719u |
+| corner | 500 | 337.18 | 294.43 @ 311.33° | 337.18 | 337.18 @ -0.906u |
+| corner | 640 | 51.01 | 260.26 @ 28.52° | 244.37 | 244.37 @ -1.719u |
+| corner | 800 | 257.08 | 229.40 @ 289.92° | 200.12 | 200.12 @ -3.156u |
+| corner | 1000 | 190.51 | 189.73 @ 76.33° | 230.46 | 230.46 @ -4.094u |
+| ceiling48 | 400 | 16.06 | 1.77 @ 296.80° | none | — |
+| ceiling48 | 500 | 16.27 | 1.81 @ 63.20° | none | — |
+| ceiling48 | 640 | 16.42 | 1.73 @ 296.17° | none | — |
+| ceiling48 | 800 | 16.47 | 1.78 @ 296.17° | none | — |
+| ceiling48 | 1000 | 16.41 | 1.80 @ 296.17° | none | — |
+
+**Crouch slide — the three G7 numbers.** Largest step surviving aim refinement to 0.25°: **554.86 ups**. Largest surviving geometry refinement to 0.0625 of a unit: **582.11 ups**. Largest disagreement between the closed form `step.rs` computes the impulse from and the impulse actually measured against the control on the invoking command: **14.41 ups**. 
+
+The **timing** axis is not refinable — 8 ms is the input quantum: the sweep's timing resolution is one command and one command is the simulation's input quantum, so there is no finer grid to refine into and "does this step shrink when the grid is refined" has no meaning there. That is a limit of the model rather than of this instrument, and it is stated rather than answered with a number that would only describe the grid. 
+
+The closed forms are the *immediate impulse*, not the outcome at the horizon. No closed form for the horizon outcome is offered, because a second of `PM_Accelerate`, friction, ground probes and possibly a collision separates the impulse from the horizon and every one of those depends on the whole run. G7's first part asks the **verdict** to state a rule; what is published here is the arithmetic the code already contains, measured, so that a rule has something to be checked against. 
+
+**Beside the incumbent, because §1.6 binds a G7 rejection to publish the comparison.** The same instrument, at the same geometry floor, finds overbounce's surviving step at 447.55 ups across 0.0625 of a unit of drop height (the self-test table above). Canon's own text quotes overbounce at 160.00 against 0.17; that is §4's figure at one drop height, and the refined sweep finds a larger one. Both numbers are this instrument's, taken the same way, so they can be compared directly.
+
+### Dash
+
+**Dash — the sweep.** `Δ` is the outcome delta in ups; `abs` is absolute exit speed; `control` is the best absolute exit speed the existing vocabulary reached in the same cell with the same freedom of aim and timing.
+
+| context | entry | anchor cmds | anchor ups | avail | best Δ | best abs | control abs | at ms | at aim | Δ at aim 0 | latency |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| floor | 320 | 43 | 320.00 | 47 | 6.73 | 328.90 | 482.51 | 16 | 70 | 0.00 | 0 |
+| floor | 400 | 43 | 400.00 | 47 | 5.65 | 331.09 | 482.53 | 16 | 290 | — | 0 |
+| floor | 500 | 43 | 500.00 | 47 | 4.64 | 278.63 | 482.53 | 16 | 285 | — | 0 |
+| floor | 640 | 43 | 640.00 | 47 | 3.64 | 283.13 | 482.87 | 16 | 75 | — | 0 |
+| floor | 800 | 43 | 800.00 | 47 | 3.00 | 233.40 | 483.54 | 24 | 80 | — | 0 |
+| floor | 1000 | 43 | 1000.00 | 47 | 2.39 | 240.37 | 484.36 | 24 | 280 | — | 0 |
+| ramp26 | 320 | 40 | 320.00 | 47 | 27.51 | 169.72 | 482.51 | 16 | 275 | 0.00 | 0 |
+| ramp26 | 400 | 41 | 219.57 | 47 | 27.59 | 219.89 | 482.53 | 16 | 280 | 0.00 | 0 |
+| ramp26 | 500 | 41 | 300.33 | 47 | 30.22 | 222.15 | 482.53 | 376 | 80 | 0.00 | 0 |
+| ramp26 | 640 | 41 | 413.40 | 47 | 34.09 | 337.67 | 482.53 | 16 | 70 | — | 0 |
+| ramp26 | 800 | 41 | 542.62 | 47 | 65.76 | 434.23 | 726.49 | 240 | 300 | — | 0 |
+| ramp26 | 1000 | 41 | 704.15 | 38 | 33.60 | 38.40 | 754.18 | 16 | 180 | — | 0 |
+| ramp50 | 320 | 64 | 83.23 | 47 | 141.33 | 173.18 | 482.51 | 328 | 235 | 0.00 | 0 |
+| ramp50 | 400 | 83 | 97.36 | 47 | 96.60 | 120.47 | 482.53 | 240 | 210 | 0.00 | 0 |
+| ramp50 | 500 | 112 | 137.91 | 47 | 82.07 | 150.15 | 482.53 | 368 | 260 | 0.00 | 0 |
+| ramp50 | 640 | 156 | 207.09 | 47 | 158.12 | 226.21 | 482.53 | 368 | 100 | 0.00 | 0 |
+| ramp50 | 800 | 208 | 294.28 | 47 | 158.52 | 226.61 | 482.53 | 336 | 100 | 0.00 | 0 |
+| ramp50 | 1000 | 276 | 391.01 | 47 | 249.00 | 299.49 | 482.53 | 352 | 175 | 0.00 | 0 |
+| step18 | 320 | 37 | 320.00 | 47 | 53.52 | 268.21 | 482.51 | 16 | 280 | 0.00 | 0 |
+| step18 | 400 | 38 | 400.00 | 47 | 66.04 | 336.18 | 531.68 | 16 | 285 | — | 0 |
+| step18 | 500 | 39 | 500.00 | 47 | 83.47 | 412.96 | 507.36 | 16 | 290 | — | 0 |
+| step18 | 640 | 40 | 640.00 | 48 | 42.44 | 138.67 | 482.53 | 120 | 265 | — | 0 |
+| step18 | 800 | 40 | 800.00 | 47 | 3.00 | 233.36 | 483.54 | 16 | 280 | — | 0 |
+| step18 | 1000 | 41 | 1000.00 | 47 | 10.44 | 38.40 | 484.37 | 16 | 180 | — | 0 |
+| ledge256 | 320 | 43 | 320.00 | 47 | 169.16 | 527.11 | 482.51 | 24 | 85 | 60.80 | 0 |
+| ledge256 | 400 | 43 | 400.00 | 47 | 152.88 | 586.26 | 530.08 | 16 | 85 | — | 0 |
+| ledge256 | 500 | 43 | 500.00 | 47 | 192.72 | 670.13 | 624.84 | 16 | 70 | — | 0 |
+| ledge256 | 640 | 43 | 640.00 | 47 | 108.15 | 723.11 | 804.08 | 288 | 90 | — | 0 |
+| ledge256 | 800 | 43 | 800.00 | 47 | 131.30 | 896.85 | 935.53 | 48 | 90 | — | 0 |
+| ledge256 | 1000 | 43 | 1000.00 | 47 | 408.13 | 688.99 | 1099.34 | 288 | 240 | — | 0 |
+| corner | 320 | 43 | 15.68 | 47 | 460.75 | 466.04 | 482.51 | 32 | 50 | 0.00 | 0 |
+| corner | 400 | 43 | 13.20 | 47 | 506.74 | 699.44 | 482.53 | 216 | 75 | 0.00 | 0 |
+| corner | 500 | 43 | 10.74 | 47 | 555.98 | 838.82 | 482.53 | 128 | 55 | 0.00 | 0 |
+| corner | 640 | 43 | 8.32 | 47 | 492.90 | 815.35 | 482.53 | 64 | 65 | 0.00 | 0 |
+| corner | 800 | 43 | 8.48 | 47 | 502.51 | 760.12 | 482.53 | 240 | 70 | 0.00 | 0 |
+| corner | 1000 | 43 | 6.12 | 47 | 458.18 | 461.60 | 482.53 | 240 | 55 | 0.00 | 0 |
+| ceiling48 | 320 | 17 | 320.00 | 16 | 1.62 | 74.07 | 120.14 | 24 | 65 | 0.00 | 0 |
+| ceiling48 | 400 | 17 | 400.00 | 16 | 4.80 | 9.60 | 120.14 | 16 | 180 | — | 0 |
+| ceiling48 | 500 | 17 | 500.00 | 16 | 4.80 | 9.60 | 120.14 | 16 | 180 | — | 0 |
+| ceiling48 | 640 | 17 | 640.00 | 16 | 0.42 | 31.69 | 120.15 | 16 | 290 | — | 0 |
+| ceiling48 | 800 | 17 | 800.00 | 16 | 3.36 | 9.60 | 120.16 | 16 | 180 | — | 0 |
+| ceiling48 | 1000 | 17 | 1000.00 | 16 | 4.80 | 9.60 | 120.17 | 16 | 180 | — | 0 |
+
+A cell marked `*` in `avail` is one where every invocation timing produced the identical run, so the timing axis selected nothing and the count is not a window. That is measured by comparing the rows rather than inferred from the context's name.
+
+**A delta of zero has two causes and they are not the same fact.** Either the mechanic did nothing, or it did something and the second of simulation between the window closing and the horizon erased it. On flat ground the second is what happens: a player holding a direction converges to the ground terminal speed whether or not they slid, so a run measured a full second later shows nothing however much speed the slide carried in between. `peak_gain_ups` in the machine-readable section is the largest advantage the candidate held at any command of that cell's best run, with `peak_gain_at_ms` saying when. **It is a diagnostic and no criterion is scored on it** — §1.1 defines the outcome at the horizon and this document does not get to move the horizon because it dislikes an answer. It is published so that a zero can be read correctly, and a verdict that wants to say "this mechanic is worth 300 ups for half a second and nothing at the horizon" has the number for both halves of the sentence.
+
+**Dash — W1's naive neighbourhood.** Every timing in the window crossed with every aim within ±30° of the heading. `harmed` counts the points whose outcome delta is negative by more than 16 ups; `n` is the size of the neighbourhood, published because a percentage over it without its count is false precision.
+
+| context | entry | mean Δ | harmed | n | harm rate |
+|---|---|---|---|---|---|
+| floor | 320 | 0.00 | 0 | 624 | 0.0% |
+| floor | 400 | 0.00 | 0 | 624 | 0.0% |
+| floor | 500 | 0.00 | 0 | 624 | 0.0% |
+| floor | 640 | 0.00 | 0 | 624 | 0.0% |
+| floor | 800 | 0.00 | 0 | 624 | 0.0% |
+| floor | 1000 | 0.00 | 0 | 624 | 0.0% |
+| ramp26 | 320 | 3.33 | 2 | 624 | 0.3% |
+| ramp26 | 400 | 0.32 | 0 | 624 | 0.0% |
+| ramp26 | 500 | 0.15 | 0 | 624 | 0.0% |
+| ramp26 | 640 | 0.00 | 0 | 624 | 0.0% |
+| ramp26 | 800 | 0.00 | 0 | 624 | 0.0% |
+| ramp26 | 1000 | 0.00 | 0 | 624 | 0.0% |
+| ramp50 | 320 | 18.34 | 2 | 624 | 0.3% |
+| ramp50 | 400 | 0.00 | 0 | 624 | 0.0% |
+| ramp50 | 500 | 0.00 | 0 | 624 | 0.0% |
+| ramp50 | 640 | 0.00 | 0 | 624 | 0.0% |
+| ramp50 | 800 | -0.00 | 0 | 624 | 0.0% |
+| ramp50 | 1000 | 0.00 | 0 | 624 | 0.0% |
+| step18 | 320 | 0.00 | 0 | 624 | 0.0% |
+| step18 | 400 | 0.00 | 0 | 624 | 0.0% |
+| step18 | 500 | -0.00 | 0 | 624 | 0.0% |
+| step18 | 640 | 0.00 | 0 | 624 | 0.0% |
+| step18 | 800 | 0.00 | 0 | 624 | 0.0% |
+| step18 | 1000 | 0.00 | 0 | 624 | 0.0% |
+| ledge256 | 320 | 13.68 | 0 | 624 | 0.0% |
+| ledge256 | 400 | 0.18 | 0 | 624 | 0.0% |
+| ledge256 | 500 | 0.00 | 0 | 624 | 0.0% |
+| ledge256 | 640 | 0.00 | 0 | 624 | 0.0% |
+| ledge256 | 800 | 0.00 | 0 | 624 | 0.0% |
+| ledge256 | 1000 | 0.00 | 0 | 624 | 0.0% |
+| corner | 320 | 5.40 | 28 | 624 | 4.5% |
+| corner | 400 | -2.93 | 20 | 624 | 3.2% |
+| corner | 500 | 1.43 | 16 | 624 | 2.6% |
+| corner | 640 | 6.76 | 11 | 624 | 1.8% |
+| corner | 800 | 1.74 | 0 | 624 | 0.0% |
+| corner | 1000 | 0.89 | 0 | 624 | 0.0% |
+| ceiling48 | 320 | -0.00 | 0 | 624 | 0.0% |
+| ceiling48 | 400 | -0.00 | 0 | 624 | 0.0% |
+| ceiling48 | 500 | 0.00 | 0 | 624 | 0.0% |
+| ceiling48 | 640 | 0.00 | 0 | 624 | 0.0% |
+| ceiling48 | 800 | 0.00 | 0 | 624 | 0.0% |
+| ceiling48 | 1000 | 0.00 | 0 | 624 | 0.0% |
+
+Pooled over every reachable cell: **79 of 26208 points harm the player by more than 16 ups**, which is 0.3%. The pooled figure is published beside the per-cell rows and not instead of them: W1 states one rate and does not say over what, and a mechanic can be harmless where it is available often and harmful where it is available twice.
+
+**Dash — W2's gap and execution window, and G5(b)'s point-naive ratio.** The raw `best` and `naive` deltas in ups sit beside every ratio, and a cell whose best delta is not positive and material is marked *not meaningful* rather than printed as a number. `window` is the count of timings reaching ≥95% of the best delta, in ms; `span` is the distance from the first such timing to the last.
+
+| context | entry | best Δ | naive Δ | gap | point-naive Δ | point/best | window | span |
+|---|---|---|---|---|---|---|---|---|
+| floor | 320 | 6.73 | 0.00 | not meaningful | 0.00 | not meaningful | 192 | 192 |
+| floor | 400 | 5.65 | 0.00 | not meaningful | — | not meaningful | 192 | 192 |
+| floor | 500 | 4.64 | 0.00 | not meaningful | — | not meaningful | 304 | 304 |
+| floor | 640 | 3.64 | 0.00 | not meaningful | — | not meaningful | 376 | 376 |
+| floor | 800 | 3.00 | 0.00 | not meaningful | — | not meaningful | 376 | 376 |
+| floor | 1000 | 2.39 | 0.00 | not meaningful | — | not meaningful | 376 | 376 |
+| ramp26 | 320 | 27.51 | 3.33 | 87.9% | 0.00 | 0.0000 | 376 | 376 |
+| ramp26 | 400 | 27.59 | 0.32 | 98.8% | 0.00 | 0.0000 | 376 | 376 |
+| ramp26 | 500 | 30.22 | 0.15 | 99.5% | 0.00 | 0.0000 | 376 | 376 |
+| ramp26 | 640 | 34.09 | 0.00 | 100.0% | — | not meaningful | 376 | 376 |
+| ramp26 | 800 | 65.76 | 0.00 | 100.0% | — | not meaningful | 168 | 176 |
+| ramp26 | 1000 | 33.60 | 0.00 | 100.0% | — | not meaningful | 136 | 136 |
+| ramp50 | 320 | 141.33 | 18.34 | 87.0% | 0.00 | 0.0000 | 8 | 8 |
+| ramp50 | 400 | 96.60 | 0.00 | 100.0% | 0.00 | 0.0000 | 8 | 8 |
+| ramp50 | 500 | 82.07 | 0.00 | 100.0% | 0.00 | 0.0000 | 24 | 24 |
+| ramp50 | 640 | 158.12 | 0.00 | 100.0% | 0.00 | 0.0000 | 16 | 16 |
+| ramp50 | 800 | 158.52 | -0.00 | 100.0% | 0.00 | 0.0000 | 16 | 16 |
+| ramp50 | 1000 | 249.00 | 0.00 | 100.0% | 0.00 | 0.0000 | 16 | 16 |
+| step18 | 320 | 53.52 | 0.00 | 100.0% | 0.00 | 0.0000 | 376 | 376 |
+| step18 | 400 | 66.04 | 0.00 | 100.0% | — | not meaningful | 376 | 376 |
+| step18 | 500 | 83.47 | -0.00 | 100.0% | — | not meaningful | 376 | 376 |
+| step18 | 640 | 42.44 | 0.00 | 100.0% | — | not meaningful | 256 | 256 |
+| step18 | 800 | 3.00 | 0.00 | not meaningful | — | not meaningful | 376 | 376 |
+| step18 | 1000 | 10.44 | 0.00 | not meaningful | — | not meaningful | 24 | 24 |
+| ledge256 | 320 | 169.16 | 13.68 | 91.9% | 60.80 | 0.3594 | 160 | 160 |
+| ledge256 | 400 | 152.88 | 0.18 | 99.9% | — | not meaningful | 376 | 376 |
+| ledge256 | 500 | 192.72 | 0.00 | 100.0% | — | not meaningful | 160 | 168 |
+| ledge256 | 640 | 108.15 | 0.00 | 100.0% | — | not meaningful | 376 | 376 |
+| ledge256 | 800 | 131.30 | 0.00 | 100.0% | — | not meaningful | 184 | 184 |
+| ledge256 | 1000 | 408.13 | 0.00 | 100.0% | — | not meaningful | 8 | 8 |
+| corner | 320 | 460.75 | 5.40 | 98.8% | 0.00 | 0.0000 | 104 | 104 |
+| corner | 400 | 506.74 | -2.93 | 100.6% | 0.00 | 0.0000 | 8 | 8 |
+| corner | 500 | 555.98 | 1.43 | 99.7% | 0.00 | 0.0000 | 8 | 8 |
+| corner | 640 | 492.90 | 6.76 | 98.6% | 0.00 | 0.0000 | 8 | 8 |
+| corner | 800 | 502.51 | 1.74 | 99.7% | 0.00 | 0.0000 | 8 | 8 |
+| corner | 1000 | 458.18 | 0.89 | 99.8% | 0.00 | 0.0000 | 8 | 8 |
+| ceiling48 | 320 | 1.62 | -0.00 | not meaningful | 0.00 | not meaningful | 128 | 128 |
+| ceiling48 | 400 | 4.80 | -0.00 | not meaningful | — | not meaningful | 40 | 80 |
+| ceiling48 | 500 | 4.80 | 0.00 | not meaningful | — | not meaningful | 40 | 80 |
+| ceiling48 | 640 | 0.42 | 0.00 | not meaningful | — | not meaningful | 128 | 128 |
+| ceiling48 | 800 | 3.36 | 0.00 | not meaningful | — | not meaningful | 40 | 80 |
+| ceiling48 | 1000 | 4.80 | 0.00 | not meaningful | — | not meaningful | 40 | 80 |
+
+**5 qualifying contexts**, and the medians are taken over those. *An aggregation this document had to choose, and says so:* W2 and G5(b) both define their number **per cell** and then score it on *the median across contexts*, and a context here holds six cells — one per entry speed. Nothing in Part 1 says how the six become one. The medians published above collapse each context by taking the median of its qualifying entry speeds first, then the median across contexts. The per-cell numbers are all in the table and in the machine-readable section, so a verdict that wants a different collapse can take one without re-running anything.
+
+**Dash — W3.** `both` is the best absolute exit speed with the mechanic and a held angle; `mechanic alone` is the best with the mechanic and no angle held (aim 0); `technique alone` is the best the control reached over every aim. `d(abs)/d(entry)` is the slope of `both` against entry speed across each adjacent pair.
+
+| context | entry | both | mechanic alone | technique alone | both − best alone | d(abs)/d(entry) |
+|---|---|---|---|---|---|---|
+| floor | 320 | 328.90 | 320.00 | 482.51 | -153.61 | — |
+| floor | 400 | 331.09 | never fires at aim 0 | 482.53 | -151.44 | 0.0274 |
+| floor | 500 | 278.63 | never fires at aim 0 | 482.53 | -203.90 | -0.5246 |
+| floor | 640 | 283.13 | never fires at aim 0 | 482.87 | -199.74 | 0.0321 |
+| floor | 800 | 233.40 | never fires at aim 0 | 483.54 | -250.14 | -0.3108 |
+| floor | 1000 | 240.37 | never fires at aim 0 | 484.36 | -244.00 | 0.0348 |
+| ramp26 | 320 | 169.72 | 287.61 | 482.51 | -312.79 | — |
+| ramp26 | 400 | 219.89 | 287.61 | 482.53 | -262.64 | 0.6272 |
+| ramp26 | 500 | 222.15 | 287.61 | 482.53 | -260.38 | 0.0226 |
+| ramp26 | 640 | 337.67 | never fires at aim 0 | 482.53 | -144.86 | 0.8251 |
+| ramp26 | 800 | 434.23 | never fires at aim 0 | 726.49 | -292.25 | 0.6035 |
+| ramp26 | 1000 | 38.40 | never fires at aim 0 | 754.18 | -715.78 | -1.9792 |
+| ramp50 | 320 | 173.18 | 320.00 | 482.51 | -309.33 | — |
+| ramp50 | 400 | 120.47 | 320.00 | 482.53 | -362.07 | -0.6590 |
+| ramp50 | 500 | 150.15 | 320.00 | 482.53 | -332.38 | 0.2969 |
+| ramp50 | 640 | 226.21 | 320.00 | 482.53 | -256.33 | 0.5432 |
+| ramp50 | 800 | 226.61 | 320.00 | 482.53 | -255.92 | 0.0025 |
+| ramp50 | 1000 | 299.49 | 320.00 | 482.53 | -183.04 | 0.3644 |
+| step18 | 320 | 268.21 | 320.00 | 482.51 | -214.30 | — |
+| step18 | 400 | 336.18 | never fires at aim 0 | 531.68 | -195.50 | 0.8496 |
+| step18 | 500 | 412.96 | never fires at aim 0 | 507.36 | -94.40 | 0.7678 |
+| step18 | 640 | 138.67 | never fires at aim 0 | 482.53 | -343.87 | -1.9593 |
+| step18 | 800 | 233.36 | never fires at aim 0 | 483.54 | -250.18 | 0.5918 |
+| step18 | 1000 | 38.40 | never fires at aim 0 | 484.37 | -445.97 | -0.9748 |
+| ledge256 | 320 | 527.11 | 380.80 | 482.51 | 44.60 | — |
+| ledge256 | 400 | 586.26 | never fires at aim 0 | 530.08 | 56.18 | 0.7394 |
+| ledge256 | 500 | 670.13 | never fires at aim 0 | 624.84 | 45.29 | 0.8387 |
+| ledge256 | 640 | 723.11 | never fires at aim 0 | 804.08 | -80.98 | 0.3784 |
+| ledge256 | 800 | 896.85 | never fires at aim 0 | 935.53 | -38.68 | 1.0859 |
+| ledge256 | 1000 | 688.99 | never fires at aim 0 | 1099.34 | -410.36 | -1.0393 |
+| corner | 320 | 466.04 | 320.00 | 482.51 | -16.47 | — |
+| corner | 400 | 699.44 | 320.00 | 482.53 | 216.90 | 2.9174 |
+| corner | 500 | 838.82 | 320.00 | 482.53 | 356.29 | 1.3939 |
+| corner | 640 | 815.35 | 320.00 | 482.53 | 332.82 | -0.1677 |
+| corner | 800 | 760.12 | 320.00 | 482.53 | 277.59 | -0.3452 |
+| corner | 1000 | 461.60 | 320.00 | 482.53 | -20.93 | -1.4926 |
+| ceiling48 | 320 | 74.07 | 80.00 | 120.14 | -46.07 | — |
+| ceiling48 | 400 | 9.60 | never fires at aim 0 | 120.14 | -110.54 | -0.8059 |
+| ceiling48 | 500 | 9.60 | never fires at aim 0 | 120.14 | -110.54 | 0.0000 |
+| ceiling48 | 640 | 31.69 | never fires at aim 0 | 120.15 | -88.45 | 0.1578 |
+| ceiling48 | 800 | 9.60 | never fires at aim 0 | 120.16 | -110.56 | -0.1381 |
+| ceiling48 | 1000 | 9.60 | never fires at aim 0 | 120.17 | -110.57 | 0.0000 |
+
+**Levelling** — W3's third number, whether the mechanic ever sets absolute exit speed to a value independent of the entry speed — is read off the slope column: a slope of zero across an adjacent pair is a pair of entry speeds the mechanic returned the same exit speed for. The minimum and maximum slope per context are in the machine-readable section under `w3_entry_slope_min` and `_max`.
+
+**Dash — W4.** A context counts when its best outcome delta over the six entry speeds is material (16 ups).
+
+| context | kind | best Δ over entries | material |
+|---|---|---|---|
+| floor | surface | 6.73 | no |
+| ramp26 | surface | 65.76 | yes |
+| ramp50 | surface | 249.00 | yes |
+| step18 | edge | 83.47 | yes |
+| ledge256 | edge | 408.13 | yes |
+| corner | wall | 555.98 | yes |
+| ceiling48 | ceiling | 4.80 | no |
+
+**5 of 7 contexts material, spanning 3 distinct kind(s)**: `surface`, `edge`, `wall`.
+
+**W5 needs a technique menu the candidate sweep cannot produce, and measuring one turned up a fact about §1.2's harness worth stating first.** On the harness §1.2 specifies — one context, one entry speed, an angle held off the current velocity and a jump the player may or may not press — **four of the seven named techniques are the same command policy**. `ground_turn`, `ramp traversal`, `step-up` and the `drop launch` are each *hold a direction and press nothing*; so is `air_forward`. What distinguishes them is which context they are named in, because in each case the geometry supplies the technique. Only the strafe axis and the jump-on-landing rhythm are separate things for the player's hands to do. The menu below therefore measures three policies per cell and maps the seven names onto them. That is a finding rather than a shortcut, and scoring W5 as though there were seven independent measurements would overstate the evidence by four.
+
+**Dash — the canonical technique menu**, measured from the candidate's own anchors and to the candidate's own horizon, under the control profile, with the held angle swept 0–90° at 5°. Absolute exit speed in ups. `candidate` is the candidate's best absolute exit speed in the same cell.
+
+| context | entry | held_forward | held_strafe | bunnyhop | candidate | beats best technique by |
+|---|---|---|---|---|---|---|
+| floor | 320 | 480.33 @55° | 480.33 @55° | 598.58 @60° | 328.90 | -269.68 |
+| floor | 400 | 480.34 @55° | 480.34 @55° | 640.01 @60° | 331.09 | -308.91 |
+| floor | 500 | 480.35 @55° | 480.35 @55° | 734.64 @65° | 278.63 | -456.01 |
+| floor | 640 | 480.35 @55° | 480.35 @55° | 829.98 @70° | 283.13 | -546.85 |
+| floor | 800 | 480.35 @55° | 480.35 @55° | 944.35 @75° | 233.40 | -710.94 |
+| floor | 1000 | 480.35 @55° | 480.35 @55° | 1143.73 @75° | 240.37 | -903.37 |
+| ramp26 | 320 | 480.33 @55° | 480.33 @55° | 598.58 @60° | 169.72 | -428.86 |
+| ramp26 | 400 | 480.34 @55° | 480.34 @55° | 640.01 @60° | 219.89 | -420.11 |
+| ramp26 | 500 | 479.80 @55° | 479.80 @55° | 640.02 @60° | 222.15 | -417.86 |
+| ramp26 | 640 | 479.39 @55° | 479.39 @55° | 698.21 @65° | 337.67 | -360.54 |
+| ramp26 | 800 | 476.81 @55° | 476.81 @55° | 800.00 @40° | 434.23 | -365.77 |
+| ramp26 | 1000 | 469.56 @55° | 469.56 @55° | 860.62 @70° | 38.40 | -822.22 |
+| ramp50 | 320 | 480.33 @55° | 480.33 @55° | 598.58 @60° | 173.18 | -425.40 |
+| ramp50 | 400 | 480.34 @55° | 480.34 @55° | 640.01 @60° | 120.47 | -519.54 |
+| ramp50 | 500 | 480.36 @55° | 467.69 @50° | 639.81 @60° | 150.15 | -489.66 |
+| ramp50 | 640 | 480.28 @55° | 472.92 @55° | 640.00 @30° | 226.21 | -413.79 |
+| ramp50 | 800 | 480.50 @55° | 480.25 @55° | 709.61 @35° | 226.61 | -483.00 |
+| ramp50 | 1000 | 480.35 @55° | 599.05 @35° | 783.38 @35° | 299.49 | -483.89 |
+| step18 | 320 | 480.33 @55° | 480.33 @55° | 598.58 @60° | 268.21 | -330.37 |
+| step18 | 400 | 480.34 @55° | 480.34 @55° | 639.54 @60° | 336.18 | -303.36 |
+| step18 | 500 | 480.40 @55° | 480.36 @55° | 731.39 @65° | 412.96 | -318.43 |
+| step18 | 640 | 483.91 @55° | 480.30 @55° | 827.34 @70° | 138.67 | -688.67 |
+| step18 | 800 | 517.36 @55° | 480.37 @55° | 942.35 @75° | 233.36 | -708.99 |
+| step18 | 1000 | 481.05 @55° | 480.38 @55° | 1142.40 @75° | 38.40 | -1104.00 |
+| ledge256 | 320 | 480.33 @55° | 480.33 @55° | 598.58 @60° | 527.11 | -71.47 |
+| ledge256 | 400 | 480.34 @55° | 480.34 @55° | 640.01 @60° | 586.26 | -53.75 |
+| ledge256 | 500 | 480.35 @55° | 480.35 @55° | 734.64 @65° | 670.13 | -64.52 |
+| ledge256 | 640 | 467.70 @50° | 482.80 @55° | 829.98 @70° | 723.11 | -106.87 |
+| ledge256 | 800 | 466.08 @50° | 482.44 @55° | 944.35 @75° | 896.85 | -47.50 |
+| ledge256 | 1000 | 482.62 @55° | 482.61 @55° | 1143.73 @75° | 688.99 | -454.74 |
+| corner | 320 | 466.08 @50° | 466.08 @50° | 331.17 @15° | 466.04 | -0.03 |
+| corner | 400 | 466.08 @50° | 466.08 @50° | 332.03 @20° | 699.44 | 233.36 |
+| corner | 500 | 466.08 @50° | 466.08 @50° | 340.26 @20° | 838.82 | 372.75 |
+| corner | 640 | 466.08 @50° | 466.08 @50° | 340.35 @20° | 815.35 | 349.27 |
+| corner | 800 | 466.08 @50° | 466.08 @50° | 340.35 @20° | 760.12 | 294.05 |
+| corner | 1000 | 466.08 @50° | 466.08 @50° | 340.35 @20° | 461.60 | -4.48 |
+| ceiling48 | 320 | 120.09 @55° | 120.09 @55° | 558.54 @60° | 74.07 | -484.47 |
+| ceiling48 | 400 | 120.09 @55° | 120.09 @55° | 635.65 @60° | 9.60 | -626.05 |
+| ceiling48 | 500 | 120.09 @55° | 120.09 @55° | 698.50 @65° | 9.60 | -688.90 |
+| ceiling48 | 640 | 120.09 @55° | 120.09 @55° | 800.71 @70° | 31.69 | -769.01 |
+| ceiling48 | 800 | 120.09 @55° | 120.09 @55° | 935.52 @70° | 9.60 | -925.92 |
+| ceiling48 | 1000 | 120.10 @55° | 120.10 @55° | 1121.11 @75° | 9.60 | -1111.51 |
+
+**Dash — W5's survival test.** For each named technique, over the cells of *its own* domain: how many the candidate fails to beat by 16 ups or more. A technique survives if that count is not zero.
+
+| technique | policy | domain cells | not beaten materially |
+|---|---|---|---|
+| `ground_turn` | `held_forward` | 12 | 12 |
+| `air_forward` | `held_forward` | 42 | 32 |
+| `air_strafe` | `held_strafe` | 42 | 32 |
+| `bunnyhop` | `bunnyhop` | 12 | 12 |
+| `drop_launch` | `held_forward` | 6 | 0 |
+| `ramp_traversal` | `held_forward` | 12 | 12 |
+| `step_up` | `held_forward` | 6 | 6 |
+
+**Dash — W6's ≥95%-of-best sets**, the same sets W2's execution window is read off. Aims are signed offsets from the heading. Centroids are compared against 10% of each swept range: 40 ms of timing and 36° of aim.
+
+| context | entry | timings | timing span ms | timing centroid ms | aims | aim span | aim centroid |
+|---|---|---|---|---|---|---|---|
+| floor | 320 | 24 | 192 | 108 | 4 | 140 | 0.0 |
+| ramp26 | 320 | 47 | 376 | 200 | 2 | 170 | 0.0 |
+| ramp50 | 320 | 1 | 8 | 328 | 2 | 250 | 0.0 |
+| step18 | 320 | 47 | 376 | 200 | 2 | 160 | 0.0 |
+| ledge256 | 320 | 20 | 160 | 92 | 2 | 170 | 0.0 |
+| corner | 320 | 13 | 104 | 64 | 1 | 0 | 50.0 |
+| ceiling48 | 320 | 16 | 128 | 76 | 2 | 130 | 0.0 |
+| floor | 400 | 24 | 192 | 108 | 6 | 150 | 0.0 |
+| ramp26 | 400 | 47 | 376 | 200 | 2 | 160 | 0.0 |
+| ramp50 | 400 | 1 | 8 | 240 | 2 | 300 | 0.0 |
+| step18 | 400 | 47 | 376 | 200 | 2 | 150 | 0.0 |
+| ledge256 | 400 | 47 | 376 | 200 | 4 | 170 | 0.0 |
+| corner | 400 | 1 | 8 | 216 | 1 | 0 | 75.0 |
+| ceiling48 | 400 | 5 | 80 | 56 | 1 | 0 | 180.0 |
+| floor | 500 | 38 | 304 | 164 | 4 | 150 | 0.0 |
+| ramp26 | 500 | 47 | 376 | 200 | 2 | 160 | 0.0 |
+| ramp50 | 500 | 3 | 24 | 376 | 4 | 350 | 0.0 |
+| step18 | 500 | 47 | 376 | 200 | 2 | 140 | 0.0 |
+| ledge256 | 500 | 20 | 168 | 94 | 2 | 140 | 0.0 |
+| corner | 500 | 1 | 8 | 128 | 1 | 0 | 55.0 |
+| ceiling48 | 500 | 5 | 80 | 56 | 1 | 0 | 180.0 |
+| floor | 640 | 47 | 376 | 200 | 4 | 160 | 0.0 |
+| ramp26 | 640 | 47 | 376 | 200 | 3 | 250 | 60.0 |
+| ramp50 | 640 | 2 | 16 | 372 | 2 | 200 | 0.0 |
+| step18 | 640 | 32 | 256 | 228 | 2 | 190 | 0.0 |
+| ledge256 | 640 | 47 | 376 | 200 | 4 | 180 | 0.0 |
+| corner | 640 | 1 | 8 | 64 | 1 | 0 | 65.0 |
+| ceiling48 | 640 | 16 | 128 | 76 | 3 | 140 | 21.7 |
+| floor | 800 | 47 | 376 | 200 | 2 | 160 | 0.0 |
+| ramp26 | 800 | 21 | 176 | 303 | 2 | 120 | 0.0 |
+| ramp50 | 800 | 2 | 16 | 340 | 2 | 200 | 0.0 |
+| step18 | 800 | 47 | 376 | 200 | 2 | 160 | 0.0 |
+| ledge256 | 800 | 23 | 184 | 104 | 4 | 190 | 0.0 |
+| corner | 800 | 1 | 8 | 240 | 1 | 0 | 70.0 |
+| ceiling48 | 800 | 5 | 80 | 56 | 1 | 0 | 180.0 |
+| floor | 1000 | 47 | 376 | 200 | 4 | 170 | 0.0 |
+| ramp26 | 1000 | 17 | 136 | 80 | 1 | 0 | 180.0 |
+| ramp50 | 1000 | 2 | 16 | 356 | 2 | 350 | 0.0 |
+| step18 | 1000 | 3 | 24 | 24 | 1 | 0 | 180.0 |
+| ledge256 | 1000 | 1 | 8 | 288 | 2 | 240 | 0.0 |
+| corner | 1000 | 1 | 8 | 240 | 1 | 0 | 55.0 |
+| ceiling48 | 1000 | 5 | 80 | 56 | 1 | 0 | 180.0 |
+
+The pair counts W6 is scored on — how many pairs of contexts have disjoint sets, and how many have centroids more than 10% of the swept range apart, in timing and in aim, at each entry speed — are in the machine-readable section under `w6.e<entry>.*`. They are counts of pairs rather than a yes/no, because W6 asks for *at least two contexts* and the number of pairs that satisfy it is the evidence for that.
+
+**Dash — G3's two counts.** The first is the commands between the command carrying the input and the first command on which velocity differs from the control, over every press that fired: the worst across all 42 cells is **0**. The second is the commands on which the mechanic causes an input to be ignored, measured by rotating one command's wish direction by 90° at a time over the 32 commands after the press and counting the commands that changed nothing. The cell where the candidate ignores the most *more than its own control does* is **corner at 320 ups**: **5 unresponsive in the candidate against 3 in the control**, out of 32 probed. The control's count is the reading that matters — a command the control also ignores was never the mechanic's doing, and at 640 ups a crouched player's wish speed of 80 is below `PM_Accelerate`'s projection in every direction, so steering stops mattering for reasons that predate every candidate. 
+
+What that instrument does *not* cover, stated rather than left to be assumed: it measures whether a command's **steering** reached the outcome. It cannot measure a spent *jump press*, because under canon an airborne jump press does nothing at all, so there is no control behaviour to differ from. Read from `step.rs` instead: the dash and the wall jump both set `jump_held` when they fire, exactly as a floor jump does, so the following command's jump press is refused until the input is released. Whether that is a press *spent* or a press *ignored* is a reading of the gate, not a measurement, and it is left to the verdict.
+
+**Dash — G5(a).** A player who accelerates on the ground only, jumps and lands freely, holds one world direction so they never strafejump, and never invokes the mechanic — run for 30 seconds in each context. `armed` counts the transitions from unavailable to available. **Flat ground decides the gate; the other six are the evidence** (amendment 2, change 18).
+
+| context | armed | commands available | peak speed | over max_speed |
+|---|---|---|---|---|
+| floor | 30 | 1500 | 320.00 | no |
+| ramp26 | 32 | 1600 | 320.00 | no |
+| ramp50 | 17 | 850 | 320.00 | no |
+| step18 | 30 | 1500 | 320.00 | no |
+| ledge256 | 29 | 1450 | 320.00 | no |
+| corner | 32 | 1555 | 320.00 | no |
+| ceiling48 | 1 | 3489 | 320.00 | no |
+
+**Dash — G2.** Sections 1 to 6 re-taken under the candidate profile and diffed against the same six families under the control: **1059 measurements, and none of them moved**. G2's scope is every measurement in which the mechanic's activation preconditions are not all met on every command; since no value moved at all, the question of which measurements are exempt does not arise.
+
+*What 1059 is and is not, because G2 names the whole published set.* This document publishes 2211 values: 1059 under `cpm`, 1059 under `vq3`, 74 in section 8 and 19 in section 7. The 1059 compared here are the `cpm` half, because the candidate constants sit on top of `cpm` — `experimental()` is `..Self::cpm()` — so a `vq3` re-measurement would be a measurement of a profile nobody has proposed. Section 7 restates other sections' numbers rather than taking its own, and section 8 is not parameterised by profile at all. The unmeasured half is named here rather than folded into a claim about "the whole set".
+
+**Dash — G7 part 2.** The outcome delta swept against aim at the cell's best timing, refined to 0.25° — the floor the instrument's own self-test needed — and against the approach offset refined to 0.0625 of a unit. A step that survives is a cliff; one that halves with the grid is a gradient.
+
+| context | entry | aim: coarse | aim: refined | geometry: coarse | geometry: refined |
+|---|---|---|---|---|---|
+| floor | 320 | none | — | none | — |
+| floor | 400 | none | — | none | — |
+| floor | 500 | none | — | none | — |
+| floor | 640 | none | — | none | — |
+| floor | 800 | none | — | none | — |
+| floor | 1000 | none | — | none | — |
+| ramp26 | 320 | 23.97 | 44.08 @ 24.61° | none | — |
+| ramp26 | 400 | 19.64 | 12.08 @ 281.33° | none | — |
+| ramp26 | 500 | 16.13 | 7.51 @ 279.77° | 31.68 | 31.68 @ -5.281u |
+| ramp26 | 640 | 22.88 | 7.38 @ 289.92° | 24.28 | 21.42 @ -12.719u |
+| ramp26 | 800 | 93.97 | 71.42 @ 60.55° | 62.82 | 62.82 @ -4.094u |
+| ramp26 | 1000 | 16.37 | 3.53 @ 183.98° | 29.71 | 29.71 @ +14.281u |
+| ramp50 | 320 | 141.33 | 149.63 @ 234.77° | 54.88 | 54.83 @ -12.156u |
+| ramp50 | 400 | 96.60 | 74.74 @ 150.08° | 37.90 | 67.94 @ -3.969u |
+| ramp50 | 500 | 80.96 | 108.02 @ 261.33° | 58.19 | 55.47 @ +0.969u |
+| ramp50 | 640 | 92.15 | 98.28 @ 155.70° | 77.86 | 76.83 @ +0.031u |
+| ramp50 | 800 | 125.21 | 151.08 @ 245.70° | 26.56 | 37.77 @ -0.906u |
+| ramp50 | 1000 | 281.98 | 232.63 @ 152.89° | 51.01 | 150.42 @ +4.594u |
+| step18 | 320 | 49.70 | 49.25 @ 276.95° | 42.62 | 42.54 @ -8.719u |
+| step18 | 400 | 61.19 | 66.06 @ 76.02° | 55.39 | 55.39 @ -13.531u |
+| step18 | 500 | 78.82 | 78.40 @ 289.61° | 69.29 | 69.29 @ -12.406u |
+| step18 | 640 | 40.61 | 58.00 @ 91.64° | 39.40 | 39.40 @ -2.406u |
+| step18 | 800 | none | — | none | — |
+| step18 | 1000 | none | — | 23.89 | 23.89 @ +9.781u |
+| ledge256 | 320 | 355.47 | 350.13 @ 277.27° | 78.81 | 140.91 @ +15.469u |
+| ledge256 | 400 | 394.90 | 342.85 @ 75.08° | 149.35 | 149.35 @ +12.906u |
+| ledge256 | 500 | 189.57 | 333.83 @ 68.83° | 165.49 | 142.90 @ +14.781u |
+| ledge256 | 640 | 510.41 | 418.73 @ 93.98° | 106.31 | 106.31 @ +13.969u |
+| ledge256 | 800 | 364.78 | 428.88 @ 102.73° | 268.66 | 268.66 @ +12.156u |
+| ledge256 | 1000 | 256.13 | 242.70 @ 109.77° | 21.94 | 579.37 @ +14.469u |
+| corner | 320 | 27.84 | 273.33 @ 277.89° | 462.80 | 461.11 @ -0.031u |
+| corner | 400 | 469.62 | 287.06 @ 78.83° | 421.78 | 413.41 @ -0.031u |
+| corner | 500 | 545.99 | 347.40 @ 55.08° | 37.25 | 516.62 @ +13.656u |
+| corner | 640 | 107.54 | 409.61 @ 301.64° | 459.39 | 459.39 @ +1.906u |
+| corner | 800 | 55.12 | 315.31 @ 82.73° | 492.46 | 492.46 @ -15.469u |
+| corner | 1000 | 38.15 | 317.21 @ 82.89° | 576.32 | 437.00 @ -3.094u |
+| ceiling48 | 320 | none | — | none | — |
+| ceiling48 | 400 | none | — | none | — |
+| ceiling48 | 500 | none | — | none | — |
+| ceiling48 | 640 | none | — | none | — |
+| ceiling48 | 800 | none | — | none | — |
+| ceiling48 | 1000 | none | — | none | — |
+
+**Dash — the three G7 numbers.** Largest step surviving aim refinement to 0.25°: **428.88 ups**. Largest surviving geometry refinement to 0.0625 of a unit: **579.37 ups**. Largest disagreement between the closed form `step.rs` computes the impulse from and the impulse actually measured against the control on the invoking command: **117.98 ups**. 
+
+The **timing** axis is not refinable — 8 ms is the input quantum: the sweep's timing resolution is one command and one command is the simulation's input quantum, so there is no finer grid to refine into and "does this step shrink when the grid is refined" has no meaning there. That is a limit of the model rather than of this instrument, and it is stated rather than answered with a number that would only describe the grid. 
+
+The closed forms are the *immediate impulse*, not the outcome at the horizon. No closed form for the horizon outcome is offered, because a second of `PM_Accelerate`, friction, ground probes and possibly a collision separates the impulse from the horizon and every one of those depends on the whole run. G7's first part asks the **verdict** to state a rule; what is published here is the arithmetic the code already contains, measured, so that a rule has something to be checked against. 
+
+**Beside the incumbent, because §1.6 binds a G7 rejection to publish the comparison.** The same instrument, at the same geometry floor, finds overbounce's surviving step at 447.55 ups across 0.0625 of a unit of drop height (the self-test table above). Canon's own text quotes overbounce at 160.00 against 0.17; that is §4's figure at one drop height, and the refined sweep finds a larger one. Both numbers are this instrument's, taken the same way, so they can be compared directly.
+
+### Dash, retuned — the one pre-registered change §1.5 allows
+
+**Registered before this measurement was run, which is the only thing that makes it evidence.** §1.5 permits one retune per candidate and requires the verdict to name the constant, state the direction and predict which criterion it moves *before* the re-measurement. Canon did that, and it reached this seat ahead of the numbers below. Its terms, recorded here so the order is on the record in the document the numbers live in:
+
+- **Constant:** a new `dash_entry_speed` on `PhysicsProfile`. No existing constant can express it — the dash's two are `dash_speed` and `dash_window_ms`, and arming is `left_ground_by_jumping` in the just-landed branch of `step.rs`, which no current constant gates on speed.
+- **Direction:** above `max_speed` 320, at **400**, mirroring `slide_entry_speed`, tested against horizontal speed at the arming landing.
+- **Prediction:** G5(a) moves fail→pass. W4's context count may fall. W1 may move in either direction, with no sign predicted. G3, G4, G6, G7 and G8 should not move at all.
+- **One attempt.** There is no second retune.
+
+**These numbers are derived, not taken against a patched crate, and the condition for that being exact is stated rather than assumed.** The field does not exist in `straf3-sim` and must not land speculatively: `identity.rs` folds an exhaustive destructure of `PhysicsProfile`, so adding a field moves the physics digest for `vq3` and `cpm` too, and a rejected candidate would have permanently altered the digest of two profiles it has nothing to do with. But the retune as registered gates **arming and nothing else**: a landing at or above the threshold arms exactly the window that arms today, and one below it arms nothing. A run whose arming was refused is a run with the mechanic absent, so its outcome is the control's and its delta is exactly zero. The rows below are therefore the measured sweep rewritten under that rule — arithmetic on numbers already taken, not an estimate of numbers not taken. **If the constant that lands does anything more than gate arming on the horizontal speed at the arming event — reads a different speed, gates the spend rather than the arm, or touches the window length — this derivation is void and these cells must be re-measured against the patch.** Every value carries the `dash_retuned` prefix so no reader can mistake one for a shipped-crate measurement.
+
+**Dash before and after the retune.** `arm ups` is the horizontal speed at the arming landing at the best aim — the quantity `dash_entry_speed` 400 would be compared against.
+
+| context | entry | arm ups (aim 0) | before: best Δ | after: best Δ | aims still arming | before: harmed/n | after: harmed/n |
+|---|---|---|---|---|---|---|---|
+| floor | 320 | 320.00 | 6.73 | 0.01 | 2/72 | 0/624 | 0/624 |
+| floor | 400 | 400.00 | 5.65 | 5.65 | 30/72 | 0/624 | 0/624 |
+| floor | 500 | 500.00 | 4.64 | 4.64 | 45/72 | 0/624 | 0/624 |
+| floor | 640 | 640.00 | 3.64 | 3.64 | 61/72 | 0/624 | 0/624 |
+| floor | 800 | 800.00 | 3.00 | 3.00 | 72/72 | 0/624 | 0/624 |
+| floor | 1000 | 1000.00 | 2.39 | 2.39 | 72/72 | 0/624 | 0/624 |
+| ramp26 | 320 | 320.00 | 27.51 | 0.01 | 2/72 | 2/624 | 0/624 |
+| ramp26 | 400 | 219.57 | 27.59 | 16.34 | 18/72 | 0/624 | 0/624 |
+| ramp26 | 500 | 300.33 | 30.22 | 6.17 | 24/72 | 0/624 | 0/624 |
+| ramp26 | 640 | 413.40 | 34.09 | 34.09 | 59/72 | 0/624 | 0/624 |
+| ramp26 | 800 | 542.62 | 65.76 | 65.76 | 72/72 | 0/624 | 0/624 |
+| ramp26 | 1000 | 704.15 | 33.60 | 33.60 | 72/72 | 0/624 | 0/624 |
+| ramp50 | 320 | 83.23 | 141.33 | 0.01 | 2/72 | 2/624 | 0/624 |
+| ramp50 | 400 | 97.36 | 96.60 | 0.86 | 16/72 | 0/624 | 0/624 |
+| ramp50 | 500 | 137.91 | 82.07 | 2.07 | 22/72 | 0/624 | 0/624 |
+| ramp50 | 640 | 207.09 | 158.12 | 6.06 | 36/72 | 0/624 | 0/624 |
+| ramp50 | 800 | 294.28 | 158.52 | 97.39 | 49/72 | 0/624 | 0/624 |
+| ramp50 | 1000 | 391.01 | 249.00 | 249.00 | 53/72 | 0/624 | 0/624 |
+| step18 | 320 | 320.00 | 53.52 | 0.01 | 2/72 | 0/624 | 0/624 |
+| step18 | 400 | 400.00 | 66.04 | 66.04 | 30/72 | 0/624 | 0/624 |
+| step18 | 500 | 500.00 | 83.47 | 83.47 | 41/72 | 0/624 | 0/624 |
+| step18 | 640 | 640.00 | 42.44 | 42.44 | 59/72 | 0/624 | 0/624 |
+| step18 | 800 | 800.00 | 3.00 | 3.00 | 70/72 | 0/624 | 0/624 |
+| step18 | 1000 | 1000.00 | 10.44 | 10.44 | 68/72 | 0/624 | 0/624 |
+| ledge256 | 320 | 320.00 | 169.16 | 0.01 | 2/72 | 0/624 | 0/624 |
+| ledge256 | 400 | 400.00 | 152.88 | 152.88 | 30/72 | 0/624 | 0/624 |
+| ledge256 | 500 | 500.00 | 192.72 | 192.72 | 45/72 | 0/624 | 0/624 |
+| ledge256 | 640 | 640.00 | 108.15 | 108.15 | 61/72 | 0/624 | 0/624 |
+| ledge256 | 800 | 800.00 | 131.30 | 131.30 | 72/72 | 0/624 | 0/624 |
+| ledge256 | 1000 | 1000.00 | 408.13 | 408.13 | 72/72 | 0/624 | 0/624 |
+| corner | 320 | 15.68 | 460.75 | 0.01 | 1/72 | 28/624 | 0/624 |
+| corner | 400 | 13.20 | 506.74 | 3.27 | 8/72 | 20/624 | 19/624 |
+| corner | 500 | 10.74 | 555.98 | 555.98 | 14/72 | 16/624 | 0/624 |
+| corner | 640 | 8.32 | 492.90 | 440.16 | 33/72 | 11/624 | 0/624 |
+| corner | 800 | 8.48 | 502.51 | 317.73 | 44/72 | 0/624 | 0/624 |
+| corner | 1000 | 6.12 | 458.18 | 223.73 | 37/72 | 0/624 | 0/624 |
+| ceiling48 | 320 | 320.00 | 1.62 | never fires | 0/72 | 0/624 | 0/624 |
+| ceiling48 | 400 | 400.00 | 4.80 | 1.16 | 29/72 | 0/624 | 0/624 |
+| ceiling48 | 500 | 500.00 | 4.80 | 0.76 | 63/72 | 0/624 | 0/624 |
+| ceiling48 | 640 | 640.00 | 0.42 | 0.42 | 72/72 | 0/624 | 0/624 |
+| ceiling48 | 800 | 800.00 | 3.36 | 3.36 | 72/72 | 0/624 | 0/624 |
+| ceiling48 | 1000 | 1000.00 | 4.80 | 4.80 | 72/72 | 0/624 | 0/624 |
+
+**Dash retuned — G5(a).** The same player as before, with arming refused below 400 ups at the landing. Flat ground decides the gate.
+
+| context | before: armed | after: armed | peak speed |
+|---|---|---|---|
+| floor | 30 | 0 | 320.00 |
+| ramp26 | 32 | 0 | 320.00 |
+| ramp50 | 17 | 0 | 320.00 |
+| step18 | 30 | 0 | 320.00 |
+| ledge256 | 29 | 0 | 320.00 |
+| corner | 32 | 0 | 320.00 |
+| ceiling48 | 1 | 0 | 320.00 |
+
+**Against the prediction, item by item, including the part that did not happen.** G5(a) moved as canon predicted: the arming count on flat ground goes from 30 to **0**, because a player who never exceeds `max_speed` peaks at 320.00 ups and cannot land at 400. W4 was predicted to *possibly fall*; it did not. It stays at **5** material contexts spanning 3 kinds, the same as before.
+
+The reason is in the `aims still arming` column and is worth stating because it is not obvious: **the fall to the arming landing is itself a strafejump.** The sweep holds its aim off the current velocity from the first command, so at an aim of 50–70° a player entering at 320 ups is accelerating all the way down and lands well above 400 — the threshold the entry speed did not supply, earned in the air on the way to the landing. What the retune removes at low entry speeds is not the mechanic but the *lazy* aims: on flat ground at 320 ups the best delta falls from 6.73 ups to 0.01 while 47 timings still fire. Whether "earned during the approach" is what G5(a) means by earned is a reading of the gate and is left to the verdict; the number is here either way.
+
+### Wall jump
+
+**Wall jump — the sweep.** `Δ` is the outcome delta in ups; `abs` is absolute exit speed; `control` is the best absolute exit speed the existing vocabulary reached in the same cell with the same freedom of aim and timing.
+
+| context | entry | anchor cmds | anchor ups | avail | best Δ | best abs | control abs | at ms | at aim | Δ at aim 0 | latency |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| floor | 320 | — | — | never | — | — | — | — | — | — | — |
+| floor | 400 | — | — | never | — | — | — | — | — | — | — |
+| floor | 500 | — | — | never | — | — | — | — | — | — | — |
+| floor | 640 | — | — | never | — | — | — | — | — | — | — |
+| floor | 800 | — | — | never | — | — | — | — | — | — | — |
+| floor | 1000 | — | — | never | — | — | — | — | — | — | — |
+| ramp26 | 320 | — | — | never | — | — | — | — | — | — | — |
+| ramp26 | 400 | — | — | never | — | — | — | — | — | — | — |
+| ramp26 | 500 | — | — | never | — | — | — | — | — | — | — |
+| ramp26 | 640 | — | — | never | — | — | — | — | — | — | — |
+| ramp26 | 800 | — | — | never | — | — | — | — | — | — | — |
+| ramp26 | 1000 | — | — | never | — | — | — | — | — | — | — |
+| ramp50 | 320 | — | — | never | — | — | — | — | — | — | — |
+| ramp50 | 400 | — | — | never | — | — | — | — | — | — | — |
+| ramp50 | 500 | — | — | never | — | — | — | — | — | — | — |
+| ramp50 | 640 | — | — | never | — | — | — | — | — | — | — |
+| ramp50 | 800 | — | — | never | — | — | — | — | — | — | — |
+| ramp50 | 1000 | — | — | never | — | — | — | — | — | — | — |
+| step18 | 320 | — | — | never | — | — | — | — | — | — | — |
+| step18 | 400 | — | — | never | — | — | — | — | — | — | — |
+| step18 | 500 | — | — | never | — | — | — | — | — | — | — |
+| step18 | 640 | — | — | never | — | — | — | — | — | — | — |
+| step18 | 800 | — | — | never | — | — | — | — | — | — | — |
+| step18 | 1000 | — | — | never | — | — | — | — | — | — | — |
+| ledge256 | 320 | — | — | never | — | — | — | — | — | — | — |
+| ledge256 | 400 | — | — | never | — | — | — | — | — | — | — |
+| ledge256 | 500 | — | — | never | — | — | — | — | — | — | — |
+| ledge256 | 640 | — | — | never | — | — | — | — | — | — | — |
+| ledge256 | 800 | — | — | never | — | — | — | — | — | — | — |
+| ledge256 | 1000 | — | — | never | — | — | — | — | — | — | — |
+| corner | 320 | 37 | 0.32 | 15 | 163.12 | 166.86 | 466.08 | 0 | 275 | 0.00 | 0 |
+| corner | 400 | 38 | 0.40 | 15 | 161.28 | 165.02 | 522.28 | 32 | 275 | 0.00 | 0 |
+| corner | 500 | 39 | 0.50 | 18 | 335.20 | 665.35 | 478.82 | 96 | 15 | 0.00 | 0 |
+| corner | 640 | 40 | 0.64 | 15 | 161.12 | 164.86 | 477.96 | 16 | 275 | 0.00 | 0 |
+| corner | 800 | 40 | 0.80 | 25 | 161.12 | 164.85 | 519.34 | 16 | 85 | 0.00 | 0 |
+| corner | 1000 | 41 | 1.00 | 15 | 263.89 | 264.07 | 519.60 | 0 | 285 | 0.00 | 0 |
+| ceiling48 | 320 | — | — | never | — | — | — | — | — | — | — |
+| ceiling48 | 400 | — | — | never | — | — | — | — | — | — | — |
+| ceiling48 | 500 | — | — | never | — | — | — | — | — | — | — |
+| ceiling48 | 640 | — | — | never | — | — | — | — | — | — | — |
+| ceiling48 | 800 | — | — | never | — | — | — | — | — | — | — |
+| ceiling48 | 1000 | — | — | never | — | — | — | — | — | — | — |
+
+A cell marked `*` in `avail` is one where every invocation timing produced the identical run, so the timing axis selected nothing and the count is not a window. That is measured by comparing the rows rather than inferred from the context's name.
+
+**A delta of zero has two causes and they are not the same fact.** Either the mechanic did nothing, or it did something and the second of simulation between the window closing and the horizon erased it. On flat ground the second is what happens: a player holding a direction converges to the ground terminal speed whether or not they slid, so a run measured a full second later shows nothing however much speed the slide carried in between. `peak_gain_ups` in the machine-readable section is the largest advantage the candidate held at any command of that cell's best run, with `peak_gain_at_ms` saying when. **It is a diagnostic and no criterion is scored on it** — §1.1 defines the outcome at the horizon and this document does not get to move the horizon because it dislikes an answer. It is published so that a zero can be read correctly, and a verdict that wants to say "this mechanic is worth 300 ups for half a second and nothing at the horizon" has the number for both halves of the sentence.
+
+**Wall jump — W1's naive neighbourhood.** Every timing in the window crossed with every aim within ±30° of the heading. `harmed` counts the points whose outcome delta is negative by more than 16 ups; `n` is the size of the neighbourhood, published because a percentage over it without its count is false precision.
+
+| context | entry | mean Δ | harmed | n | harm rate |
+|---|---|---|---|---|---|
+| corner | 320 | 0.00 | 0 | 325 | 0.0% |
+| corner | 400 | 0.57 | 0 | 325 | 0.0% |
+| corner | 500 | 2.22 | 0 | 325 | 0.0% |
+| corner | 640 | -0.79 | 2 | 325 | 0.6% |
+| corner | 800 | -0.34 | 2 | 325 | 0.6% |
+| corner | 1000 | -0.69 | 2 | 325 | 0.6% |
+
+Pooled over every reachable cell: **6 of 1950 points harm the player by more than 16 ups**, which is 0.3%. The pooled figure is published beside the per-cell rows and not instead of them: W1 states one rate and does not say over what, and a mechanic can be harmless where it is available often and harmful where it is available twice.
+
+**Wall jump — W2's gap and execution window, and G5(b)'s point-naive ratio.** The raw `best` and `naive` deltas in ups sit beside every ratio, and a cell whose best delta is not positive and material is marked *not meaningful* rather than printed as a number. `window` is the count of timings reaching ≥95% of the best delta, in ms; `span` is the distance from the first such timing to the last.
+
+| context | entry | best Δ | naive Δ | gap | point-naive Δ | point/best | window | span |
+|---|---|---|---|---|---|---|---|---|
+| corner | 320 | 163.12 | 0.00 | 100.0% | 0.00 | 0.0000 | 48 | 48 |
+| corner | 400 | 161.28 | 0.57 | 99.6% | 0.00 | 0.0000 | 40 | 40 |
+| corner | 500 | 335.20 | 2.22 | 99.3% | 0.00 | 0.0000 | 8 | 8 |
+| corner | 640 | 161.12 | -0.79 | 100.5% | 0.00 | 0.0000 | 24 | 24 |
+| corner | 800 | 161.12 | -0.34 | 100.2% | 0.00 | 0.0000 | 24 | 24 |
+| corner | 1000 | 263.89 | -0.69 | 100.3% | 0.00 | 0.0000 | 8 | 8 |
+
+**1 qualifying contexts**, and the medians are taken over those. *An aggregation this document had to choose, and says so:* W2 and G5(b) both define their number **per cell** and then score it on *the median across contexts*, and a context here holds six cells — one per entry speed. Nothing in Part 1 says how the six become one. The medians published above collapse each context by taking the median of its qualifying entry speeds first, then the median across contexts. The per-cell numbers are all in the table and in the machine-readable section, so a verdict that wants a different collapse can take one without re-running anything.
+
+**Wall jump — W3.** `both` is the best absolute exit speed with the mechanic and a held angle; `mechanic alone` is the best with the mechanic and no angle held (aim 0); `technique alone` is the best the control reached over every aim. `d(abs)/d(entry)` is the slope of `both` against entry speed across each adjacent pair.
+
+| context | entry | both | mechanic alone | technique alone | both − best alone | d(abs)/d(entry) |
+|---|---|---|---|---|---|---|
+| corner | 320 | 166.86 | 320.00 | 466.08 | -299.22 | — |
+| corner | 400 | 165.02 | 320.00 | 522.28 | -357.26 | -0.0230 |
+| corner | 500 | 665.35 | 320.00 | 478.82 | 186.54 | 5.0033 |
+| corner | 640 | 164.86 | 320.00 | 477.96 | -313.11 | -3.5750 |
+| corner | 800 | 164.85 | 320.00 | 519.34 | -354.49 | -0.0000 |
+| corner | 1000 | 264.07 | 320.00 | 519.60 | -255.53 | 0.4961 |
+
+**Levelling** — W3's third number, whether the mechanic ever sets absolute exit speed to a value independent of the entry speed — is read off the slope column: a slope of zero across an adjacent pair is a pair of entry speeds the mechanic returned the same exit speed for. The minimum and maximum slope per context are in the machine-readable section under `w3_entry_slope_min` and `_max`.
+
+**Wall jump — W4.** A context counts when its best outcome delta over the six entry speeds is material (16 ups).
+
+| context | kind | best Δ over entries | material |
+|---|---|---|---|
+| floor | surface | never fires | no |
+| ramp26 | surface | never fires | no |
+| ramp50 | surface | never fires | no |
+| step18 | edge | never fires | no |
+| ledge256 | edge | never fires | no |
+| corner | wall | 335.20 | yes |
+| ceiling48 | ceiling | never fires | no |
+
+**1 of 7 contexts material, spanning 1 distinct kind(s)**: `wall`.
+
+**W5 needs a technique menu the candidate sweep cannot produce, and measuring one turned up a fact about §1.2's harness worth stating first.** On the harness §1.2 specifies — one context, one entry speed, an angle held off the current velocity and a jump the player may or may not press — **four of the seven named techniques are the same command policy**. `ground_turn`, `ramp traversal`, `step-up` and the `drop launch` are each *hold a direction and press nothing*; so is `air_forward`. What distinguishes them is which context they are named in, because in each case the geometry supplies the technique. Only the strafe axis and the jump-on-landing rhythm are separate things for the player's hands to do. The menu below therefore measures three policies per cell and maps the seven names onto them. That is a finding rather than a shortcut, and scoring W5 as though there were seven independent measurements would overstate the evidence by four.
+
+**Wall jump — the canonical technique menu**, measured from the candidate's own anchors and to the candidate's own horizon, under the control profile, with the held angle swept 0–90° at 5°. Absolute exit speed in ups. `candidate` is the candidate's best absolute exit speed in the same cell.
+
+| context | entry | held_forward | held_strafe | bunnyhop | candidate | beats best technique by |
+|---|---|---|---|---|---|---|
+| corner | 320 | 466.08 @50° | 466.08 @50° | 324.88 @10° | 166.86 | -299.22 |
+| corner | 400 | 466.08 @50° | 466.08 @50° | 324.88 @10° | 165.02 | -301.06 |
+| corner | 500 | 466.08 @50° | 466.08 @50° | 324.88 @10° | 665.35 | 199.28 |
+| corner | 640 | 466.08 @50° | 466.08 @50° | 324.88 @10° | 164.86 | -301.22 |
+| corner | 800 | 466.08 @50° | 466.08 @50° | 324.88 @10° | 164.85 | -301.22 |
+| corner | 1000 | 466.08 @50° | 466.08 @50° | 324.88 @10° | 264.07 | -202.01 |
+
+**Wall jump — W5's survival test.** For each named technique, over the cells of *its own* domain: how many the candidate fails to beat by 16 ups or more. A technique survives if that count is not zero.
+
+| technique | policy | domain cells | not beaten materially |
+|---|---|---|---|
+| `ground_turn` | `held_forward` | 0 | 0 |
+| `air_forward` | `held_forward` | 6 | 5 |
+| `air_strafe` | `held_strafe` | 6 | 5 |
+| `bunnyhop` | `bunnyhop` | 0 | 0 |
+| `drop_launch` | `held_forward` | 0 | 0 |
+| `ramp_traversal` | `held_forward` | 0 | 0 |
+| `step_up` | `held_forward` | 0 | 0 |
+
+**Wall jump — W6's ≥95%-of-best sets**, the same sets W2's execution window is read off. Aims are signed offsets from the heading. Centroids are compared against 10% of each swept range: 20 ms of timing and 36° of aim.
+
+| context | entry | timings | timing span ms | timing centroid ms | aims | aim span | aim centroid |
+|---|---|---|---|---|---|---|---|
+| corner | 320 | 6 | 48 | 20 | 2 | 170 | 0.0 |
+| corner | 400 | 5 | 40 | 16 | 3 | 170 | -23.3 |
+| corner | 500 | 1 | 8 | 96 | 1 | 0 | 15.0 |
+| corner | 640 | 3 | 24 | 8 | 2 | 170 | 0.0 |
+| corner | 800 | 3 | 24 | 8 | 2 | 170 | 0.0 |
+| corner | 1000 | 1 | 8 | 0 | 1 | 0 | -75.0 |
+
+The pair counts W6 is scored on — how many pairs of contexts have disjoint sets, and how many have centroids more than 10% of the swept range apart, in timing and in aim, at each entry speed — are in the machine-readable section under `w6.e<entry>.*`. They are counts of pairs rather than a yes/no, because W6 asks for *at least two contexts* and the number of pairs that satisfy it is the evidence for that.
+
+**Wall jump — G3's two counts.** The first is the commands between the command carrying the input and the first command on which velocity differs from the control, over every press that fired: the worst across all 42 cells is **0**. The second is the commands on which the mechanic causes an input to be ignored, measured by rotating one command's wish direction by 90° at a time over the 32 commands after the press and counting the commands that changed nothing. The cell where the candidate ignores the most *more than its own control does* is **corner at 1000 ups**: **0 unresponsive in the candidate against 0 in the control**, out of 32 probed. The control's count is the reading that matters — a command the control also ignores was never the mechanic's doing, and at 640 ups a crouched player's wish speed of 80 is below `PM_Accelerate`'s projection in every direction, so steering stops mattering for reasons that predate every candidate. 
+
+What that instrument does *not* cover, stated rather than left to be assumed: it measures whether a command's **steering** reached the outcome. It cannot measure a spent *jump press*, because under canon an airborne jump press does nothing at all, so there is no control behaviour to differ from. Read from `step.rs` instead: the dash and the wall jump both set `jump_held` when they fire, exactly as a floor jump does, so the following command's jump press is refused until the input is released. Whether that is a press *spent* or a press *ignored* is a reading of the gate, not a measurement, and it is left to the verdict.
+
+**Wall jump — G5(a).** A player who accelerates on the ground only, jumps and lands freely, holds one world direction so they never strafejump, and never invokes the mechanic — run for 30 seconds in each context. `armed` counts the transitions from unavailable to available. **Flat ground decides the gate; the other six are the evidence** (amendment 2, change 18).
+
+| context | armed | commands available | peak speed | over max_speed |
+|---|---|---|---|---|
+| floor | 0 | 0 | 320.00 | no |
+| ramp26 | 0 | 0 | 320.00 | no |
+| ramp50 | 0 | 0 | 320.00 | no |
+| step18 | 0 | 0 | 320.00 | no |
+| ledge256 | 0 | 0 | 320.00 | no |
+| corner | 1 | 3494 | 320.00 | no |
+| ceiling48 | 0 | 0 | 320.00 | no |
+
+**Wall jump — G2.** Sections 1 to 6 re-taken under the candidate profile and diffed against the same six families under the control: **1059 measurements, and none of them moved**. G2's scope is every measurement in which the mechanic's activation preconditions are not all met on every command; since no value moved at all, the question of which measurements are exempt does not arise.
+
+*What 1059 is and is not, because G2 names the whole published set.* This document publishes 2211 values: 1059 under `cpm`, 1059 under `vq3`, 74 in section 8 and 19 in section 7. The 1059 compared here are the `cpm` half, because the candidate constants sit on top of `cpm` — `experimental()` is `..Self::cpm()` — so a `vq3` re-measurement would be a measurement of a profile nobody has proposed. Section 7 restates other sections' numbers rather than taking its own, and section 8 is not parameterised by profile at all. The unmeasured half is named here rather than folded into a claim about "the whole set".
+
+**Wall jump — G7 part 2.** The outcome delta swept against aim at the cell's best timing, refined to 0.25° — the floor the instrument's own self-test needed — and against the approach offset refined to 0.0625 of a unit. A step that survives is a cliff; one that halves with the grid is a gradient.
+
+| context | entry | aim: coarse | aim: refined | geometry: coarse | geometry: refined |
+|---|---|---|---|---|---|
+| corner | 320 | 53.99 | 184.07 @ 293.67° | 160.96 | 160.96 @ -13.531u |
+| corner | 400 | 161.28 | 125.96 @ 89.92° | 161.28 | 161.28 @ -1.406u |
+| corner | 500 | 335.20 | 199.04 @ 14.92° | 229.26 | 334.18 @ -4.094u |
+| corner | 640 | 43.10 | 127.11 @ 292.11° | 161.12 | 161.12 @ -4.156u |
+| corner | 800 | 62.28 | 221.43 @ 293.05° | 161.12 | 161.12 @ -1.594u |
+| corner | 1000 | 48.25 | 239.51 @ 298.67° | 197.87 | 197.87 @ -7.719u |
+
+**Wall jump — the three G7 numbers.** Largest step surviving aim refinement to 0.25°: **239.51 ups**. Largest surviving geometry refinement to 0.0625 of a unit: **334.18 ups**. Largest disagreement between the closed form `step.rs` computes the impulse from and the impulse actually measured against the control on the invoking command: **8.52 ups**. 
+
+The **timing** axis is not refinable — 8 ms is the input quantum: the sweep's timing resolution is one command and one command is the simulation's input quantum, so there is no finer grid to refine into and "does this step shrink when the grid is refined" has no meaning there. That is a limit of the model rather than of this instrument, and it is stated rather than answered with a number that would only describe the grid. 
+
+The closed forms are the *immediate impulse*, not the outcome at the horizon. No closed form for the horizon outcome is offered, because a second of `PM_Accelerate`, friction, ground probes and possibly a collision separates the impulse from the horizon and every one of those depends on the whole run. G7's first part asks the **verdict** to state a rule; what is published here is the arithmetic the code already contains, measured, so that a rule has something to be checked against. 
+
+**Beside the incumbent, because §1.6 binds a G7 rejection to publish the comparison.** The same instrument, at the same geometry floor, finds overbounce's surviving step at 447.55 ups across 0.0625 of a unit of drop height (the self-test table above). Canon's own text quotes overbounce at 160.00 against 0.17; that is §4's figure at one drop height, and the refined sweep finds a larger one. Both numbers are this instrument's, taken the same way, so they can be compared directly.
+
+**W7's three counts, read from the source and published rather than gated** (except the precondition count, which W7 does gate). The constants are `PhysicsProfile`'s; the state fields are `PlayerState`'s and `Timers`'; the preconditions are the distinct state predicates gating the mechanic in `step.rs`. Two counts are given for the preconditions because Part 1 does not say whether the profile guards — the `!= 0` tests that G8 *requires* every mechanic to carry so that a stated value switches it off — are state predicates. They are tests on the profile rather than on the player, so the first column excludes them; the second includes them, and a verdict can use either without re-reading the file.
+
+**W7 — cost.**
+
+| mechanic | new constants | new state fields | preconditions (player state) | preconditions (incl. profile guards) | the predicates |
+|---|---|---|---|---|---|
+| Crouch slide | 3 | 1 | 3 | 4 | `crouch_edge`; walking (`check_slide` is reached only from `PM_WalkMove`); `speed >= slide_entry_speed`. Profile guard: `slide_duration_ms != 0`. |
+| Dash | 2 | 1 | 5 | 7 | `jump_pressed`; `!jump_held`; airborne (`check_air_jump` is reached only from `PM_AirMove`); `dash_ms > 0`; `wishdir != 0`; `addspeed > 0`. Profile guards: `dash_speed != 0`, `dash_window_ms != 0`. Counted as five because `addspeed > 0` is a test on the impulse rather than on state. |
+| Wall jump | 3 | 2 | 4 | 6 | `jump_pressed`; `!jump_held`; airborne; `wall_contact_ms > 0`. Arming adds `|normal.z| <= wall_normal_max`, counted here because it is a test on the world the player is touching. Profile guards: `wall_jump_velocity != 0`, `wall_contact_window_ms != 0`. |
+
+The state fields counted are `Timers::slide_ms` for the slide, `Timers::dash_ms` for the dash, and `Timers::wall_contact_ms` plus `PlayerState::wall_normal` for the wall jump. `PlayerState::left_ground_by_jumping` is *not* counted against the dash: it already existed for the double jump, which arms on the same landing under the same provenance rule.
+
+### Crouch slide: does tap-and-stand-up dominate?
+
+`docs/movement-canon.md` §2.0 names this as a question a verdict must settle first, because it may decide the mechanic rather than tune it. **The claim is true of the code.** `PM_Friction` (`crates/straf3-sim/src/step.rs`) selects `slide_friction` on `self.profile.slide_duration_ms != 0 && p.timers.slide_ms > 0` and reads nothing else — `p.crouched` is not consulted. The wish-speed cap is a separate test in `walk_move`, `if p.crouched { wishspeed = min(wishspeed, max_speed · duck_scale) }`. So the two halves of "sliding" are gated on different things: the friction on a timer, the speed price on a posture. A player who taps crouch to start the timer and stands up on the next command pays the price for one command and keeps the friction for the whole countdown.
+
+**Tap-and-stand against hold-crouch**, over the whole sweep. Best outcome delta in ups, and the naive-harm rate in each policy's own neighbourhood.
+
+| context | entry | tap: best Δ | hold: best Δ | tap − hold | tap: harmed/n | hold: harmed/n |
+|---|---|---|---|---|---|---|
+| floor | 320 | 13.13 | 4.60 | 8.53 | 0/416 | 0/416 |
+| floor | 400 | 13.11 | 26.36 | -13.25 | 0/416 | 0/416 |
+| floor | 500 | 20.47 | 36.06 | -15.59 | 0/416 | 0/416 |
+| floor | 640 | 26.35 | 43.61 | -17.27 | 0/416 | 0/416 |
+| floor | 800 | 36.67 | 47.57 | -10.90 | 0/416 | 0/416 |
+| floor | 1000 | 36.66 | 49.82 | -13.16 | 0/416 | 0/416 |
+| ramp26 | 320 | 13.13 | 15.86 | -2.73 | 0/416 | 0/416 |
+| ramp26 | 400 | 13.11 | 16.63 | -3.52 | 4/416 | 0/416 |
+| ramp26 | 500 | 44.87 | 38.57 | 6.30 | 20/416 | 0/416 |
+| ramp26 | 640 | 41.41 | 42.52 | -1.11 | 36/416 | 0/416 |
+| ramp26 | 800 | 47.68 | 53.75 | -6.07 | 20/416 | 0/416 |
+| ramp26 | 1000 | 61.70 | 58.06 | 3.64 | 60/416 | 0/416 |
+| ramp50 | 320 | 13.13 | 4.60 | 8.53 | 0/416 | 0/416 |
+| ramp50 | 400 | 49.16 | 70.18 | -21.02 | 0/416 | 0/416 |
+| ramp50 | 500 | 98.28 | 157.54 | -59.26 | 3/416 | 0/416 |
+| ramp50 | 640 | 192.12 | 275.28 | -83.15 | 9/416 | 0/416 |
+| ramp50 | 800 | 231.26 | 313.20 | -81.94 | 10/416 | 10/416 |
+| ramp50 | 1000 | 303.03 | 340.15 | -37.12 | 17/416 | 17/416 |
+| step18 | 320 | 19.83 | 38.18 | -18.34 | 0/416 | 0/416 |
+| step18 | 400 | 30.12 | 34.85 | -4.74 | 0/416 | 2/416 |
+| step18 | 500 | 32.08 | 48.50 | -16.42 | 0/416 | 0/416 |
+| step18 | 640 | 36.25 | 83.46 | -47.21 | 0/416 | 0/416 |
+| step18 | 800 | 55.31 | 91.02 | -35.70 | 0/416 | 0/416 |
+| step18 | 1000 | 61.87 | 107.12 | -45.25 | 0/416 | 0/416 |
+| ledge256 | 320 | 13.13 | 250.75 | -237.62 | 0/416 | 0/416 |
+| ledge256 | 400 | 212.83 | 493.04 | -280.21 | 2/416 | 5/416 |
+| ledge256 | 500 | 581.54 | 380.02 | 201.52 | 12/416 | 35/416 |
+| ledge256 | 640 | 382.64 | 489.42 | -106.79 | 6/416 | 110/416 |
+| ledge256 | 800 | 553.54 | 404.32 | 149.22 | 6/416 | 0/416 |
+| ledge256 | 1000 | 185.68 | 326.29 | -140.61 | 4/416 | 2/416 |
+| corner | 320 | 4.99 | 81.67 | -76.68 | 0/416 | 0/416 |
+| corner | 400 | 261.33 | 108.07 | 153.25 | 0/416 | 0/416 |
+| corner | 500 | 337.17 | 108.08 | 229.10 | 0/416 | 1/416 |
+| corner | 640 | 316.66 | 101.91 | 214.76 | 0/416 | 6/416 |
+| corner | 800 | 240.43 | 101.71 | 138.72 | 0/416 | 6/416 |
+| corner | 1000 | 239.13 | 94.53 | 144.60 | 0/416 | 4/416 |
+| ceiling48 | 320 | — | — | — | 0/416 | 0/416 |
+| ceiling48 | 400 | 26.36 | 26.36 | 0.00 | 0/416 | 0/416 |
+| ceiling48 | 500 | 29.06 | 29.06 | 0.00 | 0/416 | 0/416 |
+| ceiling48 | 640 | 32.52 | 32.52 | 0.00 | 0/416 | 0/416 |
+| ceiling48 | 800 | 35.68 | 35.68 | 0.00 | 0/416 | 0/416 |
+| ceiling48 | 1000 | 38.83 | 38.83 | 0.00 | 0/416 | 0/416 |
+
+Over the cells where both policies fire: **tap beats hold materially in 7, hold beats tap materially in 16, and 18 are within 16 ups of each other**. The largest advantage tapping holds anywhere is 229.10 ups. Note that the primary sweep tables above are the **tap** policy, because tapping is the default in `presses()`; the hold numbers are here and in the machine-readable section under `hold_*`.
+
+**What a slide does after the speed that bought it is gone.** Armed at the entry speed on flat ground, then nothing is held — no move axis, so `PM_Friction` is the only force and what the run measures is the mechanic alone. `standing` counts the commands of the slide spent standing up.
+
+| policy | entry | slide commands | standing | exit speed | lowest speed | commands below entry speed | ran below max_speed |
+|---|---|---|---|---|---|---|---|
+| tap | 400 | 75 | 75 | 208.48 | 208.48 | 74 | yes |
+| tap | 500 | 75 | 75 | 260.60 | 260.60 | 48 | yes |
+| tap | 640 | 75 | 75 | 333.57 | 333.57 | 17 | no |
+| tap | 800 | 75 | 75 | 416.97 | 416.97 | 0 | no |
+| tap | 1000 | 75 | 75 | 521.21 | 521.21 | 0 | no |
+| hold | 400 | 75 | 0 | 208.48 | 208.48 | 74 | yes |
+| hold | 500 | 75 | 0 | 260.60 | 260.60 | 48 | yes |
+| hold | 640 | 75 | 0 | 333.57 | 333.57 | 17 | no |
+| hold | 800 | 75 | 0 | 416.97 | 416.97 | 0 | no |
+| hold | 1000 | 75 | 0 | 521.21 | 521.21 | 0 | no |
+
+`slide_entry_speed` is a floor checked **once, at entry**: nothing in `PM_Friction` or in `Timers::advance` re-reads it, so the countdown runs to its end whatever the speed becomes. The `commands below entry speed` column is that fact measured. It is published because several criteria may want it and nothing else in this document measures it, and it is a property of Straf3's mover read from Straf3's mover.
+
+### What this section could not measure
+
+§1.9 says an honest gap beats a proxy metric that does not mean what it claims, because a proxy converts a question into a number and then the number gets cited. Five gaps, each a real limit on what a verdict can rest on:
+
+1. **G1 is not measured here.** It is decided by `cargo xtask determinism` across all four build targets and by `the_checksum_covers_the_state_a_technique_depends_on` in `crates/straf3-sim/src/state.rs`, neither of which is this instrument. `SimState::checksum` does fold `slide_ms`, `dash_ms` and `wall_contact_ms`, which is the half of G1 about branching on unfolded state; the cross-target half is the determinism runner's answer to give.
+
+2. **G6's first half is a code read, not a measurement.** The gate asks whether an explicit clamp exists on the magnitude of `velocity` or of its horizontal component. No candidate path contains one: the dash adds along a wish direction under `PM_Accelerate`'s projection clamp, the wall jump adds along a surface normal, and the slide changes a friction rate. That is a reading of `step.rs` rather than a number, and it is reported as one. G6's second half — terminal speeds under the candidate profile where the mechanic is not invoked — is measured, and is the `terminal.*` rows of the G2 diff above.
+
+3. **G3's second count is measured on steering, not on presses.** The instrument rotates one command's wish direction and asks whether anything moved. It cannot ask the same question of a jump press, because under canon an airborne jump press does nothing at all and there is no control behaviour to differ from. The `jump_held` consequence is read from the source and stated in the G3 paragraphs rather than folded into the count.
+
+4. **W5 has three policies and seven names.** On §1.2's harness, `ground_turn`, `ramp traversal`, `step-up`, the `drop launch` and `air_forward` are the same command policy, distinguished only by the context each is named in. The menu measures three policies and maps the names onto them; a W5 score that treated the seven as independent would be counting the same measurement up to five times.
+
+5. **The retuned dash is derived, not measured against a patched crate.** The rewriting is exact if and only if `dash_entry_speed` is precisely a horizontal-speed gate at the arming event and changes nothing else; the retuned-dash section states the condition in full and every value carries a `dash_retuned` prefix. It reads that way because the field cannot land speculatively — `identity.rs` folds an exhaustive destructure of `PhysicsProfile`, so adding it would move the physics digest of `vq3` and `cpm` for a candidate that may be rejected.
+
+6. **Route diversity is still not measured**, and the candidates do not change that. *Limits* 6 explains why the only perturbation harness that exists cannot answer it honestly. W4 and W6 above are scored on testbed geometry, and §1.5's geometry-dependency disclosure is what keeps the difference between "pays in four contexts" and "pays on a map that exists" visible in a verdict.
+
+
 ## Machine-readable results
 
 Every measurement above, as `key<TAB>value<TAB>unit`, sorted by key. This is the same text as `tools/straf3-lab/measurements.pinned.tsv`, which `cargo test -p straf3-lab` compares against and which names the measurements that moved when it fails.
 
 ```tsv
+candidate.crouch_slide.ceiling48.e0320.anchor_commands	0	n
+candidate.crouch_slide.ceiling48.e0320.anchor_speed_ups	320.00	ups
+candidate.crouch_slide.ceiling48.e0320.avail_commands	0	n
+candidate.crouch_slide.ceiling48.e0320.avail_ms	0	ms
+candidate.crouch_slide.ceiling48.e0320.best_delta_ups	never-fired	
+candidate.crouch_slide.ceiling48.e0320.control_best_absolute_ups	120.09	ups
+candidate.crouch_slide.ceiling48.e0320.delta_aim0_ups	never-fired-at-aim-0	
+candidate.crouch_slide.ceiling48.e0320.exec_window_ms	0	ms
+candidate.crouch_slide.ceiling48.e0320.exec_window_span_ms	0	ms
+candidate.crouch_slide.ceiling48.e0320.g5b_point_naive	not-meaningful	
+candidate.crouch_slide.ceiling48.e0320.hold_naive_harmed	0	n
+candidate.crouch_slide.ceiling48.e0320.material	no	
+candidate.crouch_slide.ceiling48.e0320.menu.bunnyhop.absolute_ups	525.45	ups
+candidate.crouch_slide.ceiling48.e0320.menu.bunnyhop.angle_deg	55.00	deg
+candidate.crouch_slide.ceiling48.e0320.menu.held_forward.absolute_ups	120.09	ups
+candidate.crouch_slide.ceiling48.e0320.menu.held_forward.angle_deg	55.00	deg
+candidate.crouch_slide.ceiling48.e0320.menu.held_strafe.absolute_ups	120.09	ups
+candidate.crouch_slide.ceiling48.e0320.menu.held_strafe.angle_deg	55.00	deg
+candidate.crouch_slide.ceiling48.e0320.naive_harm_rate	0.0000	
+candidate.crouch_slide.ceiling48.e0320.naive_harmed	0	n
+candidate.crouch_slide.ceiling48.e0320.naive_mean_delta_ups	0.00	ups
+candidate.crouch_slide.ceiling48.e0320.naive_points	416	n
+candidate.crouch_slide.ceiling48.e0320.qualifies	no	
+candidate.crouch_slide.ceiling48.e0320.reachable	yes	
+candidate.crouch_slide.ceiling48.e0320.timing_degenerate	yes	
+candidate.crouch_slide.ceiling48.e0320.w2_gap	not-meaningful	
+candidate.crouch_slide.ceiling48.e0320.w6_top_aims	0	n
+candidate.crouch_slide.ceiling48.e0320.w6_top_timings	0	n
+candidate.crouch_slide.ceiling48.e0320.worst_latency	0	n
+candidate.crouch_slide.ceiling48.e0400.absolute_aim0_ups	80.00	ups
+candidate.crouch_slide.ceiling48.e0400.anchor_commands	0	n
+candidate.crouch_slide.ceiling48.e0400.anchor_speed_ups	400.00	ups
+candidate.crouch_slide.ceiling48.e0400.avail_commands	32	n
+candidate.crouch_slide.ceiling48.e0400.avail_ms	256	ms
+candidate.crouch_slide.ceiling48.e0400.best_absolute_ups	56.08	ups
+candidate.crouch_slide.ceiling48.e0400.best_aim_deg	290.00	deg
+candidate.crouch_slide.ceiling48.e0400.best_delta_ups	26.36	ups
+candidate.crouch_slide.ceiling48.e0400.best_timing_ms	0	ms
+candidate.crouch_slide.ceiling48.e0400.control_best_absolute_ups	120.10	ups
+candidate.crouch_slide.ceiling48.e0400.delta_aim0_ups	0.00	ups
+candidate.crouch_slide.ceiling48.e0400.exec_window_ms	256	ms
+candidate.crouch_slide.ceiling48.e0400.exec_window_span_ms	256	ms
+candidate.crouch_slide.ceiling48.e0400.g3_unresponsive_candidate	32	n
+candidate.crouch_slide.ceiling48.e0400.g3_unresponsive_control	9	n
+candidate.crouch_slide.ceiling48.e0400.g5b_point_naive	0.0000	
+candidate.crouch_slide.ceiling48.e0400.g7_aim_at_deg	296.80	deg
+candidate.crouch_slide.ceiling48.e0400.g7_aim_refined_ups	1.77	ups
+candidate.crouch_slide.ceiling48.e0400.g7_impulse_measured_ups	16.00	ups
+candidate.crouch_slide.ceiling48.e0400.g7_impulse_predicted_ups	16.00	ups
+candidate.crouch_slide.ceiling48.e0400.hold_best_delta_ups	26.36	ups
+candidate.crouch_slide.ceiling48.e0400.hold_naive_harmed	0	n
+candidate.crouch_slide.ceiling48.e0400.material	yes	
+candidate.crouch_slide.ceiling48.e0400.menu.bunnyhop.absolute_ups	572.68	ups
+candidate.crouch_slide.ceiling48.e0400.menu.bunnyhop.angle_deg	60.00	deg
+candidate.crouch_slide.ceiling48.e0400.menu.held_forward.absolute_ups	120.10	ups
+candidate.crouch_slide.ceiling48.e0400.menu.held_forward.angle_deg	55.00	deg
+candidate.crouch_slide.ceiling48.e0400.menu.held_strafe.absolute_ups	120.10	ups
+candidate.crouch_slide.ceiling48.e0400.menu.held_strafe.angle_deg	55.00	deg
+candidate.crouch_slide.ceiling48.e0400.naive_harm_rate	0.0000	
+candidate.crouch_slide.ceiling48.e0400.naive_harmed	0	n
+candidate.crouch_slide.ceiling48.e0400.naive_mean_delta_ups	0.00	ups
+candidate.crouch_slide.ceiling48.e0400.naive_points	416	n
+candidate.crouch_slide.ceiling48.e0400.peak_gain_at_ms	264	ms
+candidate.crouch_slide.ceiling48.e0400.peak_gain_ups	180.11	ups
+candidate.crouch_slide.ceiling48.e0400.qualifies	yes	
+candidate.crouch_slide.ceiling48.e0400.reachable	yes	
+candidate.crouch_slide.ceiling48.e0400.tap_minus_hold_ups	0.00	ups
+candidate.crouch_slide.ceiling48.e0400.timing_degenerate	yes	
+candidate.crouch_slide.ceiling48.e0400.w2_gap	1.0000	
+candidate.crouch_slide.ceiling48.e0400.w3_chain_gain_ups	-64.02	ups
+candidate.crouch_slide.ceiling48.e0400.w3_mechanic_alone_ups	80.00	ups
+candidate.crouch_slide.ceiling48.e0400.w5_over_best_technique_ups	-516.60	ups
+candidate.crouch_slide.ceiling48.e0400.w6_aim_centroid_deg	0.00	deg
+candidate.crouch_slide.ceiling48.e0400.w6_timing_centroid_ms	124	ms
+candidate.crouch_slide.ceiling48.e0400.w6_top_aims	2	n
+candidate.crouch_slide.ceiling48.e0400.w6_top_timings	32	n
+candidate.crouch_slide.ceiling48.e0400.worst_latency	0	n
+candidate.crouch_slide.ceiling48.e0500.absolute_aim0_ups	80.00	ups
+candidate.crouch_slide.ceiling48.e0500.anchor_commands	0	n
+candidate.crouch_slide.ceiling48.e0500.anchor_speed_ups	500.00	ups
+candidate.crouch_slide.ceiling48.e0500.avail_commands	32	n
+candidate.crouch_slide.ceiling48.e0500.avail_ms	256	ms
+candidate.crouch_slide.ceiling48.e0500.best_absolute_ups	59.35	ups
+candidate.crouch_slide.ceiling48.e0500.best_aim_deg	290.00	deg
+candidate.crouch_slide.ceiling48.e0500.best_delta_ups	29.06	ups
+candidate.crouch_slide.ceiling48.e0500.best_timing_ms	0	ms
+candidate.crouch_slide.ceiling48.e0500.control_best_absolute_ups	120.10	ups
+candidate.crouch_slide.ceiling48.e0500.delta_aim0_ups	0.00	ups
+candidate.crouch_slide.ceiling48.e0500.exec_window_ms	256	ms
+candidate.crouch_slide.ceiling48.e0500.exec_window_span_ms	256	ms
+candidate.crouch_slide.ceiling48.e0500.g3_unresponsive_candidate	32	n
+candidate.crouch_slide.ceiling48.e0500.g3_unresponsive_control	14	n
+candidate.crouch_slide.ceiling48.e0500.g5b_point_naive	0.0000	
+candidate.crouch_slide.ceiling48.e0500.g7_aim_at_deg	63.20	deg
+candidate.crouch_slide.ceiling48.e0500.g7_aim_refined_ups	1.81	ups
+candidate.crouch_slide.ceiling48.e0500.g7_impulse_measured_ups	20.00	ups
+candidate.crouch_slide.ceiling48.e0500.g7_impulse_predicted_ups	20.00	ups
+candidate.crouch_slide.ceiling48.e0500.hold_best_delta_ups	29.06	ups
+candidate.crouch_slide.ceiling48.e0500.hold_naive_harmed	0	n
+candidate.crouch_slide.ceiling48.e0500.material	yes	
+candidate.crouch_slide.ceiling48.e0500.menu.bunnyhop.absolute_ups	640.00	ups
+candidate.crouch_slide.ceiling48.e0500.menu.bunnyhop.angle_deg	60.00	deg
+candidate.crouch_slide.ceiling48.e0500.menu.held_forward.absolute_ups	120.10	ups
+candidate.crouch_slide.ceiling48.e0500.menu.held_forward.angle_deg	55.00	deg
+candidate.crouch_slide.ceiling48.e0500.menu.held_strafe.absolute_ups	120.10	ups
+candidate.crouch_slide.ceiling48.e0500.menu.held_strafe.angle_deg	55.00	deg
+candidate.crouch_slide.ceiling48.e0500.naive_harm_rate	0.0000	
+candidate.crouch_slide.ceiling48.e0500.naive_harmed	0	n
+candidate.crouch_slide.ceiling48.e0500.naive_mean_delta_ups	0.00	ups
+candidate.crouch_slide.ceiling48.e0500.naive_points	416	n
+candidate.crouch_slide.ceiling48.e0500.peak_gain_at_ms	264	ms
+candidate.crouch_slide.ceiling48.e0500.peak_gain_ups	243.88	ups
+candidate.crouch_slide.ceiling48.e0500.qualifies	yes	
+candidate.crouch_slide.ceiling48.e0500.reachable	yes	
+candidate.crouch_slide.ceiling48.e0500.tap_minus_hold_ups	0.00	ups
+candidate.crouch_slide.ceiling48.e0500.timing_degenerate	yes	
+candidate.crouch_slide.ceiling48.e0500.w2_gap	1.0000	
+candidate.crouch_slide.ceiling48.e0500.w3_chain_gain_ups	-60.75	ups
+candidate.crouch_slide.ceiling48.e0500.w3_entry_slope	0.0327	
+candidate.crouch_slide.ceiling48.e0500.w3_mechanic_alone_ups	80.00	ups
+candidate.crouch_slide.ceiling48.e0500.w5_over_best_technique_ups	-580.65	ups
+candidate.crouch_slide.ceiling48.e0500.w6_aim_centroid_deg	0.00	deg
+candidate.crouch_slide.ceiling48.e0500.w6_timing_centroid_ms	124	ms
+candidate.crouch_slide.ceiling48.e0500.w6_top_aims	2	n
+candidate.crouch_slide.ceiling48.e0500.w6_top_timings	32	n
+candidate.crouch_slide.ceiling48.e0500.worst_latency	0	n
+candidate.crouch_slide.ceiling48.e0640.absolute_aim0_ups	80.00	ups
+candidate.crouch_slide.ceiling48.e0640.anchor_commands	0	n
+candidate.crouch_slide.ceiling48.e0640.anchor_speed_ups	640.00	ups
+candidate.crouch_slide.ceiling48.e0640.avail_commands	32	n
+candidate.crouch_slide.ceiling48.e0640.avail_ms	256	ms
+candidate.crouch_slide.ceiling48.e0640.best_absolute_ups	63.60	ups
+candidate.crouch_slide.ceiling48.e0640.best_aim_deg	70.00	deg
+candidate.crouch_slide.ceiling48.e0640.best_delta_ups	32.52	ups
+candidate.crouch_slide.ceiling48.e0640.best_timing_ms	0	ms
+candidate.crouch_slide.ceiling48.e0640.control_best_absolute_ups	120.10	ups
+candidate.crouch_slide.ceiling48.e0640.delta_aim0_ups	0.00	ups
+candidate.crouch_slide.ceiling48.e0640.exec_window_ms	256	ms
+candidate.crouch_slide.ceiling48.e0640.exec_window_span_ms	256	ms
+candidate.crouch_slide.ceiling48.e0640.g3_unresponsive_candidate	0	n
+candidate.crouch_slide.ceiling48.e0640.g3_unresponsive_control	0	n
+candidate.crouch_slide.ceiling48.e0640.g5b_point_naive	0.0000	
+candidate.crouch_slide.ceiling48.e0640.g7_aim_at_deg	296.17	deg
+candidate.crouch_slide.ceiling48.e0640.g7_aim_refined_ups	1.73	ups
+candidate.crouch_slide.ceiling48.e0640.g7_impulse_measured_ups	25.60	ups
+candidate.crouch_slide.ceiling48.e0640.g7_impulse_predicted_ups	25.60	ups
+candidate.crouch_slide.ceiling48.e0640.hold_best_delta_ups	32.52	ups
+candidate.crouch_slide.ceiling48.e0640.hold_naive_harmed	0	n
+candidate.crouch_slide.ceiling48.e0640.material	yes	
+candidate.crouch_slide.ceiling48.e0640.menu.bunnyhop.absolute_ups	756.95	ups
+candidate.crouch_slide.ceiling48.e0640.menu.bunnyhop.angle_deg	65.00	deg
+candidate.crouch_slide.ceiling48.e0640.menu.held_forward.absolute_ups	120.10	ups
+candidate.crouch_slide.ceiling48.e0640.menu.held_forward.angle_deg	55.00	deg
+candidate.crouch_slide.ceiling48.e0640.menu.held_strafe.absolute_ups	120.10	ups
+candidate.crouch_slide.ceiling48.e0640.menu.held_strafe.angle_deg	55.00	deg
+candidate.crouch_slide.ceiling48.e0640.naive_harm_rate	0.0000	
+candidate.crouch_slide.ceiling48.e0640.naive_harmed	0	n
+candidate.crouch_slide.ceiling48.e0640.naive_mean_delta_ups	0.00	ups
+candidate.crouch_slide.ceiling48.e0640.naive_points	416	n
+candidate.crouch_slide.ceiling48.e0640.peak_gain_at_ms	264	ms
+candidate.crouch_slide.ceiling48.e0640.peak_gain_ups	332.99	ups
+candidate.crouch_slide.ceiling48.e0640.qualifies	yes	
+candidate.crouch_slide.ceiling48.e0640.reachable	yes	
+candidate.crouch_slide.ceiling48.e0640.tap_minus_hold_ups	0.00	ups
+candidate.crouch_slide.ceiling48.e0640.timing_degenerate	yes	
+candidate.crouch_slide.ceiling48.e0640.w2_gap	1.0000	
+candidate.crouch_slide.ceiling48.e0640.w3_chain_gain_ups	-56.51	ups
+candidate.crouch_slide.ceiling48.e0640.w3_entry_slope	0.0303	
+candidate.crouch_slide.ceiling48.e0640.w3_mechanic_alone_ups	80.00	ups
+candidate.crouch_slide.ceiling48.e0640.w5_over_best_technique_ups	-693.35	ups
+candidate.crouch_slide.ceiling48.e0640.w6_aim_centroid_deg	0.00	deg
+candidate.crouch_slide.ceiling48.e0640.w6_timing_centroid_ms	124	ms
+candidate.crouch_slide.ceiling48.e0640.w6_top_aims	2	n
+candidate.crouch_slide.ceiling48.e0640.w6_top_timings	32	n
+candidate.crouch_slide.ceiling48.e0640.worst_latency	0	n
+candidate.crouch_slide.ceiling48.e0800.absolute_aim0_ups	80.00	ups
+candidate.crouch_slide.ceiling48.e0800.anchor_commands	0	n
+candidate.crouch_slide.ceiling48.e0800.anchor_speed_ups	800.00	ups
+candidate.crouch_slide.ceiling48.e0800.avail_commands	32	n
+candidate.crouch_slide.ceiling48.e0800.avail_ms	256	ms
+candidate.crouch_slide.ceiling48.e0800.best_absolute_ups	67.63	ups
+candidate.crouch_slide.ceiling48.e0800.best_aim_deg	290.00	deg
+candidate.crouch_slide.ceiling48.e0800.best_delta_ups	35.68	ups
+candidate.crouch_slide.ceiling48.e0800.best_timing_ms	0	ms
+candidate.crouch_slide.ceiling48.e0800.control_best_absolute_ups	120.11	ups
+candidate.crouch_slide.ceiling48.e0800.delta_aim0_ups	0.00	ups
+candidate.crouch_slide.ceiling48.e0800.exec_window_ms	256	ms
+candidate.crouch_slide.ceiling48.e0800.exec_window_span_ms	256	ms
+candidate.crouch_slide.ceiling48.e0800.g3_unresponsive_candidate	32	n
+candidate.crouch_slide.ceiling48.e0800.g3_unresponsive_control	24	n
+candidate.crouch_slide.ceiling48.e0800.g5b_point_naive	0.0000	
+candidate.crouch_slide.ceiling48.e0800.g7_aim_at_deg	296.17	deg
+candidate.crouch_slide.ceiling48.e0800.g7_aim_refined_ups	1.78	ups
+candidate.crouch_slide.ceiling48.e0800.g7_impulse_measured_ups	32.00	ups
+candidate.crouch_slide.ceiling48.e0800.g7_impulse_predicted_ups	32.00	ups
+candidate.crouch_slide.ceiling48.e0800.hold_best_delta_ups	35.68	ups
+candidate.crouch_slide.ceiling48.e0800.hold_naive_harmed	0	n
+candidate.crouch_slide.ceiling48.e0800.material	yes	
+candidate.crouch_slide.ceiling48.e0800.menu.bunnyhop.absolute_ups	890.82	ups
+candidate.crouch_slide.ceiling48.e0800.menu.bunnyhop.angle_deg	70.00	deg
+candidate.crouch_slide.ceiling48.e0800.menu.held_forward.absolute_ups	120.11	ups
+candidate.crouch_slide.ceiling48.e0800.menu.held_forward.angle_deg	55.00	deg
+candidate.crouch_slide.ceiling48.e0800.menu.held_strafe.absolute_ups	120.11	ups
+candidate.crouch_slide.ceiling48.e0800.menu.held_strafe.angle_deg	55.00	deg
+candidate.crouch_slide.ceiling48.e0800.naive_harm_rate	0.0000	
+candidate.crouch_slide.ceiling48.e0800.naive_harmed	0	n
+candidate.crouch_slide.ceiling48.e0800.naive_mean_delta_ups	0.00	ups
+candidate.crouch_slide.ceiling48.e0800.naive_points	416	n
+candidate.crouch_slide.ceiling48.e0800.peak_gain_at_ms	264	ms
+candidate.crouch_slide.ceiling48.e0800.peak_gain_ups	434.67	ups
+candidate.crouch_slide.ceiling48.e0800.qualifies	yes	
+candidate.crouch_slide.ceiling48.e0800.reachable	yes	
+candidate.crouch_slide.ceiling48.e0800.tap_minus_hold_ups	0.00	ups
+candidate.crouch_slide.ceiling48.e0800.timing_degenerate	yes	
+candidate.crouch_slide.ceiling48.e0800.w2_gap	1.0000	
+candidate.crouch_slide.ceiling48.e0800.w3_chain_gain_ups	-52.48	ups
+candidate.crouch_slide.ceiling48.e0800.w3_entry_slope	0.0252	
+candidate.crouch_slide.ceiling48.e0800.w3_mechanic_alone_ups	80.00	ups
+candidate.crouch_slide.ceiling48.e0800.w5_over_best_technique_ups	-823.20	ups
+candidate.crouch_slide.ceiling48.e0800.w6_aim_centroid_deg	0.00	deg
+candidate.crouch_slide.ceiling48.e0800.w6_timing_centroid_ms	124	ms
+candidate.crouch_slide.ceiling48.e0800.w6_top_aims	2	n
+candidate.crouch_slide.ceiling48.e0800.w6_top_timings	32	n
+candidate.crouch_slide.ceiling48.e0800.worst_latency	0	n
+candidate.crouch_slide.ceiling48.e1000.absolute_aim0_ups	80.00	ups
+candidate.crouch_slide.ceiling48.e1000.anchor_commands	0	n
+candidate.crouch_slide.ceiling48.e1000.anchor_speed_ups	1000.00	ups
+candidate.crouch_slide.ceiling48.e1000.avail_commands	32	n
+candidate.crouch_slide.ceiling48.e1000.avail_ms	256	ms
+candidate.crouch_slide.ceiling48.e1000.best_absolute_ups	71.83	ups
+candidate.crouch_slide.ceiling48.e1000.best_aim_deg	70.00	deg
+candidate.crouch_slide.ceiling48.e1000.best_delta_ups	38.83	ups
+candidate.crouch_slide.ceiling48.e1000.best_timing_ms	0	ms
+candidate.crouch_slide.ceiling48.e1000.control_best_absolute_ups	120.11	ups
+candidate.crouch_slide.ceiling48.e1000.delta_aim0_ups	0.00	ups
+candidate.crouch_slide.ceiling48.e1000.exec_window_ms	256	ms
+candidate.crouch_slide.ceiling48.e1000.exec_window_span_ms	256	ms
+candidate.crouch_slide.ceiling48.e1000.g3_unresponsive_candidate	0	n
+candidate.crouch_slide.ceiling48.e1000.g3_unresponsive_control	0	n
+candidate.crouch_slide.ceiling48.e1000.g5b_point_naive	0.0000	
+candidate.crouch_slide.ceiling48.e1000.g7_aim_at_deg	296.17	deg
+candidate.crouch_slide.ceiling48.e1000.g7_aim_refined_ups	1.80	ups
+candidate.crouch_slide.ceiling48.e1000.g7_impulse_measured_ups	40.00	ups
+candidate.crouch_slide.ceiling48.e1000.g7_impulse_predicted_ups	40.00	ups
+candidate.crouch_slide.ceiling48.e1000.hold_best_delta_ups	38.83	ups
+candidate.crouch_slide.ceiling48.e1000.hold_naive_harmed	0	n
+candidate.crouch_slide.ceiling48.e1000.material	yes	
+candidate.crouch_slide.ceiling48.e1000.menu.bunnyhop.absolute_ups	1049.85	ups
+candidate.crouch_slide.ceiling48.e1000.menu.bunnyhop.angle_deg	75.00	deg
+candidate.crouch_slide.ceiling48.e1000.menu.held_forward.absolute_ups	120.11	ups
+candidate.crouch_slide.ceiling48.e1000.menu.held_forward.angle_deg	55.00	deg
+candidate.crouch_slide.ceiling48.e1000.menu.held_strafe.absolute_ups	120.11	ups
+candidate.crouch_slide.ceiling48.e1000.menu.held_strafe.angle_deg	55.00	deg
+candidate.crouch_slide.ceiling48.e1000.naive_harm_rate	0.0000	
+candidate.crouch_slide.ceiling48.e1000.naive_harmed	0	n
+candidate.crouch_slide.ceiling48.e1000.naive_mean_delta_ups	0.00	ups
+candidate.crouch_slide.ceiling48.e1000.naive_points	416	n
+candidate.crouch_slide.ceiling48.e1000.peak_gain_at_ms	264	ms
+candidate.crouch_slide.ceiling48.e1000.peak_gain_ups	561.58	ups
+candidate.crouch_slide.ceiling48.e1000.qualifies	yes	
+candidate.crouch_slide.ceiling48.e1000.reachable	yes	
+candidate.crouch_slide.ceiling48.e1000.tap_minus_hold_ups	0.00	ups
+candidate.crouch_slide.ceiling48.e1000.timing_degenerate	yes	
+candidate.crouch_slide.ceiling48.e1000.w2_gap	1.0000	
+candidate.crouch_slide.ceiling48.e1000.w3_chain_gain_ups	-48.28	ups
+candidate.crouch_slide.ceiling48.e1000.w3_entry_slope	0.0210	
+candidate.crouch_slide.ceiling48.e1000.w3_mechanic_alone_ups	80.00	ups
+candidate.crouch_slide.ceiling48.e1000.w5_over_best_technique_ups	-978.02	ups
+candidate.crouch_slide.ceiling48.e1000.w6_aim_centroid_deg	0.00	deg
+candidate.crouch_slide.ceiling48.e1000.w6_timing_centroid_ms	124	ms
+candidate.crouch_slide.ceiling48.e1000.w6_top_aims	2	n
+candidate.crouch_slide.ceiling48.e1000.w6_top_timings	32	n
+candidate.crouch_slide.ceiling48.e1000.worst_latency	0	n
+candidate.crouch_slide.ceiling48.g5a.arming_events	0	n
+candidate.crouch_slide.ceiling48.g5a.available_commands	0	n
+candidate.crouch_slide.ceiling48.g5a.peak_speed_ups	320.00	ups
+candidate.crouch_slide.ceiling48.g5b_median	0.0000	
+candidate.crouch_slide.ceiling48.w2_gap_median	1.0000	
+candidate.crouch_slide.ceiling48.w3_chain_gain_best_ups	-48.28	ups
+candidate.crouch_slide.ceiling48.w3_entry_slope_max	0.0327	
+candidate.crouch_slide.ceiling48.w3_entry_slope_min	0.0210	
+candidate.crouch_slide.ceiling48.w4_best_delta_ups	38.83	ups
+candidate.crouch_slide.corner.e0320.anchor_commands	0	n
+candidate.crouch_slide.corner.e0320.anchor_speed_ups	320.00	ups
+candidate.crouch_slide.corner.e0320.avail_commands	25	n
+candidate.crouch_slide.corner.e0320.avail_ms	200	ms
+candidate.crouch_slide.corner.e0320.best_absolute_ups	462.28	ups
+candidate.crouch_slide.corner.e0320.best_aim_deg	55.00	deg
+candidate.crouch_slide.corner.e0320.best_delta_ups	4.99	ups
+candidate.crouch_slide.corner.e0320.best_timing_ms	168	ms
+candidate.crouch_slide.corner.e0320.control_best_absolute_ups	480.28	ups
+candidate.crouch_slide.corner.e0320.delta_aim0_ups	never-fired-at-aim-0	
+candidate.crouch_slide.corner.e0320.exec_window_ms	16	ms
+candidate.crouch_slide.corner.e0320.exec_window_span_ms	16	ms
+candidate.crouch_slide.corner.e0320.g3_unresponsive_candidate	32	n
+candidate.crouch_slide.corner.e0320.g3_unresponsive_control	0	n
+candidate.crouch_slide.corner.e0320.g5b_point_naive	not-meaningful	
+candidate.crouch_slide.corner.e0320.g7_impulse_measured_ups	2.65	ups
+candidate.crouch_slide.corner.e0320.g7_impulse_predicted_ups	17.06	ups
+candidate.crouch_slide.corner.e0320.hold_best_delta_ups	81.67	ups
+candidate.crouch_slide.corner.e0320.hold_naive_harmed	0	n
+candidate.crouch_slide.corner.e0320.material	no	
+candidate.crouch_slide.corner.e0320.menu.bunnyhop.absolute_ups	331.29	ups
+candidate.crouch_slide.corner.e0320.menu.bunnyhop.angle_deg	15.00	deg
+candidate.crouch_slide.corner.e0320.menu.held_forward.absolute_ups	466.08	ups
+candidate.crouch_slide.corner.e0320.menu.held_forward.angle_deg	50.00	deg
+candidate.crouch_slide.corner.e0320.menu.held_strafe.absolute_ups	466.08	ups
+candidate.crouch_slide.corner.e0320.menu.held_strafe.angle_deg	50.00	deg
+candidate.crouch_slide.corner.e0320.naive_harm_rate	0.0000	
+candidate.crouch_slide.corner.e0320.naive_harmed	0	n
+candidate.crouch_slide.corner.e0320.naive_mean_delta_ups	0.00	ups
+candidate.crouch_slide.corner.e0320.naive_points	416	n
+candidate.crouch_slide.corner.e0320.peak_gain_at_ms	440	ms
+candidate.crouch_slide.corner.e0320.peak_gain_ups	289.76	ups
+candidate.crouch_slide.corner.e0320.qualifies	no	
+candidate.crouch_slide.corner.e0320.reachable	yes	
+candidate.crouch_slide.corner.e0320.tap_minus_hold_ups	-76.68	ups
+candidate.crouch_slide.corner.e0320.timing_degenerate	no	
+candidate.crouch_slide.corner.e0320.w2_gap	not-meaningful	
+candidate.crouch_slide.corner.e0320.w3_chain_gain_ups	-18.00	ups
+candidate.crouch_slide.corner.e0320.w5_over_best_technique_ups	-3.79	ups
+candidate.crouch_slide.corner.e0320.w6_aim_centroid_deg	55.00	deg
+candidate.crouch_slide.corner.e0320.w6_timing_centroid_ms	164	ms
+candidate.crouch_slide.corner.e0320.w6_top_aims	1	n
+candidate.crouch_slide.corner.e0320.w6_top_timings	2	n
+candidate.crouch_slide.corner.e0320.worst_latency	0	n
+candidate.crouch_slide.corner.e0400.absolute_aim0_ups	320.00	ups
+candidate.crouch_slide.corner.e0400.anchor_commands	0	n
+candidate.crouch_slide.corner.e0400.anchor_speed_ups	400.00	ups
+candidate.crouch_slide.corner.e0400.avail_commands	32	n
+candidate.crouch_slide.corner.e0400.avail_ms	256	ms
+candidate.crouch_slide.corner.e0400.best_absolute_ups	363.87	ups
+candidate.crouch_slide.corner.e0400.best_aim_deg	30.00	deg
+candidate.crouch_slide.corner.e0400.best_delta_ups	261.33	ups
+candidate.crouch_slide.corner.e0400.best_timing_ms	0	ms
+candidate.crouch_slide.corner.e0400.control_best_absolute_ups	479.62	ups
+candidate.crouch_slide.corner.e0400.delta_aim0_ups	0.00	ups
+candidate.crouch_slide.corner.e0400.exec_window_ms	8	ms
+candidate.crouch_slide.corner.e0400.exec_window_span_ms	8	ms
+candidate.crouch_slide.corner.e0400.g3_unresponsive_candidate	0	n
+candidate.crouch_slide.corner.e0400.g3_unresponsive_control	0	n
+candidate.crouch_slide.corner.e0400.g5b_point_naive	0.0000	
+candidate.crouch_slide.corner.e0400.g7_aim_at_deg	29.61	deg
+candidate.crouch_slide.corner.e0400.g7_aim_refined_ups	293.22	ups
+candidate.crouch_slide.corner.e0400.g7_geometry_at_units	0.719	units
+candidate.crouch_slide.corner.e0400.g7_geometry_refined_ups	261.32	ups
+candidate.crouch_slide.corner.e0400.g7_impulse_measured_ups	16.00	ups
+candidate.crouch_slide.corner.e0400.g7_impulse_predicted_ups	16.00	ups
+candidate.crouch_slide.corner.e0400.hold_best_delta_ups	108.07	ups
+candidate.crouch_slide.corner.e0400.hold_naive_harmed	0	n
+candidate.crouch_slide.corner.e0400.material	yes	
+candidate.crouch_slide.corner.e0400.menu.bunnyhop.absolute_ups	324.94	ups
+candidate.crouch_slide.corner.e0400.menu.bunnyhop.angle_deg	10.00	deg
+candidate.crouch_slide.corner.e0400.menu.held_forward.absolute_ups	466.08	ups
+candidate.crouch_slide.corner.e0400.menu.held_forward.angle_deg	50.00	deg
+candidate.crouch_slide.corner.e0400.menu.held_strafe.absolute_ups	466.08	ups
+candidate.crouch_slide.corner.e0400.menu.held_strafe.angle_deg	50.00	deg
+candidate.crouch_slide.corner.e0400.naive_harm_rate	0.0000	
+candidate.crouch_slide.corner.e0400.naive_harmed	0	n
+candidate.crouch_slide.corner.e0400.naive_mean_delta_ups	0.63	ups
+candidate.crouch_slide.corner.e0400.naive_points	416	n
+candidate.crouch_slide.corner.e0400.peak_gain_at_ms	1240	ms
+candidate.crouch_slide.corner.e0400.peak_gain_ups	291.59	ups
+candidate.crouch_slide.corner.e0400.qualifies	yes	
+candidate.crouch_slide.corner.e0400.reachable	yes	
+candidate.crouch_slide.corner.e0400.tap_minus_hold_ups	153.25	ups
+candidate.crouch_slide.corner.e0400.timing_degenerate	no	
+candidate.crouch_slide.corner.e0400.w2_gap	0.9976	
+candidate.crouch_slide.corner.e0400.w3_chain_gain_ups	-115.74	ups
+candidate.crouch_slide.corner.e0400.w3_entry_slope	-1.2301	
+candidate.crouch_slide.corner.e0400.w3_mechanic_alone_ups	320.00	ups
+candidate.crouch_slide.corner.e0400.w5_over_best_technique_ups	-102.21	ups
+candidate.crouch_slide.corner.e0400.w6_aim_centroid_deg	30.00	deg
+candidate.crouch_slide.corner.e0400.w6_timing_centroid_ms	0	ms
+candidate.crouch_slide.corner.e0400.w6_top_aims	1	n
+candidate.crouch_slide.corner.e0400.w6_top_timings	1	n
+candidate.crouch_slide.corner.e0400.worst_latency	0	n
+candidate.crouch_slide.corner.e0500.absolute_aim0_ups	320.00	ups
+candidate.crouch_slide.corner.e0500.anchor_commands	0	n
+candidate.crouch_slide.corner.e0500.anchor_speed_ups	500.00	ups
+candidate.crouch_slide.corner.e0500.avail_commands	32	n
+candidate.crouch_slide.corner.e0500.avail_ms	256	ms
+candidate.crouch_slide.corner.e0500.best_absolute_ups	432.72	ups
+candidate.crouch_slide.corner.e0500.best_aim_deg	315.00	deg
+candidate.crouch_slide.corner.e0500.best_delta_ups	337.17	ups
+candidate.crouch_slide.corner.e0500.best_timing_ms	80	ms
+candidate.crouch_slide.corner.e0500.control_best_absolute_ups	467.70	ups
+candidate.crouch_slide.corner.e0500.delta_aim0_ups	0.00	ups
+candidate.crouch_slide.corner.e0500.exec_window_ms	72	ms
+candidate.crouch_slide.corner.e0500.exec_window_span_ms	72	ms
+candidate.crouch_slide.corner.e0500.g3_unresponsive_candidate	0	n
+candidate.crouch_slide.corner.e0500.g3_unresponsive_control	0	n
+candidate.crouch_slide.corner.e0500.g5b_point_naive	0.0000	
+candidate.crouch_slide.corner.e0500.g7_aim_at_deg	311.33	deg
+candidate.crouch_slide.corner.e0500.g7_aim_refined_ups	294.43	ups
+candidate.crouch_slide.corner.e0500.g7_geometry_at_units	-0.906	units
+candidate.crouch_slide.corner.e0500.g7_geometry_refined_ups	337.18	ups
+candidate.crouch_slide.corner.e0500.g7_impulse_measured_ups	17.31	ups
+candidate.crouch_slide.corner.e0500.g7_impulse_predicted_ups	17.31	ups
+candidate.crouch_slide.corner.e0500.hold_best_delta_ups	108.08	ups
+candidate.crouch_slide.corner.e0500.hold_naive_harmed	1	n
+candidate.crouch_slide.corner.e0500.material	yes	
+candidate.crouch_slide.corner.e0500.menu.bunnyhop.absolute_ups	324.94	ups
+candidate.crouch_slide.corner.e0500.menu.bunnyhop.angle_deg	10.00	deg
+candidate.crouch_slide.corner.e0500.menu.held_forward.absolute_ups	466.08	ups
+candidate.crouch_slide.corner.e0500.menu.held_forward.angle_deg	50.00	deg
+candidate.crouch_slide.corner.e0500.menu.held_strafe.absolute_ups	466.08	ups
+candidate.crouch_slide.corner.e0500.menu.held_strafe.angle_deg	50.00	deg
+candidate.crouch_slide.corner.e0500.naive_harm_rate	0.0000	
+candidate.crouch_slide.corner.e0500.naive_harmed	0	n
+candidate.crouch_slide.corner.e0500.naive_mean_delta_ups	0.41	ups
+candidate.crouch_slide.corner.e0500.naive_points	416	n
+candidate.crouch_slide.corner.e0500.peak_gain_at_ms	1232	ms
+candidate.crouch_slide.corner.e0500.peak_gain_ups	391.35	ups
+candidate.crouch_slide.corner.e0500.qualifies	yes	
+candidate.crouch_slide.corner.e0500.reachable	yes	
+candidate.crouch_slide.corner.e0500.tap_minus_hold_ups	229.10	ups
+candidate.crouch_slide.corner.e0500.timing_degenerate	no	
+candidate.crouch_slide.corner.e0500.w2_gap	0.9988	
+candidate.crouch_slide.corner.e0500.w3_chain_gain_ups	-34.98	ups
+candidate.crouch_slide.corner.e0500.w3_entry_slope	0.6885	
+candidate.crouch_slide.corner.e0500.w3_mechanic_alone_ups	320.00	ups
+candidate.crouch_slide.corner.e0500.w5_over_best_technique_ups	-33.35	ups
+candidate.crouch_slide.corner.e0500.w6_aim_centroid_deg	-45.00	deg
+candidate.crouch_slide.corner.e0500.w6_timing_centroid_ms	48	ms
+candidate.crouch_slide.corner.e0500.w6_top_aims	1	n
+candidate.crouch_slide.corner.e0500.w6_top_timings	9	n
+candidate.crouch_slide.corner.e0500.worst_latency	0	n
+candidate.crouch_slide.corner.e0640.absolute_aim0_ups	320.00	ups
+candidate.crouch_slide.corner.e0640.anchor_commands	0	n
+candidate.crouch_slide.corner.e0640.anchor_speed_ups	640.00	ups
+candidate.crouch_slide.corner.e0640.avail_commands	15	n
+candidate.crouch_slide.corner.e0640.avail_ms	120	ms
+candidate.crouch_slide.corner.e0640.best_absolute_ups	431.17	ups
+candidate.crouch_slide.corner.e0640.best_aim_deg	60.00	deg
+candidate.crouch_slide.corner.e0640.best_delta_ups	316.66	ups
+candidate.crouch_slide.corner.e0640.best_timing_ms	72	ms
+candidate.crouch_slide.corner.e0640.control_best_absolute_ups	466.08	ups
+candidate.crouch_slide.corner.e0640.delta_aim0_ups	0.00	ups
+candidate.crouch_slide.corner.e0640.exec_window_ms	8	ms
+candidate.crouch_slide.corner.e0640.exec_window_span_ms	8	ms
+candidate.crouch_slide.corner.e0640.g3_unresponsive_candidate	0	n
+candidate.crouch_slide.corner.e0640.g3_unresponsive_control	0	n
+candidate.crouch_slide.corner.e0640.g5b_point_naive	0.0000	
+candidate.crouch_slide.corner.e0640.g7_aim_at_deg	28.52	deg
+candidate.crouch_slide.corner.e0640.g7_aim_refined_ups	260.26	ups
+candidate.crouch_slide.corner.e0640.g7_geometry_at_units	-1.719	units
+candidate.crouch_slide.corner.e0640.g7_geometry_refined_ups	244.37	ups
+candidate.crouch_slide.corner.e0640.g7_impulse_measured_ups	21.86	ups
+candidate.crouch_slide.corner.e0640.g7_impulse_predicted_ups	21.86	ups
+candidate.crouch_slide.corner.e0640.hold_best_delta_ups	101.91	ups
+candidate.crouch_slide.corner.e0640.hold_naive_harmed	6	n
+candidate.crouch_slide.corner.e0640.material	yes	
+candidate.crouch_slide.corner.e0640.menu.bunnyhop.absolute_ups	321.22	ups
+candidate.crouch_slide.corner.e0640.menu.bunnyhop.angle_deg	5.00	deg
+candidate.crouch_slide.corner.e0640.menu.held_forward.absolute_ups	466.06	ups
+candidate.crouch_slide.corner.e0640.menu.held_forward.angle_deg	50.00	deg
+candidate.crouch_slide.corner.e0640.menu.held_strafe.absolute_ups	466.06	ups
+candidate.crouch_slide.corner.e0640.menu.held_strafe.angle_deg	50.00	deg
+candidate.crouch_slide.corner.e0640.naive_harm_rate	0.0000	
+candidate.crouch_slide.corner.e0640.naive_harmed	0	n
+candidate.crouch_slide.corner.e0640.naive_mean_delta_ups	1.22	ups
+candidate.crouch_slide.corner.e0640.naive_points	416	n
+candidate.crouch_slide.corner.e0640.peak_gain_at_ms	568	ms
+candidate.crouch_slide.corner.e0640.peak_gain_ups	416.06	ups
+candidate.crouch_slide.corner.e0640.qualifies	yes	
+candidate.crouch_slide.corner.e0640.reachable	yes	
+candidate.crouch_slide.corner.e0640.tap_minus_hold_ups	214.76	ups
+candidate.crouch_slide.corner.e0640.timing_degenerate	no	
+candidate.crouch_slide.corner.e0640.w2_gap	0.9961	
+candidate.crouch_slide.corner.e0640.w3_chain_gain_ups	-34.91	ups
+candidate.crouch_slide.corner.e0640.w3_entry_slope	-0.0111	
+candidate.crouch_slide.corner.e0640.w3_mechanic_alone_ups	320.00	ups
+candidate.crouch_slide.corner.e0640.w5_over_best_technique_ups	-34.89	ups
+candidate.crouch_slide.corner.e0640.w6_aim_centroid_deg	60.00	deg
+candidate.crouch_slide.corner.e0640.w6_timing_centroid_ms	72	ms
+candidate.crouch_slide.corner.e0640.w6_top_aims	1	n
+candidate.crouch_slide.corner.e0640.w6_top_timings	1	n
+candidate.crouch_slide.corner.e0640.worst_latency	0	n
+candidate.crouch_slide.corner.e0800.absolute_aim0_ups	320.00	ups
+candidate.crouch_slide.corner.e0800.anchor_commands	0	n
+candidate.crouch_slide.corner.e0800.anchor_speed_ups	800.00	ups
+candidate.crouch_slide.corner.e0800.avail_commands	12	n
+candidate.crouch_slide.corner.e0800.avail_ms	96	ms
+candidate.crouch_slide.corner.e0800.best_absolute_ups	276.04	ups
+candidate.crouch_slide.corner.e0800.best_aim_deg	290.00	deg
+candidate.crouch_slide.corner.e0800.best_delta_ups	240.43	ups
+candidate.crouch_slide.corner.e0800.best_timing_ms	48	ms
+candidate.crouch_slide.corner.e0800.control_best_absolute_ups	466.08	ups
+candidate.crouch_slide.corner.e0800.delta_aim0_ups	0.00	ups
+candidate.crouch_slide.corner.e0800.exec_window_ms	8	ms
+candidate.crouch_slide.corner.e0800.exec_window_span_ms	8	ms
+candidate.crouch_slide.corner.e0800.g3_unresponsive_candidate	0	n
+candidate.crouch_slide.corner.e0800.g3_unresponsive_control	0	n
+candidate.crouch_slide.corner.e0800.g5b_point_naive	0.0000	
+candidate.crouch_slide.corner.e0800.g7_aim_at_deg	289.92	deg
+candidate.crouch_slide.corner.e0800.g7_aim_refined_ups	229.40	ups
+candidate.crouch_slide.corner.e0800.g7_geometry_at_units	-3.156	units
+candidate.crouch_slide.corner.e0800.g7_geometry_refined_ups	200.12	ups
+candidate.crouch_slide.corner.e0800.g7_impulse_measured_ups	26.81	ups
+candidate.crouch_slide.corner.e0800.g7_impulse_predicted_ups	26.81	ups
+candidate.crouch_slide.corner.e0800.hold_best_delta_ups	101.71	ups
+candidate.crouch_slide.corner.e0800.hold_naive_harmed	6	n
+candidate.crouch_slide.corner.e0800.material	yes	
+candidate.crouch_slide.corner.e0800.menu.bunnyhop.absolute_ups	321.22	ups
+candidate.crouch_slide.corner.e0800.menu.bunnyhop.angle_deg	5.00	deg
+candidate.crouch_slide.corner.e0800.menu.held_forward.absolute_ups	466.08	ups
+candidate.crouch_slide.corner.e0800.menu.held_forward.angle_deg	50.00	deg
+candidate.crouch_slide.corner.e0800.menu.held_strafe.absolute_ups	466.08	ups
+candidate.crouch_slide.corner.e0800.menu.held_strafe.angle_deg	50.00	deg
+candidate.crouch_slide.corner.e0800.naive_harm_rate	0.0000	
+candidate.crouch_slide.corner.e0800.naive_harmed	0	n
+candidate.crouch_slide.corner.e0800.naive_mean_delta_ups	0.00	ups
+candidate.crouch_slide.corner.e0800.naive_points	416	n
+candidate.crouch_slide.corner.e0800.peak_gain_at_ms	384	ms
+candidate.crouch_slide.corner.e0800.peak_gain_ups	382.02	ups
+candidate.crouch_slide.corner.e0800.qualifies	yes	
+candidate.crouch_slide.corner.e0800.reachable	yes	
+candidate.crouch_slide.corner.e0800.tap_minus_hold_ups	138.72	ups
+candidate.crouch_slide.corner.e0800.timing_degenerate	no	
+candidate.crouch_slide.corner.e0800.w2_gap	1.0000	
+candidate.crouch_slide.corner.e0800.w3_chain_gain_ups	-190.04	ups
+candidate.crouch_slide.corner.e0800.w3_entry_slope	-0.9696	
+candidate.crouch_slide.corner.e0800.w3_mechanic_alone_ups	320.00	ups
+candidate.crouch_slide.corner.e0800.w5_over_best_technique_ups	-190.04	ups
+candidate.crouch_slide.corner.e0800.w6_aim_centroid_deg	-70.00	deg
+candidate.crouch_slide.corner.e0800.w6_timing_centroid_ms	48	ms
+candidate.crouch_slide.corner.e0800.w6_top_aims	1	n
+candidate.crouch_slide.corner.e0800.w6_top_timings	1	n
+candidate.crouch_slide.corner.e0800.worst_latency	0	n
+candidate.crouch_slide.corner.e1000.absolute_aim0_ups	320.00	ups
+candidate.crouch_slide.corner.e1000.anchor_commands	0	n
+candidate.crouch_slide.corner.e1000.anchor_speed_ups	1000.00	ups
+candidate.crouch_slide.corner.e1000.avail_commands	12	n
+candidate.crouch_slide.corner.e1000.avail_ms	96	ms
+candidate.crouch_slide.corner.e1000.best_absolute_ups	264.85	ups
+candidate.crouch_slide.corner.e1000.best_aim_deg	285.00	deg
+candidate.crouch_slide.corner.e1000.best_delta_ups	239.13	ups
+candidate.crouch_slide.corner.e1000.best_timing_ms	16	ms
+candidate.crouch_slide.corner.e1000.control_best_absolute_ups	466.08	ups
+candidate.crouch_slide.corner.e1000.delta_aim0_ups	0.00	ups
+candidate.crouch_slide.corner.e1000.exec_window_ms	8	ms
+candidate.crouch_slide.corner.e1000.exec_window_span_ms	8	ms
+candidate.crouch_slide.corner.e1000.g3_unresponsive_candidate	0	n
+candidate.crouch_slide.corner.e1000.g3_unresponsive_control	0	n
+candidate.crouch_slide.corner.e1000.g5b_point_naive	0.0000	
+candidate.crouch_slide.corner.e1000.g7_aim_at_deg	76.33	deg
+candidate.crouch_slide.corner.e1000.g7_aim_refined_ups	189.73	ups
+candidate.crouch_slide.corner.e1000.g7_geometry_at_units	-4.094	units
+candidate.crouch_slide.corner.e1000.g7_geometry_refined_ups	230.46	ups
+candidate.crouch_slide.corner.e1000.g7_impulse_measured_ups	37.09	ups
+candidate.crouch_slide.corner.e1000.g7_impulse_predicted_ups	37.09	ups
+candidate.crouch_slide.corner.e1000.hold_best_delta_ups	94.53	ups
+candidate.crouch_slide.corner.e1000.hold_naive_harmed	4	n
+candidate.crouch_slide.corner.e1000.material	yes	
+candidate.crouch_slide.corner.e1000.menu.bunnyhop.absolute_ups	321.22	ups
+candidate.crouch_slide.corner.e1000.menu.bunnyhop.angle_deg	5.00	deg
+candidate.crouch_slide.corner.e1000.menu.held_forward.absolute_ups	466.08	ups
+candidate.crouch_slide.corner.e1000.menu.held_forward.angle_deg	50.00	deg
+candidate.crouch_slide.corner.e1000.menu.held_strafe.absolute_ups	466.08	ups
+candidate.crouch_slide.corner.e1000.menu.held_strafe.angle_deg	50.00	deg
+candidate.crouch_slide.corner.e1000.naive_harm_rate	0.0000	
+candidate.crouch_slide.corner.e1000.naive_harmed	0	n
+candidate.crouch_slide.corner.e1000.naive_mean_delta_ups	0.00	ups
+candidate.crouch_slide.corner.e1000.naive_points	416	n
+candidate.crouch_slide.corner.e1000.peak_gain_at_ms	648	ms
+candidate.crouch_slide.corner.e1000.peak_gain_ups	294.09	ups
+candidate.crouch_slide.corner.e1000.qualifies	yes	
+candidate.crouch_slide.corner.e1000.reachable	yes	
+candidate.crouch_slide.corner.e1000.tap_minus_hold_ups	144.60	ups
+candidate.crouch_slide.corner.e1000.timing_degenerate	no	
+candidate.crouch_slide.corner.e1000.w2_gap	1.0000	
+candidate.crouch_slide.corner.e1000.w3_chain_gain_ups	-201.23	ups
+candidate.crouch_slide.corner.e1000.w3_entry_slope	-0.0560	
+candidate.crouch_slide.corner.e1000.w3_mechanic_alone_ups	320.00	ups
+candidate.crouch_slide.corner.e1000.w5_over_best_technique_ups	-201.23	ups
+candidate.crouch_slide.corner.e1000.w6_aim_centroid_deg	-75.00	deg
+candidate.crouch_slide.corner.e1000.w6_timing_centroid_ms	16	ms
+candidate.crouch_slide.corner.e1000.w6_top_aims	1	n
+candidate.crouch_slide.corner.e1000.w6_top_timings	1	n
+candidate.crouch_slide.corner.e1000.worst_latency	0	n
+candidate.crouch_slide.corner.g5a.arming_events	0	n
+candidate.crouch_slide.corner.g5a.available_commands	0	n
+candidate.crouch_slide.corner.g5a.peak_speed_ups	320.00	ups
+candidate.crouch_slide.corner.g5b_median	0.0000	
+candidate.crouch_slide.corner.w2_gap_median	0.9988	
+candidate.crouch_slide.corner.w3_chain_gain_best_ups	-18.00	ups
+candidate.crouch_slide.corner.w3_entry_slope_max	0.6885	
+candidate.crouch_slide.corner.w3_entry_slope_min	-1.2301	
+candidate.crouch_slide.corner.w4_best_delta_ups	337.17	ups
+candidate.crouch_slide.floor.e0320.anchor_commands	0	n
+candidate.crouch_slide.floor.e0320.anchor_speed_ups	320.00	ups
+candidate.crouch_slide.floor.e0320.avail_commands	25	n
+candidate.crouch_slide.floor.e0320.avail_ms	200	ms
+candidate.crouch_slide.floor.e0320.best_absolute_ups	440.09	ups
+candidate.crouch_slide.floor.e0320.best_aim_deg	300.00	deg
+candidate.crouch_slide.floor.e0320.best_delta_ups	13.13	ups
+candidate.crouch_slide.floor.e0320.best_timing_ms	248	ms
+candidate.crouch_slide.floor.e0320.control_best_absolute_ups	480.28	ups
+candidate.crouch_slide.floor.e0320.delta_aim0_ups	never-fired-at-aim-0	
+candidate.crouch_slide.floor.e0320.exec_window_ms	8	ms
+candidate.crouch_slide.floor.e0320.exec_window_span_ms	8	ms
+candidate.crouch_slide.floor.e0320.g3_unresponsive_candidate	0	n
+candidate.crouch_slide.floor.e0320.g3_unresponsive_control	0	n
+candidate.crouch_slide.floor.e0320.g5b_point_naive	not-meaningful	
+candidate.crouch_slide.floor.e0320.g7_impulse_measured_ups	16.24	ups
+candidate.crouch_slide.floor.e0320.g7_impulse_predicted_ups	16.24	ups
+candidate.crouch_slide.floor.e0320.hold_best_delta_ups	4.60	ups
+candidate.crouch_slide.floor.e0320.hold_naive_harmed	0	n
+candidate.crouch_slide.floor.e0320.material	no	
+candidate.crouch_slide.floor.e0320.menu.bunnyhop.absolute_ups	555.73	ups
+candidate.crouch_slide.floor.e0320.menu.bunnyhop.angle_deg	55.00	deg
+candidate.crouch_slide.floor.e0320.menu.held_forward.absolute_ups	480.29	ups
+candidate.crouch_slide.floor.e0320.menu.held_forward.angle_deg	55.00	deg
+candidate.crouch_slide.floor.e0320.menu.held_strafe.absolute_ups	480.29	ups
+candidate.crouch_slide.floor.e0320.menu.held_strafe.angle_deg	55.00	deg
+candidate.crouch_slide.floor.e0320.naive_harm_rate	0.0000	
+candidate.crouch_slide.floor.e0320.naive_harmed	0	n
+candidate.crouch_slide.floor.e0320.naive_mean_delta_ups	0.00	ups
+candidate.crouch_slide.floor.e0320.naive_points	416	n
+candidate.crouch_slide.floor.e0320.peak_gain_at_ms	408	ms
+candidate.crouch_slide.floor.e0320.peak_gain_ups	209.74	ups
+candidate.crouch_slide.floor.e0320.qualifies	no	
+candidate.crouch_slide.floor.e0320.reachable	yes	
+candidate.crouch_slide.floor.e0320.tap_minus_hold_ups	8.53	ups
+candidate.crouch_slide.floor.e0320.timing_degenerate	no	
+candidate.crouch_slide.floor.e0320.w2_gap	not-meaningful	
+candidate.crouch_slide.floor.e0320.w3_chain_gain_ups	-40.19	ups
+candidate.crouch_slide.floor.e0320.w5_over_best_technique_ups	-115.64	ups
+candidate.crouch_slide.floor.e0320.w6_aim_centroid_deg	0.00	deg
+candidate.crouch_slide.floor.e0320.w6_timing_centroid_ms	248	ms
+candidate.crouch_slide.floor.e0320.w6_top_aims	2	n
+candidate.crouch_slide.floor.e0320.w6_top_timings	1	n
+candidate.crouch_slide.floor.e0320.worst_latency	0	n
+candidate.crouch_slide.floor.e0400.absolute_aim0_ups	320.00	ups
+candidate.crouch_slide.floor.e0400.anchor_commands	0	n
+candidate.crouch_slide.floor.e0400.anchor_speed_ups	400.00	ups
+candidate.crouch_slide.floor.e0400.avail_commands	32	n
+candidate.crouch_slide.floor.e0400.avail_ms	256	ms
+candidate.crouch_slide.floor.e0400.best_absolute_ups	440.09	ups
+candidate.crouch_slide.floor.e0400.best_aim_deg	300.00	deg
+candidate.crouch_slide.floor.e0400.best_delta_ups	13.11	ups
+candidate.crouch_slide.floor.e0400.best_timing_ms	248	ms
+candidate.crouch_slide.floor.e0400.control_best_absolute_ups	480.31	ups
+candidate.crouch_slide.floor.e0400.delta_aim0_ups	0.00	ups
+candidate.crouch_slide.floor.e0400.exec_window_ms	8	ms
+candidate.crouch_slide.floor.e0400.exec_window_span_ms	8	ms
+candidate.crouch_slide.floor.e0400.g3_unresponsive_candidate	0	n
+candidate.crouch_slide.floor.e0400.g3_unresponsive_control	0	n
+candidate.crouch_slide.floor.e0400.g5b_point_naive	not-meaningful	
+candidate.crouch_slide.floor.e0400.g7_impulse_measured_ups	16.87	ups
+candidate.crouch_slide.floor.e0400.g7_impulse_predicted_ups	16.87	ups
+candidate.crouch_slide.floor.e0400.hold_best_delta_ups	26.36	ups
+candidate.crouch_slide.floor.e0400.hold_naive_harmed	0	n
+candidate.crouch_slide.floor.e0400.material	no	
+candidate.crouch_slide.floor.e0400.menu.bunnyhop.absolute_ups	600.17	ups
+candidate.crouch_slide.floor.e0400.menu.bunnyhop.angle_deg	60.00	deg
+candidate.crouch_slide.floor.e0400.menu.held_forward.absolute_ups	480.32	ups
+candidate.crouch_slide.floor.e0400.menu.held_forward.angle_deg	55.00	deg
+candidate.crouch_slide.floor.e0400.menu.held_strafe.absolute_ups	480.32	ups
+candidate.crouch_slide.floor.e0400.menu.held_strafe.angle_deg	55.00	deg
+candidate.crouch_slide.floor.e0400.naive_harm_rate	0.0000	
+candidate.crouch_slide.floor.e0400.naive_harmed	0	n
+candidate.crouch_slide.floor.e0400.naive_mean_delta_ups	0.00	ups
+candidate.crouch_slide.floor.e0400.naive_points	416	n
+candidate.crouch_slide.floor.e0400.peak_gain_at_ms	416	ms
+candidate.crouch_slide.floor.e0400.peak_gain_ups	205.23	ups
+candidate.crouch_slide.floor.e0400.qualifies	no	
+candidate.crouch_slide.floor.e0400.reachable	yes	
+candidate.crouch_slide.floor.e0400.tap_minus_hold_ups	-13.25	ups
+candidate.crouch_slide.floor.e0400.timing_degenerate	no	
+candidate.crouch_slide.floor.e0400.w2_gap	not-meaningful	
+candidate.crouch_slide.floor.e0400.w3_chain_gain_ups	-40.22	ups
+candidate.crouch_slide.floor.e0400.w3_entry_slope	0.0000	
+candidate.crouch_slide.floor.e0400.w3_mechanic_alone_ups	320.00	ups
+candidate.crouch_slide.floor.e0400.w5_over_best_technique_ups	-160.08	ups
+candidate.crouch_slide.floor.e0400.w6_aim_centroid_deg	0.00	deg
+candidate.crouch_slide.floor.e0400.w6_timing_centroid_ms	248	ms
+candidate.crouch_slide.floor.e0400.w6_top_aims	2	n
+candidate.crouch_slide.floor.e0400.w6_top_timings	1	n
+candidate.crouch_slide.floor.e0400.worst_latency	0	n
+candidate.crouch_slide.floor.e0500.absolute_aim0_ups	320.00	ups
+candidate.crouch_slide.floor.e0500.anchor_commands	0	n
+candidate.crouch_slide.floor.e0500.anchor_speed_ups	500.00	ups
+candidate.crouch_slide.floor.e0500.avail_commands	32	n
+candidate.crouch_slide.floor.e0500.avail_ms	256	ms
+candidate.crouch_slide.floor.e0500.best_absolute_ups	392.55	ups
+candidate.crouch_slide.floor.e0500.best_aim_deg	295.00	deg
+candidate.crouch_slide.floor.e0500.best_delta_ups	20.47	ups
+candidate.crouch_slide.floor.e0500.best_timing_ms	224	ms
+candidate.crouch_slide.floor.e0500.control_best_absolute_ups	480.34	ups
+candidate.crouch_slide.floor.e0500.delta_aim0_ups	0.00	ups
+candidate.crouch_slide.floor.e0500.exec_window_ms	8	ms
+candidate.crouch_slide.floor.e0500.exec_window_span_ms	8	ms
+candidate.crouch_slide.floor.e0500.g3_unresponsive_candidate	0	n
+candidate.crouch_slide.floor.e0500.g3_unresponsive_control	0	n
+candidate.crouch_slide.floor.e0500.g5b_point_naive	0.0000	
+candidate.crouch_slide.floor.e0500.g7_aim_at_deg	294.92	deg
+candidate.crouch_slide.floor.e0500.g7_aim_refined_ups	20.36	ups
+candidate.crouch_slide.floor.e0500.g7_impulse_measured_ups	16.05	ups
+candidate.crouch_slide.floor.e0500.g7_impulse_predicted_ups	16.05	ups
+candidate.crouch_slide.floor.e0500.hold_best_delta_ups	36.06	ups
+candidate.crouch_slide.floor.e0500.hold_naive_harmed	0	n
+candidate.crouch_slide.floor.e0500.material	yes	
+candidate.crouch_slide.floor.e0500.menu.bunnyhop.absolute_ups	661.56	ups
+candidate.crouch_slide.floor.e0500.menu.bunnyhop.angle_deg	65.00	deg
+candidate.crouch_slide.floor.e0500.menu.held_forward.absolute_ups	480.35	ups
+candidate.crouch_slide.floor.e0500.menu.held_forward.angle_deg	55.00	deg
+candidate.crouch_slide.floor.e0500.menu.held_strafe.absolute_ups	480.35	ups
+candidate.crouch_slide.floor.e0500.menu.held_strafe.angle_deg	55.00	deg
+candidate.crouch_slide.floor.e0500.naive_harm_rate	0.0000	
+candidate.crouch_slide.floor.e0500.naive_harmed	0	n
+candidate.crouch_slide.floor.e0500.naive_mean_delta_ups	0.00	ups
+candidate.crouch_slide.floor.e0500.naive_points	416	n
+candidate.crouch_slide.floor.e0500.peak_gain_at_ms	816	ms
+candidate.crouch_slide.floor.e0500.peak_gain_ups	358.64	ups
+candidate.crouch_slide.floor.e0500.qualifies	yes	
+candidate.crouch_slide.floor.e0500.reachable	yes	
+candidate.crouch_slide.floor.e0500.tap_minus_hold_ups	-15.59	ups
+candidate.crouch_slide.floor.e0500.timing_degenerate	no	
+candidate.crouch_slide.floor.e0500.w2_gap	1.0000	
+candidate.crouch_slide.floor.e0500.w3_chain_gain_ups	-87.80	ups
+candidate.crouch_slide.floor.e0500.w3_entry_slope	-0.4755	
+candidate.crouch_slide.floor.e0500.w3_mechanic_alone_ups	320.00	ups
+candidate.crouch_slide.floor.e0500.w5_over_best_technique_ups	-269.01	ups
+candidate.crouch_slide.floor.e0500.w6_aim_centroid_deg	0.00	deg
+candidate.crouch_slide.floor.e0500.w6_timing_centroid_ms	224	ms
+candidate.crouch_slide.floor.e0500.w6_top_aims	2	n
+candidate.crouch_slide.floor.e0500.w6_top_timings	1	n
+candidate.crouch_slide.floor.e0500.worst_latency	0	n
+candidate.crouch_slide.floor.e0640.absolute_aim0_ups	320.00	ups
+candidate.crouch_slide.floor.e0640.anchor_commands	0	n
+candidate.crouch_slide.floor.e0640.anchor_speed_ups	640.00	ups
+candidate.crouch_slide.floor.e0640.avail_commands	32	n
+candidate.crouch_slide.floor.e0640.avail_ms	256	ms
+candidate.crouch_slide.floor.e0640.best_absolute_ups	342.98	ups
+candidate.crouch_slide.floor.e0640.best_aim_deg	70.00	deg
+candidate.crouch_slide.floor.e0640.best_delta_ups	26.35	ups
+candidate.crouch_slide.floor.e0640.best_timing_ms	200	ms
+candidate.crouch_slide.floor.e0640.control_best_absolute_ups	480.36	ups
+candidate.crouch_slide.floor.e0640.delta_aim0_ups	0.00	ups
+candidate.crouch_slide.floor.e0640.exec_window_ms	8	ms
+candidate.crouch_slide.floor.e0640.exec_window_span_ms	8	ms
+candidate.crouch_slide.floor.e0640.g3_unresponsive_candidate	0	n
+candidate.crouch_slide.floor.e0640.g3_unresponsive_control	0	n
+candidate.crouch_slide.floor.e0640.g5b_point_naive	0.0000	
+candidate.crouch_slide.floor.e0640.g7_aim_at_deg	289.77	deg
+candidate.crouch_slide.floor.e0640.g7_aim_refined_ups	26.55	ups
+candidate.crouch_slide.floor.e0640.g7_impulse_measured_ups	16.06	ups
+candidate.crouch_slide.floor.e0640.g7_impulse_predicted_ups	16.06	ups
+candidate.crouch_slide.floor.e0640.hold_best_delta_ups	43.61	ups
+candidate.crouch_slide.floor.e0640.hold_naive_harmed	0	n
+candidate.crouch_slide.floor.e0640.material	yes	
+candidate.crouch_slide.floor.e0640.menu.bunnyhop.absolute_ups	759.56	ups
+candidate.crouch_slide.floor.e0640.menu.bunnyhop.angle_deg	70.00	deg
+candidate.crouch_slide.floor.e0640.menu.held_forward.absolute_ups	480.36	ups
+candidate.crouch_slide.floor.e0640.menu.held_forward.angle_deg	55.00	deg
+candidate.crouch_slide.floor.e0640.menu.held_strafe.absolute_ups	480.36	ups
+candidate.crouch_slide.floor.e0640.menu.held_strafe.angle_deg	55.00	deg
+candidate.crouch_slide.floor.e0640.naive_harm_rate	0.0000	
+candidate.crouch_slide.floor.e0640.naive_harmed	0	n
+candidate.crouch_slide.floor.e0640.naive_mean_delta_ups	0.00	ups
+candidate.crouch_slide.floor.e0640.naive_points	416	n
+candidate.crouch_slide.floor.e0640.peak_gain_at_ms	792	ms
+candidate.crouch_slide.floor.e0640.peak_gain_ups	565.11	ups
+candidate.crouch_slide.floor.e0640.qualifies	yes	
+candidate.crouch_slide.floor.e0640.reachable	yes	
+candidate.crouch_slide.floor.e0640.tap_minus_hold_ups	-17.27	ups
+candidate.crouch_slide.floor.e0640.timing_degenerate	no	
+candidate.crouch_slide.floor.e0640.w2_gap	1.0000	
+candidate.crouch_slide.floor.e0640.w3_chain_gain_ups	-137.38	ups
+candidate.crouch_slide.floor.e0640.w3_entry_slope	-0.3540	
+candidate.crouch_slide.floor.e0640.w3_mechanic_alone_ups	320.00	ups
+candidate.crouch_slide.floor.e0640.w5_over_best_technique_ups	-416.58	ups
+candidate.crouch_slide.floor.e0640.w6_aim_centroid_deg	0.00	deg
+candidate.crouch_slide.floor.e0640.w6_timing_centroid_ms	200	ms
+candidate.crouch_slide.floor.e0640.w6_top_aims	2	n
+candidate.crouch_slide.floor.e0640.w6_top_timings	1	n
+candidate.crouch_slide.floor.e0640.worst_latency	0	n
+candidate.crouch_slide.floor.e0800.absolute_aim0_ups	320.00	ups
+candidate.crouch_slide.floor.e0800.anchor_commands	0	n
+candidate.crouch_slide.floor.e0800.anchor_speed_ups	800.00	ups
+candidate.crouch_slide.floor.e0800.avail_commands	32	n
+candidate.crouch_slide.floor.e0800.avail_ms	256	ms
+candidate.crouch_slide.floor.e0800.best_absolute_ups	353.34	ups
+candidate.crouch_slide.floor.e0800.best_aim_deg	290.00	deg
+candidate.crouch_slide.floor.e0800.best_delta_ups	36.67	ups
+candidate.crouch_slide.floor.e0800.best_timing_ms	248	ms
+candidate.crouch_slide.floor.e0800.control_best_absolute_ups	480.36	ups
+candidate.crouch_slide.floor.e0800.delta_aim0_ups	0.00	ups
+candidate.crouch_slide.floor.e0800.exec_window_ms	8	ms
+candidate.crouch_slide.floor.e0800.exec_window_span_ms	8	ms
+candidate.crouch_slide.floor.e0800.g3_unresponsive_candidate	0	n
+candidate.crouch_slide.floor.e0800.g3_unresponsive_control	0	n
+candidate.crouch_slide.floor.e0800.g5b_point_naive	0.0000	
+candidate.crouch_slide.floor.e0800.g7_aim_at_deg	71.02	deg
+candidate.crouch_slide.floor.e0800.g7_aim_refined_ups	39.00	ups
+candidate.crouch_slide.floor.e0800.g7_impulse_measured_ups	16.39	ups
+candidate.crouch_slide.floor.e0800.g7_impulse_predicted_ups	16.39	ups
+candidate.crouch_slide.floor.e0800.hold_best_delta_ups	47.57	ups
+candidate.crouch_slide.floor.e0800.hold_naive_harmed	0	n
+candidate.crouch_slide.floor.e0800.material	yes	
+candidate.crouch_slide.floor.e0800.menu.bunnyhop.absolute_ups	910.94	ups
+candidate.crouch_slide.floor.e0800.menu.bunnyhop.angle_deg	70.00	deg
+candidate.crouch_slide.floor.e0800.menu.held_forward.absolute_ups	480.36	ups
+candidate.crouch_slide.floor.e0800.menu.held_forward.angle_deg	55.00	deg
+candidate.crouch_slide.floor.e0800.menu.held_strafe.absolute_ups	480.36	ups
+candidate.crouch_slide.floor.e0800.menu.held_strafe.angle_deg	55.00	deg
+candidate.crouch_slide.floor.e0800.naive_harm_rate	0.0000	
+candidate.crouch_slide.floor.e0800.naive_harmed	0	n
+candidate.crouch_slide.floor.e0800.naive_mean_delta_ups	0.00	ups
+candidate.crouch_slide.floor.e0800.naive_points	416	n
+candidate.crouch_slide.floor.e0800.peak_gain_at_ms	840	ms
+candidate.crouch_slide.floor.e0800.peak_gain_ups	565.09	ups
+candidate.crouch_slide.floor.e0800.qualifies	yes	
+candidate.crouch_slide.floor.e0800.reachable	yes	
+candidate.crouch_slide.floor.e0800.tap_minus_hold_ups	-10.90	ups
+candidate.crouch_slide.floor.e0800.timing_degenerate	no	
+candidate.crouch_slide.floor.e0800.w2_gap	1.0000	
+candidate.crouch_slide.floor.e0800.w3_chain_gain_ups	-127.02	ups
+candidate.crouch_slide.floor.e0800.w3_entry_slope	0.0648	
+candidate.crouch_slide.floor.e0800.w3_mechanic_alone_ups	320.00	ups
+candidate.crouch_slide.floor.e0800.w5_over_best_technique_ups	-557.59	ups
+candidate.crouch_slide.floor.e0800.w6_aim_centroid_deg	0.00	deg
+candidate.crouch_slide.floor.e0800.w6_timing_centroid_ms	248	ms
+candidate.crouch_slide.floor.e0800.w6_top_aims	2	n
+candidate.crouch_slide.floor.e0800.w6_top_timings	1	n
+candidate.crouch_slide.floor.e0800.worst_latency	0	n
+candidate.crouch_slide.floor.e1000.absolute_aim0_ups	320.00	ups
+candidate.crouch_slide.floor.e1000.anchor_commands	0	n
+candidate.crouch_slide.floor.e1000.anchor_speed_ups	1000.00	ups
+candidate.crouch_slide.floor.e1000.avail_commands	32	n
+candidate.crouch_slide.floor.e1000.avail_ms	256	ms
+candidate.crouch_slide.floor.e1000.best_absolute_ups	353.36	ups
+candidate.crouch_slide.floor.e1000.best_aim_deg	70.00	deg
+candidate.crouch_slide.floor.e1000.best_delta_ups	36.66	ups
+candidate.crouch_slide.floor.e1000.best_timing_ms	248	ms
+candidate.crouch_slide.floor.e1000.control_best_absolute_ups	480.37	ups
+candidate.crouch_slide.floor.e1000.delta_aim0_ups	0.00	ups
+candidate.crouch_slide.floor.e1000.exec_window_ms	8	ms
+candidate.crouch_slide.floor.e1000.exec_window_span_ms	8	ms
+candidate.crouch_slide.floor.e1000.g3_unresponsive_candidate	0	n
+candidate.crouch_slide.floor.e1000.g3_unresponsive_control	0	n
+candidate.crouch_slide.floor.e1000.g5b_point_naive	0.0000	
+candidate.crouch_slide.floor.e1000.g7_aim_at_deg	284.92	deg
+candidate.crouch_slide.floor.e1000.g7_aim_refined_ups	33.79	ups
+candidate.crouch_slide.floor.e1000.g7_impulse_measured_ups	17.75	ups
+candidate.crouch_slide.floor.e1000.g7_impulse_predicted_ups	17.75	ups
+candidate.crouch_slide.floor.e1000.hold_best_delta_ups	49.82	ups
+candidate.crouch_slide.floor.e1000.hold_naive_harmed	0	n
+candidate.crouch_slide.floor.e1000.material	yes	
+candidate.crouch_slide.floor.e1000.menu.bunnyhop.absolute_ups	1065.16	ups
+candidate.crouch_slide.floor.e1000.menu.bunnyhop.angle_deg	75.00	deg
+candidate.crouch_slide.floor.e1000.menu.held_forward.absolute_ups	480.36	ups
+candidate.crouch_slide.floor.e1000.menu.held_forward.angle_deg	55.00	deg
+candidate.crouch_slide.floor.e1000.menu.held_strafe.absolute_ups	480.36	ups
+candidate.crouch_slide.floor.e1000.menu.held_strafe.angle_deg	55.00	deg
+candidate.crouch_slide.floor.e1000.naive_harm_rate	0.0000	
+candidate.crouch_slide.floor.e1000.naive_harmed	0	n
+candidate.crouch_slide.floor.e1000.naive_mean_delta_ups	0.00	ups
+candidate.crouch_slide.floor.e1000.naive_points	416	n
+candidate.crouch_slide.floor.e1000.peak_gain_at_ms	840	ms
+candidate.crouch_slide.floor.e1000.peak_gain_ups	564.89	ups
+candidate.crouch_slide.floor.e1000.qualifies	yes	
+candidate.crouch_slide.floor.e1000.reachable	yes	
+candidate.crouch_slide.floor.e1000.tap_minus_hold_ups	-13.16	ups
+candidate.crouch_slide.floor.e1000.timing_degenerate	no	
+candidate.crouch_slide.floor.e1000.w2_gap	1.0000	
+candidate.crouch_slide.floor.e1000.w3_chain_gain_ups	-127.00	ups
+candidate.crouch_slide.floor.e1000.w3_entry_slope	0.0001	
+candidate.crouch_slide.floor.e1000.w3_mechanic_alone_ups	320.00	ups
+candidate.crouch_slide.floor.e1000.w5_over_best_technique_ups	-711.79	ups
+candidate.crouch_slide.floor.e1000.w6_aim_centroid_deg	0.00	deg
+candidate.crouch_slide.floor.e1000.w6_timing_centroid_ms	248	ms
+candidate.crouch_slide.floor.e1000.w6_top_aims	2	n
+candidate.crouch_slide.floor.e1000.w6_top_timings	1	n
+candidate.crouch_slide.floor.e1000.worst_latency	0	n
+candidate.crouch_slide.floor.g5a.arming_events	0	n
+candidate.crouch_slide.floor.g5a.available_commands	0	n
+candidate.crouch_slide.floor.g5a.peak_speed_ups	320.00	ups
+candidate.crouch_slide.floor.g5b_median	0.0000	
+candidate.crouch_slide.floor.w2_gap_median	1.0000	
+candidate.crouch_slide.floor.w3_chain_gain_best_ups	-40.19	ups
+candidate.crouch_slide.floor.w3_entry_slope_max	0.0648	
+candidate.crouch_slide.floor.w3_entry_slope_min	-0.4755	
+candidate.crouch_slide.floor.w4_best_delta_ups	36.67	ups
+candidate.crouch_slide.g2.measurements_compared	1059	n
+candidate.crouch_slide.g2.measurements_moved	0	n
+candidate.crouch_slide.g3.worst_excess_unresponsive_candidate	32	n
+candidate.crouch_slide.g3.worst_excess_unresponsive_control	0	n
+candidate.crouch_slide.g3.worst_latency_commands	0	n
+candidate.crouch_slide.g5b_median	0.0000	
+candidate.crouch_slide.g7.worst_impulse_residual_ups	14.41	ups
+candidate.crouch_slide.g7.worst_surviving_aim_step_ups	554.86	ups
+candidate.crouch_slide.g7.worst_surviving_geometry_step_ups	582.11	ups
+candidate.crouch_slide.hold.cells_won	16	n
+candidate.crouch_slide.ledge256.e0320.anchor_commands	0	n
+candidate.crouch_slide.ledge256.e0320.anchor_speed_ups	320.00	ups
+candidate.crouch_slide.ledge256.e0320.avail_commands	25	n
+candidate.crouch_slide.ledge256.e0320.avail_ms	200	ms
+candidate.crouch_slide.ledge256.e0320.best_absolute_ups	440.09	ups
+candidate.crouch_slide.ledge256.e0320.best_aim_deg	300.00	deg
+candidate.crouch_slide.ledge256.e0320.best_delta_ups	13.13	ups
+candidate.crouch_slide.ledge256.e0320.best_timing_ms	248	ms
+candidate.crouch_slide.ledge256.e0320.control_best_absolute_ups	480.28	ups
+candidate.crouch_slide.ledge256.e0320.delta_aim0_ups	never-fired-at-aim-0	
+candidate.crouch_slide.ledge256.e0320.exec_window_ms	8	ms
+candidate.crouch_slide.ledge256.e0320.exec_window_span_ms	8	ms
+candidate.crouch_slide.ledge256.e0320.g3_unresponsive_candidate	0	n
+candidate.crouch_slide.ledge256.e0320.g3_unresponsive_control	0	n
+candidate.crouch_slide.ledge256.e0320.g5b_point_naive	not-meaningful	
+candidate.crouch_slide.ledge256.e0320.g7_impulse_measured_ups	16.24	ups
+candidate.crouch_slide.ledge256.e0320.g7_impulse_predicted_ups	16.24	ups
+candidate.crouch_slide.ledge256.e0320.hold_best_delta_ups	250.75	ups
+candidate.crouch_slide.ledge256.e0320.hold_naive_harmed	0	n
+candidate.crouch_slide.ledge256.e0320.material	no	
+candidate.crouch_slide.ledge256.e0320.menu.bunnyhop.absolute_ups	555.73	ups
+candidate.crouch_slide.ledge256.e0320.menu.bunnyhop.angle_deg	55.00	deg
+candidate.crouch_slide.ledge256.e0320.menu.held_forward.absolute_ups	480.29	ups
+candidate.crouch_slide.ledge256.e0320.menu.held_forward.angle_deg	55.00	deg
+candidate.crouch_slide.ledge256.e0320.menu.held_strafe.absolute_ups	480.29	ups
+candidate.crouch_slide.ledge256.e0320.menu.held_strafe.angle_deg	55.00	deg
+candidate.crouch_slide.ledge256.e0320.naive_harm_rate	0.0000	
+candidate.crouch_slide.ledge256.e0320.naive_harmed	0	n
+candidate.crouch_slide.ledge256.e0320.naive_mean_delta_ups	0.00	ups
+candidate.crouch_slide.ledge256.e0320.naive_points	416	n
+candidate.crouch_slide.ledge256.e0320.peak_gain_at_ms	408	ms
+candidate.crouch_slide.ledge256.e0320.peak_gain_ups	209.74	ups
+candidate.crouch_slide.ledge256.e0320.qualifies	no	
+candidate.crouch_slide.ledge256.e0320.reachable	yes	
+candidate.crouch_slide.ledge256.e0320.tap_minus_hold_ups	-237.62	ups
+candidate.crouch_slide.ledge256.e0320.timing_degenerate	no	
+candidate.crouch_slide.ledge256.e0320.w2_gap	not-meaningful	
+candidate.crouch_slide.ledge256.e0320.w3_chain_gain_ups	-40.19	ups
+candidate.crouch_slide.ledge256.e0320.w5_over_best_technique_ups	-115.64	ups
+candidate.crouch_slide.ledge256.e0320.w6_aim_centroid_deg	0.00	deg
+candidate.crouch_slide.ledge256.e0320.w6_timing_centroid_ms	248	ms
+candidate.crouch_slide.ledge256.e0320.w6_top_aims	2	n
+candidate.crouch_slide.ledge256.e0320.w6_top_timings	1	n
+candidate.crouch_slide.ledge256.e0320.worst_latency	0	n
+candidate.crouch_slide.ledge256.e0400.absolute_aim0_ups	320.00	ups
+candidate.crouch_slide.ledge256.e0400.anchor_commands	0	n
+candidate.crouch_slide.ledge256.e0400.anchor_speed_ups	400.00	ups
+candidate.crouch_slide.ledge256.e0400.avail_commands	32	n
+candidate.crouch_slide.ledge256.e0400.avail_ms	256	ms
+candidate.crouch_slide.ledge256.e0400.best_absolute_ups	639.83	ups
+candidate.crouch_slide.ledge256.e0400.best_aim_deg	60.00	deg
+candidate.crouch_slide.ledge256.e0400.best_delta_ups	212.83	ups
+candidate.crouch_slide.ledge256.e0400.best_timing_ms	8	ms
+candidate.crouch_slide.ledge256.e0400.control_best_absolute_ups	480.31	ups
+candidate.crouch_slide.ledge256.e0400.delta_aim0_ups	0.00	ups
+candidate.crouch_slide.ledge256.e0400.exec_window_ms	8	ms
+candidate.crouch_slide.ledge256.e0400.exec_window_span_ms	8	ms
+candidate.crouch_slide.ledge256.e0400.g3_unresponsive_candidate	0	n
+candidate.crouch_slide.ledge256.e0400.g3_unresponsive_control	0	n
+candidate.crouch_slide.ledge256.e0400.g5b_point_naive	0.0000	
+candidate.crouch_slide.ledge256.e0400.g7_aim_at_deg	59.30	deg
+candidate.crouch_slide.ledge256.e0400.g7_aim_refined_ups	404.33	ups
+candidate.crouch_slide.ledge256.e0400.g7_geometry_at_units	8.281	units
+candidate.crouch_slide.ledge256.e0400.g7_geometry_refined_ups	396.57	ups
+candidate.crouch_slide.ledge256.e0400.g7_impulse_measured_ups	16.06	ups
+candidate.crouch_slide.ledge256.e0400.g7_impulse_predicted_ups	16.06	ups
+candidate.crouch_slide.ledge256.e0400.hold_best_delta_ups	493.04	ups
+candidate.crouch_slide.ledge256.e0400.hold_naive_harmed	5	n
+candidate.crouch_slide.ledge256.e0400.material	yes	
+candidate.crouch_slide.ledge256.e0400.menu.bunnyhop.absolute_ups	557.88	ups
+candidate.crouch_slide.ledge256.e0400.menu.bunnyhop.angle_deg	55.00	deg
+candidate.crouch_slide.ledge256.e0400.menu.held_forward.absolute_ups	480.32	ups
+candidate.crouch_slide.ledge256.e0400.menu.held_forward.angle_deg	55.00	deg
+candidate.crouch_slide.ledge256.e0400.menu.held_strafe.absolute_ups	480.32	ups
+candidate.crouch_slide.ledge256.e0400.menu.held_strafe.angle_deg	55.00	deg
+candidate.crouch_slide.ledge256.e0400.naive_harm_rate	0.0048	
+candidate.crouch_slide.ledge256.e0400.naive_harmed	2	n
+candidate.crouch_slide.ledge256.e0400.naive_mean_delta_ups	-1.04	ups
+candidate.crouch_slide.ledge256.e0400.naive_points	416	n
+candidate.crouch_slide.ledge256.e0400.peak_gain_at_ms	320	ms
+candidate.crouch_slide.ledge256.e0400.peak_gain_ups	217.62	ups
+candidate.crouch_slide.ledge256.e0400.qualifies	yes	
+candidate.crouch_slide.ledge256.e0400.reachable	yes	
+candidate.crouch_slide.ledge256.e0400.tap_minus_hold_ups	-280.21	ups
+candidate.crouch_slide.ledge256.e0400.timing_degenerate	no	
+candidate.crouch_slide.ledge256.e0400.w2_gap	1.0049	
+candidate.crouch_slide.ledge256.e0400.w3_chain_gain_ups	159.52	ups
+candidate.crouch_slide.ledge256.e0400.w3_entry_slope	2.4967	
+candidate.crouch_slide.ledge256.e0400.w3_mechanic_alone_ups	320.00	ups
+candidate.crouch_slide.ledge256.e0400.w5_over_best_technique_ups	81.95	ups
+candidate.crouch_slide.ledge256.e0400.w6_aim_centroid_deg	0.00	deg
+candidate.crouch_slide.ledge256.e0400.w6_timing_centroid_ms	8	ms
+candidate.crouch_slide.ledge256.e0400.w6_top_aims	2	n
+candidate.crouch_slide.ledge256.e0400.w6_top_timings	1	n
+candidate.crouch_slide.ledge256.e0400.worst_latency	0	n
+candidate.crouch_slide.ledge256.e0500.absolute_aim0_ups	320.00	ups
+candidate.crouch_slide.ledge256.e0500.anchor_commands	0	n
+candidate.crouch_slide.ledge256.e0500.anchor_speed_ups	500.00	ups
+candidate.crouch_slide.ledge256.e0500.avail_commands	32	n
+candidate.crouch_slide.ledge256.e0500.avail_ms	256	ms
+candidate.crouch_slide.ledge256.e0500.best_absolute_ups	1008.57	ups
+candidate.crouch_slide.ledge256.e0500.best_aim_deg	60.00	deg
+candidate.crouch_slide.ledge256.e0500.best_delta_ups	581.54	ups
+candidate.crouch_slide.ledge256.e0500.best_timing_ms	48	ms
+candidate.crouch_slide.ledge256.e0500.control_best_absolute_ups	880.54	ups
+candidate.crouch_slide.ledge256.e0500.delta_aim0_ups	0.00	ups
+candidate.crouch_slide.ledge256.e0500.exec_window_ms	8	ms
+candidate.crouch_slide.ledge256.e0500.exec_window_span_ms	8	ms
+candidate.crouch_slide.ledge256.e0500.g3_unresponsive_candidate	0	n
+candidate.crouch_slide.ledge256.e0500.g3_unresponsive_control	0	n
+candidate.crouch_slide.ledge256.e0500.g5b_point_naive	0.0000	
+candidate.crouch_slide.ledge256.e0500.g7_aim_at_deg	59.92	deg
+candidate.crouch_slide.ledge256.e0500.g7_aim_refined_ups	83.46	ups
+candidate.crouch_slide.ledge256.e0500.g7_geometry_at_units	0.031	units
+candidate.crouch_slide.ledge256.e0500.g7_geometry_refined_ups	391.76	ups
+candidate.crouch_slide.ledge256.e0500.g7_impulse_measured_ups	19.22	ups
+candidate.crouch_slide.ledge256.e0500.g7_impulse_predicted_ups	19.22	ups
+candidate.crouch_slide.ledge256.e0500.hold_best_delta_ups	380.02	ups
+candidate.crouch_slide.ledge256.e0500.hold_naive_harmed	35	n
+candidate.crouch_slide.ledge256.e0500.material	yes	
+candidate.crouch_slide.ledge256.e0500.menu.bunnyhop.absolute_ups	661.56	ups
+candidate.crouch_slide.ledge256.e0500.menu.bunnyhop.angle_deg	65.00	deg
+candidate.crouch_slide.ledge256.e0500.menu.held_forward.absolute_ups	809.49	ups
+candidate.crouch_slide.ledge256.e0500.menu.held_forward.angle_deg	20.00	deg
+candidate.crouch_slide.ledge256.e0500.menu.held_strafe.absolute_ups	480.35	ups
+candidate.crouch_slide.ledge256.e0500.menu.held_strafe.angle_deg	55.00	deg
+candidate.crouch_slide.ledge256.e0500.naive_harm_rate	0.0288	
+candidate.crouch_slide.ledge256.e0500.naive_harmed	12	n
+candidate.crouch_slide.ledge256.e0500.naive_mean_delta_ups	-11.58	ups
+candidate.crouch_slide.ledge256.e0500.naive_points	416	n
+candidate.crouch_slide.ledge256.e0500.peak_gain_at_ms	1248	ms
+candidate.crouch_slide.ledge256.e0500.peak_gain_ups	581.54	ups
+candidate.crouch_slide.ledge256.e0500.qualifies	yes	
+candidate.crouch_slide.ledge256.e0500.reachable	yes	
+candidate.crouch_slide.ledge256.e0500.tap_minus_hold_ups	201.52	ups
+candidate.crouch_slide.ledge256.e0500.timing_degenerate	no	
+candidate.crouch_slide.ledge256.e0500.w2_gap	1.0199	
+candidate.crouch_slide.ledge256.e0500.w3_chain_gain_ups	128.03	ups
+candidate.crouch_slide.ledge256.e0500.w3_entry_slope	3.6873	
+candidate.crouch_slide.ledge256.e0500.w3_mechanic_alone_ups	320.00	ups
+candidate.crouch_slide.ledge256.e0500.w5_over_best_technique_ups	199.08	ups
+candidate.crouch_slide.ledge256.e0500.w6_aim_centroid_deg	0.00	deg
+candidate.crouch_slide.ledge256.e0500.w6_timing_centroid_ms	48	ms
+candidate.crouch_slide.ledge256.e0500.w6_top_aims	2	n
+candidate.crouch_slide.ledge256.e0500.w6_top_timings	1	n
+candidate.crouch_slide.ledge256.e0500.worst_latency	0	n
+candidate.crouch_slide.ledge256.e0640.absolute_aim0_ups	320.00	ups
+candidate.crouch_slide.ledge256.e0640.anchor_commands	0	n
+candidate.crouch_slide.ledge256.e0640.anchor_speed_ups	640.00	ups
+candidate.crouch_slide.ledge256.e0640.avail_commands	32	n
+candidate.crouch_slide.ledge256.e0640.avail_ms	256	ms
+candidate.crouch_slide.ledge256.e0640.best_absolute_ups	754.77	ups
+candidate.crouch_slide.ledge256.e0640.best_aim_deg	295.00	deg
+candidate.crouch_slide.ledge256.e0640.best_delta_ups	382.64	ups
+candidate.crouch_slide.ledge256.e0640.best_timing_ms	56	ms
+candidate.crouch_slide.ledge256.e0640.control_best_absolute_ups	799.19	ups
+candidate.crouch_slide.ledge256.e0640.delta_aim0_ups	0.00	ups
+candidate.crouch_slide.ledge256.e0640.exec_window_ms	8	ms
+candidate.crouch_slide.ledge256.e0640.exec_window_span_ms	8	ms
+candidate.crouch_slide.ledge256.e0640.g3_unresponsive_candidate	0	n
+candidate.crouch_slide.ledge256.e0640.g3_unresponsive_control	0	n
+candidate.crouch_slide.ledge256.e0640.g5b_point_naive	0.0000	
+candidate.crouch_slide.ledge256.e0640.g7_aim_at_deg	295.70	deg
+candidate.crouch_slide.ledge256.e0640.g7_aim_refined_ups	373.52	ups
+candidate.crouch_slide.ledge256.e0640.g7_geometry_at_units	4.281	units
+candidate.crouch_slide.ledge256.e0640.g7_geometry_refined_ups	485.54	ups
+candidate.crouch_slide.ledge256.e0640.g7_impulse_measured_ups	22.33	ups
+candidate.crouch_slide.ledge256.e0640.g7_impulse_predicted_ups	22.33	ups
+candidate.crouch_slide.ledge256.e0640.hold_best_delta_ups	489.42	ups
+candidate.crouch_slide.ledge256.e0640.hold_naive_harmed	110	n
+candidate.crouch_slide.ledge256.e0640.material	yes	
+candidate.crouch_slide.ledge256.e0640.menu.bunnyhop.absolute_ups	759.56	ups
+candidate.crouch_slide.ledge256.e0640.menu.bunnyhop.angle_deg	70.00	deg
+candidate.crouch_slide.ledge256.e0640.menu.held_forward.absolute_ups	480.53	ups
+candidate.crouch_slide.ledge256.e0640.menu.held_forward.angle_deg	55.00	deg
+candidate.crouch_slide.ledge256.e0640.menu.held_strafe.absolute_ups	492.83	ups
+candidate.crouch_slide.ledge256.e0640.menu.held_strafe.angle_deg	55.00	deg
+candidate.crouch_slide.ledge256.e0640.naive_harm_rate	0.0144	
+candidate.crouch_slide.ledge256.e0640.naive_harmed	6	n
+candidate.crouch_slide.ledge256.e0640.naive_mean_delta_ups	2.39	ups
+candidate.crouch_slide.ledge256.e0640.naive_points	416	n
+candidate.crouch_slide.ledge256.e0640.peak_gain_at_ms	816	ms
+candidate.crouch_slide.ledge256.e0640.peak_gain_ups	384.12	ups
+candidate.crouch_slide.ledge256.e0640.qualifies	yes	
+candidate.crouch_slide.ledge256.e0640.reachable	yes	
+candidate.crouch_slide.ledge256.e0640.tap_minus_hold_ups	-106.79	ups
+candidate.crouch_slide.ledge256.e0640.timing_degenerate	no	
+candidate.crouch_slide.ledge256.e0640.w2_gap	0.9938	
+candidate.crouch_slide.ledge256.e0640.w3_chain_gain_ups	-44.42	ups
+candidate.crouch_slide.ledge256.e0640.w3_entry_slope	-1.8128	
+candidate.crouch_slide.ledge256.e0640.w3_mechanic_alone_ups	320.00	ups
+candidate.crouch_slide.ledge256.e0640.w5_over_best_technique_ups	-4.80	ups
+candidate.crouch_slide.ledge256.e0640.w6_aim_centroid_deg	0.00	deg
+candidate.crouch_slide.ledge256.e0640.w6_timing_centroid_ms	56	ms
+candidate.crouch_slide.ledge256.e0640.w6_top_aims	2	n
+candidate.crouch_slide.ledge256.e0640.w6_top_timings	1	n
+candidate.crouch_slide.ledge256.e0640.worst_latency	0	n
+candidate.crouch_slide.ledge256.e0800.absolute_aim0_ups	320.00	ups
+candidate.crouch_slide.ledge256.e0800.anchor_commands	0	n
+candidate.crouch_slide.ledge256.e0800.anchor_speed_ups	800.00	ups
+candidate.crouch_slide.ledge256.e0800.avail_commands	26	n
+candidate.crouch_slide.ledge256.e0800.avail_ms	208	ms
+candidate.crouch_slide.ledge256.e0800.best_absolute_ups	815.62	ups
+candidate.crouch_slide.ledge256.e0800.best_aim_deg	75.00	deg
+candidate.crouch_slide.ledge256.e0800.best_delta_ups	553.54	ups
+candidate.crouch_slide.ledge256.e0800.best_timing_ms	200	ms
+candidate.crouch_slide.ledge256.e0800.control_best_absolute_ups	571.83	ups
+candidate.crouch_slide.ledge256.e0800.delta_aim0_ups	0.00	ups
+candidate.crouch_slide.ledge256.e0800.exec_window_ms	8	ms
+candidate.crouch_slide.ledge256.e0800.exec_window_span_ms	8	ms
+candidate.crouch_slide.ledge256.e0800.g3_unresponsive_candidate	0	n
+candidate.crouch_slide.ledge256.e0800.g3_unresponsive_control	0	n
+candidate.crouch_slide.ledge256.e0800.g5b_point_naive	0.0000	
+candidate.crouch_slide.ledge256.e0800.g7_aim_at_deg	75.08	deg
+candidate.crouch_slide.ledge256.e0800.g7_aim_refined_ups	554.86	ups
+candidate.crouch_slide.ledge256.e0800.g7_geometry_at_units	4.219	units
+candidate.crouch_slide.ledge256.e0800.g7_geometry_refined_ups	582.11	ups
+candidate.crouch_slide.ledge256.e0800.g7_impulse_measured_ups	16.03	ups
+candidate.crouch_slide.ledge256.e0800.g7_impulse_predicted_ups	16.03	ups
+candidate.crouch_slide.ledge256.e0800.hold_best_delta_ups	404.32	ups
+candidate.crouch_slide.ledge256.e0800.hold_naive_harmed	0	n
+candidate.crouch_slide.ledge256.e0800.material	yes	
+candidate.crouch_slide.ledge256.e0800.menu.bunnyhop.absolute_ups	910.94	ups
+candidate.crouch_slide.ledge256.e0800.menu.bunnyhop.angle_deg	70.00	deg
+candidate.crouch_slide.ledge256.e0800.menu.held_forward.absolute_ups	571.83	ups
+candidate.crouch_slide.ledge256.e0800.menu.held_forward.angle_deg	65.00	deg
+candidate.crouch_slide.ledge256.e0800.menu.held_strafe.absolute_ups	489.62	ups
+candidate.crouch_slide.ledge256.e0800.menu.held_strafe.angle_deg	55.00	deg
+candidate.crouch_slide.ledge256.e0800.naive_harm_rate	0.0144	
+candidate.crouch_slide.ledge256.e0800.naive_harmed	6	n
+candidate.crouch_slide.ledge256.e0800.naive_mean_delta_ups	-0.53	ups
+candidate.crouch_slide.ledge256.e0800.naive_points	416	n
+candidate.crouch_slide.ledge256.e0800.peak_gain_at_ms	792	ms
+candidate.crouch_slide.ledge256.e0800.peak_gain_ups	572.62	ups
+candidate.crouch_slide.ledge256.e0800.qualifies	yes	
+candidate.crouch_slide.ledge256.e0800.reachable	yes	
+candidate.crouch_slide.ledge256.e0800.tap_minus_hold_ups	149.22	ups
+candidate.crouch_slide.ledge256.e0800.timing_degenerate	no	
+candidate.crouch_slide.ledge256.e0800.w2_gap	1.0010	
+candidate.crouch_slide.ledge256.e0800.w3_chain_gain_ups	243.79	ups
+candidate.crouch_slide.ledge256.e0800.w3_entry_slope	0.3803	
+candidate.crouch_slide.ledge256.e0800.w3_mechanic_alone_ups	320.00	ups
+candidate.crouch_slide.ledge256.e0800.w5_over_best_technique_ups	-95.32	ups
+candidate.crouch_slide.ledge256.e0800.w6_aim_centroid_deg	0.00	deg
+candidate.crouch_slide.ledge256.e0800.w6_timing_centroid_ms	200	ms
+candidate.crouch_slide.ledge256.e0800.w6_top_aims	2	n
+candidate.crouch_slide.ledge256.e0800.w6_top_timings	1	n
+candidate.crouch_slide.ledge256.e0800.worst_latency	0	n
+candidate.crouch_slide.ledge256.e1000.absolute_aim0_ups	320.00	ups
+candidate.crouch_slide.ledge256.e1000.anchor_commands	0	n
+candidate.crouch_slide.ledge256.e1000.anchor_speed_ups	1000.00	ups
+candidate.crouch_slide.ledge256.e1000.avail_commands	18	n
+candidate.crouch_slide.ledge256.e1000.avail_ms	144	ms
+candidate.crouch_slide.ledge256.e1000.best_absolute_ups	234.45	ups
+candidate.crouch_slide.ledge256.e1000.best_aim_deg	265.00	deg
+candidate.crouch_slide.ledge256.e1000.best_delta_ups	185.68	ups
+candidate.crouch_slide.ledge256.e1000.best_timing_ms	136	ms
+candidate.crouch_slide.ledge256.e1000.control_best_absolute_ups	813.58	ups
+candidate.crouch_slide.ledge256.e1000.delta_aim0_ups	0.00	ups
+candidate.crouch_slide.ledge256.e1000.exec_window_ms	16	ms
+candidate.crouch_slide.ledge256.e1000.exec_window_span_ms	40	ms
+candidate.crouch_slide.ledge256.e1000.g3_unresponsive_candidate	0	n
+candidate.crouch_slide.ledge256.e1000.g3_unresponsive_control	0	n
+candidate.crouch_slide.ledge256.e1000.g5b_point_naive	0.0000	
+candidate.crouch_slide.ledge256.e1000.g7_aim_at_deg	93.83	deg
+candidate.crouch_slide.ledge256.e1000.g7_aim_refined_ups	187.28	ups
+candidate.crouch_slide.ledge256.e1000.g7_geometry_at_units	-0.531	units
+candidate.crouch_slide.ledge256.e1000.g7_geometry_refined_ups	249.80	ups
+candidate.crouch_slide.ledge256.e1000.g7_impulse_measured_ups	16.36	ups
+candidate.crouch_slide.ledge256.e1000.g7_impulse_predicted_ups	16.36	ups
+candidate.crouch_slide.ledge256.e1000.hold_best_delta_ups	326.29	ups
+candidate.crouch_slide.ledge256.e1000.hold_naive_harmed	2	n
+candidate.crouch_slide.ledge256.e1000.material	yes	
+candidate.crouch_slide.ledge256.e1000.menu.bunnyhop.absolute_ups	1065.16	ups
+candidate.crouch_slide.ledge256.e1000.menu.bunnyhop.angle_deg	75.00	deg
+candidate.crouch_slide.ledge256.e1000.menu.held_forward.absolute_ups	488.12	ups
+candidate.crouch_slide.ledge256.e1000.menu.held_forward.angle_deg	55.00	deg
+candidate.crouch_slide.ledge256.e1000.menu.held_strafe.absolute_ups	488.01	ups
+candidate.crouch_slide.ledge256.e1000.menu.held_strafe.angle_deg	55.00	deg
+candidate.crouch_slide.ledge256.e1000.naive_harm_rate	0.0096	
+candidate.crouch_slide.ledge256.e1000.naive_harmed	4	n
+candidate.crouch_slide.ledge256.e1000.naive_mean_delta_ups	-2.27	ups
+candidate.crouch_slide.ledge256.e1000.naive_points	416	n
+candidate.crouch_slide.ledge256.e1000.peak_gain_at_ms	1216	ms
+candidate.crouch_slide.ledge256.e1000.peak_gain_ups	289.65	ups
+candidate.crouch_slide.ledge256.e1000.qualifies	yes	
+candidate.crouch_slide.ledge256.e1000.reachable	yes	
+candidate.crouch_slide.ledge256.e1000.tap_minus_hold_ups	-140.61	ups
+candidate.crouch_slide.ledge256.e1000.timing_degenerate	no	
+candidate.crouch_slide.ledge256.e1000.w2_gap	1.0122	
+candidate.crouch_slide.ledge256.e1000.w3_chain_gain_ups	-579.13	ups
+candidate.crouch_slide.ledge256.e1000.w3_entry_slope	-2.9058	
+candidate.crouch_slide.ledge256.e1000.w3_mechanic_alone_ups	320.00	ups
+candidate.crouch_slide.ledge256.e1000.w5_over_best_technique_ups	-830.70	ups
+candidate.crouch_slide.ledge256.e1000.w6_aim_centroid_deg	0.00	deg
+candidate.crouch_slide.ledge256.e1000.w6_timing_centroid_ms	120	ms
+candidate.crouch_slide.ledge256.e1000.w6_top_aims	4	n
+candidate.crouch_slide.ledge256.e1000.w6_top_timings	2	n
+candidate.crouch_slide.ledge256.e1000.worst_latency	0	n
+candidate.crouch_slide.ledge256.g5a.arming_events	0	n
+candidate.crouch_slide.ledge256.g5a.available_commands	0	n
+candidate.crouch_slide.ledge256.g5a.peak_speed_ups	320.00	ups
+candidate.crouch_slide.ledge256.g5b_median	0.0000	
+candidate.crouch_slide.ledge256.w2_gap_median	1.0049	
+candidate.crouch_slide.ledge256.w3_chain_gain_best_ups	243.79	ups
+candidate.crouch_slide.ledge256.w3_entry_slope_max	3.6873	
+candidate.crouch_slide.ledge256.w3_entry_slope_min	-2.9058	
+candidate.crouch_slide.ledge256.w4_best_delta_ups	581.54	ups
+candidate.crouch_slide.life.hold.e0400.commands	75	n
+candidate.crouch_slide.life.hold.e0400.commands_below_entry_speed	74	n
+candidate.crouch_slide.life.hold.e0400.exit_speed_ups	208.48	ups
+candidate.crouch_slide.life.hold.e0400.lowest_speed_ups	208.48	ups
+candidate.crouch_slide.life.hold.e0400.ran_below_max_speed	yes	
+candidate.crouch_slide.life.hold.e0400.standing_commands	0	n
+candidate.crouch_slide.life.hold.e0500.commands	75	n
+candidate.crouch_slide.life.hold.e0500.commands_below_entry_speed	48	n
+candidate.crouch_slide.life.hold.e0500.exit_speed_ups	260.60	ups
+candidate.crouch_slide.life.hold.e0500.lowest_speed_ups	260.60	ups
+candidate.crouch_slide.life.hold.e0500.ran_below_max_speed	yes	
+candidate.crouch_slide.life.hold.e0500.standing_commands	0	n
+candidate.crouch_slide.life.hold.e0640.commands	75	n
+candidate.crouch_slide.life.hold.e0640.commands_below_entry_speed	17	n
+candidate.crouch_slide.life.hold.e0640.exit_speed_ups	333.57	ups
+candidate.crouch_slide.life.hold.e0640.lowest_speed_ups	333.57	ups
+candidate.crouch_slide.life.hold.e0640.ran_below_max_speed	no	
+candidate.crouch_slide.life.hold.e0640.standing_commands	0	n
+candidate.crouch_slide.life.hold.e0800.commands	75	n
+candidate.crouch_slide.life.hold.e0800.commands_below_entry_speed	0	n
+candidate.crouch_slide.life.hold.e0800.exit_speed_ups	416.97	ups
+candidate.crouch_slide.life.hold.e0800.lowest_speed_ups	416.97	ups
+candidate.crouch_slide.life.hold.e0800.ran_below_max_speed	no	
+candidate.crouch_slide.life.hold.e0800.standing_commands	0	n
+candidate.crouch_slide.life.hold.e1000.commands	75	n
+candidate.crouch_slide.life.hold.e1000.commands_below_entry_speed	0	n
+candidate.crouch_slide.life.hold.e1000.exit_speed_ups	521.21	ups
+candidate.crouch_slide.life.hold.e1000.lowest_speed_ups	521.21	ups
+candidate.crouch_slide.life.hold.e1000.ran_below_max_speed	no	
+candidate.crouch_slide.life.hold.e1000.standing_commands	0	n
+candidate.crouch_slide.life.tap.e0400.commands	75	n
+candidate.crouch_slide.life.tap.e0400.commands_below_entry_speed	74	n
+candidate.crouch_slide.life.tap.e0400.exit_speed_ups	208.48	ups
+candidate.crouch_slide.life.tap.e0400.lowest_speed_ups	208.48	ups
+candidate.crouch_slide.life.tap.e0400.ran_below_max_speed	yes	
+candidate.crouch_slide.life.tap.e0400.standing_commands	75	n
+candidate.crouch_slide.life.tap.e0500.commands	75	n
+candidate.crouch_slide.life.tap.e0500.commands_below_entry_speed	48	n
+candidate.crouch_slide.life.tap.e0500.exit_speed_ups	260.60	ups
+candidate.crouch_slide.life.tap.e0500.lowest_speed_ups	260.60	ups
+candidate.crouch_slide.life.tap.e0500.ran_below_max_speed	yes	
+candidate.crouch_slide.life.tap.e0500.standing_commands	75	n
+candidate.crouch_slide.life.tap.e0640.commands	75	n
+candidate.crouch_slide.life.tap.e0640.commands_below_entry_speed	17	n
+candidate.crouch_slide.life.tap.e0640.exit_speed_ups	333.57	ups
+candidate.crouch_slide.life.tap.e0640.lowest_speed_ups	333.57	ups
+candidate.crouch_slide.life.tap.e0640.ran_below_max_speed	no	
+candidate.crouch_slide.life.tap.e0640.standing_commands	75	n
+candidate.crouch_slide.life.tap.e0800.commands	75	n
+candidate.crouch_slide.life.tap.e0800.commands_below_entry_speed	0	n
+candidate.crouch_slide.life.tap.e0800.exit_speed_ups	416.97	ups
+candidate.crouch_slide.life.tap.e0800.lowest_speed_ups	416.97	ups
+candidate.crouch_slide.life.tap.e0800.ran_below_max_speed	no	
+candidate.crouch_slide.life.tap.e0800.standing_commands	75	n
+candidate.crouch_slide.life.tap.e1000.commands	75	n
+candidate.crouch_slide.life.tap.e1000.commands_below_entry_speed	0	n
+candidate.crouch_slide.life.tap.e1000.exit_speed_ups	521.21	ups
+candidate.crouch_slide.life.tap.e1000.lowest_speed_ups	521.21	ups
+candidate.crouch_slide.life.tap.e1000.ran_below_max_speed	no	
+candidate.crouch_slide.life.tap.e1000.standing_commands	75	n
+candidate.crouch_slide.ramp26.e0320.anchor_commands	0	n
+candidate.crouch_slide.ramp26.e0320.anchor_speed_ups	320.00	ups
+candidate.crouch_slide.ramp26.e0320.avail_commands	25	n
+candidate.crouch_slide.ramp26.e0320.avail_ms	200	ms
+candidate.crouch_slide.ramp26.e0320.best_absolute_ups	440.09	ups
+candidate.crouch_slide.ramp26.e0320.best_aim_deg	300.00	deg
+candidate.crouch_slide.ramp26.e0320.best_delta_ups	13.13	ups
+candidate.crouch_slide.ramp26.e0320.best_timing_ms	248	ms
+candidate.crouch_slide.ramp26.e0320.control_best_absolute_ups	480.28	ups
+candidate.crouch_slide.ramp26.e0320.delta_aim0_ups	never-fired-at-aim-0	
+candidate.crouch_slide.ramp26.e0320.exec_window_ms	8	ms
+candidate.crouch_slide.ramp26.e0320.exec_window_span_ms	8	ms
+candidate.crouch_slide.ramp26.e0320.g3_unresponsive_candidate	0	n
+candidate.crouch_slide.ramp26.e0320.g3_unresponsive_control	0	n
+candidate.crouch_slide.ramp26.e0320.g5b_point_naive	not-meaningful	
+candidate.crouch_slide.ramp26.e0320.g7_impulse_measured_ups	16.24	ups
+candidate.crouch_slide.ramp26.e0320.g7_impulse_predicted_ups	16.24	ups
+candidate.crouch_slide.ramp26.e0320.hold_best_delta_ups	15.86	ups
+candidate.crouch_slide.ramp26.e0320.hold_naive_harmed	0	n
+candidate.crouch_slide.ramp26.e0320.material	no	
+candidate.crouch_slide.ramp26.e0320.menu.bunnyhop.absolute_ups	555.73	ups
+candidate.crouch_slide.ramp26.e0320.menu.bunnyhop.angle_deg	55.00	deg
+candidate.crouch_slide.ramp26.e0320.menu.held_forward.absolute_ups	480.29	ups
+candidate.crouch_slide.ramp26.e0320.menu.held_forward.angle_deg	55.00	deg
+candidate.crouch_slide.ramp26.e0320.menu.held_strafe.absolute_ups	480.29	ups
+candidate.crouch_slide.ramp26.e0320.menu.held_strafe.angle_deg	55.00	deg
+candidate.crouch_slide.ramp26.e0320.naive_harm_rate	0.0000	
+candidate.crouch_slide.ramp26.e0320.naive_harmed	0	n
+candidate.crouch_slide.ramp26.e0320.naive_mean_delta_ups	0.00	ups
+candidate.crouch_slide.ramp26.e0320.naive_points	416	n
+candidate.crouch_slide.ramp26.e0320.peak_gain_at_ms	408	ms
+candidate.crouch_slide.ramp26.e0320.peak_gain_ups	209.74	ups
+candidate.crouch_slide.ramp26.e0320.qualifies	no	
+candidate.crouch_slide.ramp26.e0320.reachable	yes	
+candidate.crouch_slide.ramp26.e0320.tap_minus_hold_ups	-2.73	ups
+candidate.crouch_slide.ramp26.e0320.timing_degenerate	no	
+candidate.crouch_slide.ramp26.e0320.w2_gap	not-meaningful	
+candidate.crouch_slide.ramp26.e0320.w3_chain_gain_ups	-40.19	ups
+candidate.crouch_slide.ramp26.e0320.w5_over_best_technique_ups	-115.64	ups
+candidate.crouch_slide.ramp26.e0320.w6_aim_centroid_deg	0.00	deg
+candidate.crouch_slide.ramp26.e0320.w6_timing_centroid_ms	248	ms
+candidate.crouch_slide.ramp26.e0320.w6_top_aims	2	n
+candidate.crouch_slide.ramp26.e0320.w6_top_timings	1	n
+candidate.crouch_slide.ramp26.e0320.worst_latency	0	n
+candidate.crouch_slide.ramp26.e0400.absolute_aim0_ups	287.61	ups
+candidate.crouch_slide.ramp26.e0400.anchor_commands	0	n
+candidate.crouch_slide.ramp26.e0400.anchor_speed_ups	400.00	ups
+candidate.crouch_slide.ramp26.e0400.avail_commands	32	n
+candidate.crouch_slide.ramp26.e0400.avail_ms	256	ms
+candidate.crouch_slide.ramp26.e0400.best_absolute_ups	440.09	ups
+candidate.crouch_slide.ramp26.e0400.best_aim_deg	300.00	deg
+candidate.crouch_slide.ramp26.e0400.best_delta_ups	13.11	ups
+candidate.crouch_slide.ramp26.e0400.best_timing_ms	248	ms
+candidate.crouch_slide.ramp26.e0400.control_best_absolute_ups	480.61	ups
+candidate.crouch_slide.ramp26.e0400.delta_aim0_ups	0.00	ups
+candidate.crouch_slide.ramp26.e0400.exec_window_ms	16	ms
+candidate.crouch_slide.ramp26.e0400.exec_window_span_ms	256	ms
+candidate.crouch_slide.ramp26.e0400.g3_unresponsive_candidate	0	n
+candidate.crouch_slide.ramp26.e0400.g3_unresponsive_control	0	n
+candidate.crouch_slide.ramp26.e0400.g5b_point_naive	not-meaningful	
+candidate.crouch_slide.ramp26.e0400.g7_impulse_measured_ups	16.87	ups
+candidate.crouch_slide.ramp26.e0400.g7_impulse_predicted_ups	16.87	ups
+candidate.crouch_slide.ramp26.e0400.hold_best_delta_ups	16.63	ups
+candidate.crouch_slide.ramp26.e0400.hold_naive_harmed	0	n
+candidate.crouch_slide.ramp26.e0400.material	no	
+candidate.crouch_slide.ramp26.e0400.menu.bunnyhop.absolute_ups	600.17	ups
+candidate.crouch_slide.ramp26.e0400.menu.bunnyhop.angle_deg	60.00	deg
+candidate.crouch_slide.ramp26.e0400.menu.held_forward.absolute_ups	480.32	ups
+candidate.crouch_slide.ramp26.e0400.menu.held_forward.angle_deg	55.00	deg
+candidate.crouch_slide.ramp26.e0400.menu.held_strafe.absolute_ups	480.32	ups
+candidate.crouch_slide.ramp26.e0400.menu.held_strafe.angle_deg	55.00	deg
+candidate.crouch_slide.ramp26.e0400.naive_harm_rate	0.0096	
+candidate.crouch_slide.ramp26.e0400.naive_harmed	4	n
+candidate.crouch_slide.ramp26.e0400.naive_mean_delta_ups	-0.31	ups
+candidate.crouch_slide.ramp26.e0400.naive_points	416	n
+candidate.crouch_slide.ramp26.e0400.peak_gain_at_ms	416	ms
+candidate.crouch_slide.ramp26.e0400.peak_gain_ups	205.23	ups
+candidate.crouch_slide.ramp26.e0400.qualifies	no	
+candidate.crouch_slide.ramp26.e0400.reachable	yes	
+candidate.crouch_slide.ramp26.e0400.tap_minus_hold_ups	-3.52	ups
+candidate.crouch_slide.ramp26.e0400.timing_degenerate	no	
+candidate.crouch_slide.ramp26.e0400.w2_gap	not-meaningful	
+candidate.crouch_slide.ramp26.e0400.w3_chain_gain_ups	-40.51	ups
+candidate.crouch_slide.ramp26.e0400.w3_entry_slope	0.0000	
+candidate.crouch_slide.ramp26.e0400.w3_mechanic_alone_ups	287.61	ups
+candidate.crouch_slide.ramp26.e0400.w5_over_best_technique_ups	-160.08	ups
+candidate.crouch_slide.ramp26.e0400.w6_aim_centroid_deg	0.00	deg
+candidate.crouch_slide.ramp26.e0400.w6_timing_centroid_ms	124	ms
+candidate.crouch_slide.ramp26.e0400.w6_top_aims	4	n
+candidate.crouch_slide.ramp26.e0400.w6_top_timings	2	n
+candidate.crouch_slide.ramp26.e0400.worst_latency	0	n
+candidate.crouch_slide.ramp26.e0500.absolute_aim0_ups	287.61	ups
+candidate.crouch_slide.ramp26.e0500.anchor_commands	0	n
+candidate.crouch_slide.ramp26.e0500.anchor_speed_ups	500.00	ups
+candidate.crouch_slide.ramp26.e0500.avail_commands	32	n
+candidate.crouch_slide.ramp26.e0500.avail_ms	256	ms
+candidate.crouch_slide.ramp26.e0500.best_absolute_ups	467.70	ups
+candidate.crouch_slide.ramp26.e0500.best_aim_deg	310.00	deg
+candidate.crouch_slide.ramp26.e0500.best_delta_ups	44.87	ups
+candidate.crouch_slide.ramp26.e0500.best_timing_ms	112	ms
+candidate.crouch_slide.ramp26.e0500.control_best_absolute_ups	479.90	ups
+candidate.crouch_slide.ramp26.e0500.delta_aim0_ups	0.00	ups
+candidate.crouch_slide.ramp26.e0500.exec_window_ms	152	ms
+candidate.crouch_slide.ramp26.e0500.exec_window_span_ms	152	ms
+candidate.crouch_slide.ramp26.e0500.g3_unresponsive_candidate	0	n
+candidate.crouch_slide.ramp26.e0500.g3_unresponsive_control	0	n
+candidate.crouch_slide.ramp26.e0500.g5b_point_naive	0.0000	
+candidate.crouch_slide.ramp26.e0500.g7_aim_at_deg	50.70	deg
+candidate.crouch_slide.ramp26.e0500.g7_aim_refined_ups	20.56	ups
+candidate.crouch_slide.ramp26.e0500.g7_geometry_at_units	13.031	units
+candidate.crouch_slide.ramp26.e0500.g7_geometry_refined_ups	36.19	ups
+candidate.crouch_slide.ramp26.e0500.g7_impulse_measured_ups	16.71	ups
+candidate.crouch_slide.ramp26.e0500.g7_impulse_predicted_ups	18.71	ups
+candidate.crouch_slide.ramp26.e0500.hold_best_delta_ups	38.57	ups
+candidate.crouch_slide.ramp26.e0500.hold_naive_harmed	0	n
+candidate.crouch_slide.ramp26.e0500.material	yes	
+candidate.crouch_slide.ramp26.e0500.menu.bunnyhop.absolute_ups	640.02	ups
+candidate.crouch_slide.ramp26.e0500.menu.bunnyhop.angle_deg	60.00	deg
+candidate.crouch_slide.ramp26.e0500.menu.held_forward.absolute_ups	477.83	ups
+candidate.crouch_slide.ramp26.e0500.menu.held_forward.angle_deg	55.00	deg
+candidate.crouch_slide.ramp26.e0500.menu.held_strafe.absolute_ups	477.83	ups
+candidate.crouch_slide.ramp26.e0500.menu.held_strafe.angle_deg	55.00	deg
+candidate.crouch_slide.ramp26.e0500.naive_harm_rate	0.0481	
+candidate.crouch_slide.ramp26.e0500.naive_harmed	20	n
+candidate.crouch_slide.ramp26.e0500.naive_mean_delta_ups	-0.75	ups
+candidate.crouch_slide.ramp26.e0500.naive_points	416	n
+candidate.crouch_slide.ramp26.e0500.peak_gain_at_ms	344	ms
+candidate.crouch_slide.ramp26.e0500.peak_gain_ups	59.94	ups
+candidate.crouch_slide.ramp26.e0500.qualifies	yes	
+candidate.crouch_slide.ramp26.e0500.reachable	yes	
+candidate.crouch_slide.ramp26.e0500.tap_minus_hold_ups	6.30	ups
+candidate.crouch_slide.ramp26.e0500.timing_degenerate	no	
+candidate.crouch_slide.ramp26.e0500.w2_gap	1.0168	
+candidate.crouch_slide.ramp26.e0500.w3_chain_gain_ups	-12.19	ups
+candidate.crouch_slide.ramp26.e0500.w3_entry_slope	0.2761	
+candidate.crouch_slide.ramp26.e0500.w3_mechanic_alone_ups	287.61	ups
+candidate.crouch_slide.ramp26.e0500.w5_over_best_technique_ups	-172.31	ups
+candidate.crouch_slide.ramp26.e0500.w6_aim_centroid_deg	0.00	deg
+candidate.crouch_slide.ramp26.e0500.w6_timing_centroid_ms	176	ms
+candidate.crouch_slide.ramp26.e0500.w6_top_aims	2	n
+candidate.crouch_slide.ramp26.e0500.w6_top_timings	19	n
+candidate.crouch_slide.ramp26.e0500.worst_latency	0	n
+candidate.crouch_slide.ramp26.e0640.absolute_aim0_ups	287.61	ups
+candidate.crouch_slide.ramp26.e0640.anchor_commands	0	n
+candidate.crouch_slide.ramp26.e0640.anchor_speed_ups	640.00	ups
+candidate.crouch_slide.ramp26.e0640.avail_commands	32	n
+candidate.crouch_slide.ramp26.e0640.avail_ms	256	ms
+candidate.crouch_slide.ramp26.e0640.best_absolute_ups	467.70	ups
+candidate.crouch_slide.ramp26.e0640.best_aim_deg	50.00	deg
+candidate.crouch_slide.ramp26.e0640.best_delta_ups	41.41	ups
+candidate.crouch_slide.ramp26.e0640.best_timing_ms	224	ms
+candidate.crouch_slide.ramp26.e0640.control_best_absolute_ups	480.85	ups
+candidate.crouch_slide.ramp26.e0640.delta_aim0_ups	0.00	ups
+candidate.crouch_slide.ramp26.e0640.exec_window_ms	72	ms
+candidate.crouch_slide.ramp26.e0640.exec_window_span_ms	72	ms
+candidate.crouch_slide.ramp26.e0640.g3_unresponsive_candidate	0	n
+candidate.crouch_slide.ramp26.e0640.g3_unresponsive_control	0	n
+candidate.crouch_slide.ramp26.e0640.g5b_point_naive	0.0000	
+candidate.crouch_slide.ramp26.e0640.g7_aim_at_deg	67.73	deg
+candidate.crouch_slide.ramp26.e0640.g7_aim_refined_ups	23.56	ups
+candidate.crouch_slide.ramp26.e0640.g7_impulse_measured_ups	18.29	ups
+candidate.crouch_slide.ramp26.e0640.g7_impulse_predicted_ups	18.29	ups
+candidate.crouch_slide.ramp26.e0640.hold_best_delta_ups	42.52	ups
+candidate.crouch_slide.ramp26.e0640.hold_naive_harmed	0	n
+candidate.crouch_slide.ramp26.e0640.material	yes	
+candidate.crouch_slide.ramp26.e0640.menu.bunnyhop.absolute_ups	713.01	ups
+candidate.crouch_slide.ramp26.e0640.menu.bunnyhop.angle_deg	65.00	deg
+candidate.crouch_slide.ramp26.e0640.menu.held_forward.absolute_ups	471.71	ups
+candidate.crouch_slide.ramp26.e0640.menu.held_forward.angle_deg	55.00	deg
+candidate.crouch_slide.ramp26.e0640.menu.held_strafe.absolute_ups	471.71	ups
+candidate.crouch_slide.ramp26.e0640.menu.held_strafe.angle_deg	55.00	deg
+candidate.crouch_slide.ramp26.e0640.naive_harm_rate	0.0865	
+candidate.crouch_slide.ramp26.e0640.naive_harmed	36	n
+candidate.crouch_slide.ramp26.e0640.naive_mean_delta_ups	-1.37	ups
+candidate.crouch_slide.ramp26.e0640.naive_points	416	n
+candidate.crouch_slide.ramp26.e0640.peak_gain_at_ms	1000	ms
+candidate.crouch_slide.ramp26.e0640.peak_gain_ups	73.19	ups
+candidate.crouch_slide.ramp26.e0640.qualifies	yes	
+candidate.crouch_slide.ramp26.e0640.reachable	yes	
+candidate.crouch_slide.ramp26.e0640.tap_minus_hold_ups	-1.11	ups
+candidate.crouch_slide.ramp26.e0640.timing_degenerate	no	
+candidate.crouch_slide.ramp26.e0640.w2_gap	1.0331	
+candidate.crouch_slide.ramp26.e0640.w3_chain_gain_ups	-13.15	ups
+candidate.crouch_slide.ramp26.e0640.w3_entry_slope	0.0000	
+candidate.crouch_slide.ramp26.e0640.w3_mechanic_alone_ups	287.61	ups
+candidate.crouch_slide.ramp26.e0640.w5_over_best_technique_ups	-245.31	ups
+candidate.crouch_slide.ramp26.e0640.w6_aim_centroid_deg	0.00	deg
+candidate.crouch_slide.ramp26.e0640.w6_timing_centroid_ms	216	ms
+candidate.crouch_slide.ramp26.e0640.w6_top_aims	2	n
+candidate.crouch_slide.ramp26.e0640.w6_top_timings	9	n
+candidate.crouch_slide.ramp26.e0640.worst_latency	0	n
+candidate.crouch_slide.ramp26.e0800.absolute_aim0_ups	287.61	ups
+candidate.crouch_slide.ramp26.e0800.anchor_commands	0	n
+candidate.crouch_slide.ramp26.e0800.anchor_speed_ups	800.00	ups
+candidate.crouch_slide.ramp26.e0800.avail_commands	32	n
+candidate.crouch_slide.ramp26.e0800.avail_ms	256	ms
+candidate.crouch_slide.ramp26.e0800.best_absolute_ups	396.10	ups
+candidate.crouch_slide.ramp26.e0800.best_aim_deg	295.00	deg
+candidate.crouch_slide.ramp26.e0800.best_delta_ups	47.68	ups
+candidate.crouch_slide.ramp26.e0800.best_timing_ms	248	ms
+candidate.crouch_slide.ramp26.e0800.control_best_absolute_ups	482.01	ups
+candidate.crouch_slide.ramp26.e0800.delta_aim0_ups	0.00	ups
+candidate.crouch_slide.ramp26.e0800.exec_window_ms	24	ms
+candidate.crouch_slide.ramp26.e0800.exec_window_span_ms	32	ms
+candidate.crouch_slide.ramp26.e0800.g3_unresponsive_candidate	0	n
+candidate.crouch_slide.ramp26.e0800.g3_unresponsive_control	0	n
+candidate.crouch_slide.ramp26.e0800.g5b_point_naive	0.0000	
+candidate.crouch_slide.ramp26.e0800.g7_aim_at_deg	41.95	deg
+candidate.crouch_slide.ramp26.e0800.g7_aim_refined_ups	81.37	ups
+candidate.crouch_slide.ramp26.e0800.g7_geometry_at_units	-11.969	units
+candidate.crouch_slide.ramp26.e0800.g7_geometry_refined_ups	20.07	ups
+candidate.crouch_slide.ramp26.e0800.g7_impulse_measured_ups	17.36	ups
+candidate.crouch_slide.ramp26.e0800.g7_impulse_predicted_ups	17.36	ups
+candidate.crouch_slide.ramp26.e0800.hold_best_delta_ups	53.75	ups
+candidate.crouch_slide.ramp26.e0800.hold_naive_harmed	0	n
+candidate.crouch_slide.ramp26.e0800.material	yes	
+candidate.crouch_slide.ramp26.e0800.menu.bunnyhop.absolute_ups	806.06	ups
+candidate.crouch_slide.ramp26.e0800.menu.bunnyhop.angle_deg	70.00	deg
+candidate.crouch_slide.ramp26.e0800.menu.held_forward.absolute_ups	482.01	ups
+candidate.crouch_slide.ramp26.e0800.menu.held_forward.angle_deg	55.00	deg
+candidate.crouch_slide.ramp26.e0800.menu.held_strafe.absolute_ups	482.01	ups
+candidate.crouch_slide.ramp26.e0800.menu.held_strafe.angle_deg	55.00	deg
+candidate.crouch_slide.ramp26.e0800.naive_harm_rate	0.0481	
+candidate.crouch_slide.ramp26.e0800.naive_harmed	20	n
+candidate.crouch_slide.ramp26.e0800.naive_mean_delta_ups	-1.27	ups
+candidate.crouch_slide.ramp26.e0800.naive_points	416	n
+candidate.crouch_slide.ramp26.e0800.peak_gain_at_ms	632	ms
+candidate.crouch_slide.ramp26.e0800.peak_gain_ups	430.41	ups
+candidate.crouch_slide.ramp26.e0800.qualifies	yes	
+candidate.crouch_slide.ramp26.e0800.reachable	yes	
+candidate.crouch_slide.ramp26.e0800.tap_minus_hold_ups	-6.07	ups
+candidate.crouch_slide.ramp26.e0800.timing_degenerate	no	
+candidate.crouch_slide.ramp26.e0800.w2_gap	1.0266	
+candidate.crouch_slide.ramp26.e0800.w3_chain_gain_ups	-85.91	ups
+candidate.crouch_slide.ramp26.e0800.w3_entry_slope	-0.4475	
+candidate.crouch_slide.ramp26.e0800.w3_mechanic_alone_ups	287.61	ups
+candidate.crouch_slide.ramp26.e0800.w5_over_best_technique_ups	-409.97	ups
+candidate.crouch_slide.ramp26.e0800.w6_aim_centroid_deg	0.00	deg
+candidate.crouch_slide.ramp26.e0800.w6_timing_centroid_ms	234	ms
+candidate.crouch_slide.ramp26.e0800.w6_top_aims	2	n
+candidate.crouch_slide.ramp26.e0800.w6_top_timings	3	n
+candidate.crouch_slide.ramp26.e0800.worst_latency	0	n
+candidate.crouch_slide.ramp26.e1000.absolute_aim0_ups	287.61	ups
+candidate.crouch_slide.ramp26.e1000.anchor_commands	0	n
+candidate.crouch_slide.ramp26.e1000.anchor_speed_ups	1000.00	ups
+candidate.crouch_slide.ramp26.e1000.avail_commands	32	n
+candidate.crouch_slide.ramp26.e1000.avail_ms	256	ms
+candidate.crouch_slide.ramp26.e1000.best_absolute_ups	346.06	ups
+candidate.crouch_slide.ramp26.e1000.best_aim_deg	70.00	deg
+candidate.crouch_slide.ramp26.e1000.best_delta_ups	61.70	ups
+candidate.crouch_slide.ramp26.e1000.best_timing_ms	216	ms
+candidate.crouch_slide.ramp26.e1000.control_best_absolute_ups	475.36	ups
+candidate.crouch_slide.ramp26.e1000.delta_aim0_ups	0.00	ups
+candidate.crouch_slide.ramp26.e1000.exec_window_ms	16	ms
+candidate.crouch_slide.ramp26.e1000.exec_window_span_ms	16	ms
+candidate.crouch_slide.ramp26.e1000.g3_unresponsive_candidate	0	n
+candidate.crouch_slide.ramp26.e1000.g3_unresponsive_control	0	n
+candidate.crouch_slide.ramp26.e1000.g5b_point_naive	0.0000	
+candidate.crouch_slide.ramp26.e1000.g7_aim_at_deg	298.67	deg
+candidate.crouch_slide.ramp26.e1000.g7_aim_refined_ups	50.67	ups
+candidate.crouch_slide.ramp26.e1000.g7_impulse_measured_ups	17.95	ups
+candidate.crouch_slide.ramp26.e1000.g7_impulse_predicted_ups	17.95	ups
+candidate.crouch_slide.ramp26.e1000.hold_best_delta_ups	58.06	ups
+candidate.crouch_slide.ramp26.e1000.hold_naive_harmed	0	n
+candidate.crouch_slide.ramp26.e1000.material	yes	
+candidate.crouch_slide.ramp26.e1000.menu.bunnyhop.absolute_ups	465.52	ups
+candidate.crouch_slide.ramp26.e1000.menu.bunnyhop.angle_deg	50.00	deg
+candidate.crouch_slide.ramp26.e1000.menu.held_forward.absolute_ups	437.00	ups
+candidate.crouch_slide.ramp26.e1000.menu.held_forward.angle_deg	50.00	deg
+candidate.crouch_slide.ramp26.e1000.menu.held_strafe.absolute_ups	437.00	ups
+candidate.crouch_slide.ramp26.e1000.menu.held_strafe.angle_deg	50.00	deg
+candidate.crouch_slide.ramp26.e1000.naive_harm_rate	0.1442	
+candidate.crouch_slide.ramp26.e1000.naive_harmed	60	n
+candidate.crouch_slide.ramp26.e1000.naive_mean_delta_ups	0.67	ups
+candidate.crouch_slide.ramp26.e1000.naive_points	416	n
+candidate.crouch_slide.ramp26.e1000.peak_gain_at_ms	808	ms
+candidate.crouch_slide.ramp26.e1000.peak_gain_ups	597.31	ups
+candidate.crouch_slide.ramp26.e1000.qualifies	yes	
+candidate.crouch_slide.ramp26.e1000.reachable	yes	
+candidate.crouch_slide.ramp26.e1000.tap_minus_hold_ups	3.64	ups
+candidate.crouch_slide.ramp26.e1000.timing_degenerate	no	
+candidate.crouch_slide.ramp26.e1000.w2_gap	0.9891	
+candidate.crouch_slide.ramp26.e1000.w3_chain_gain_ups	-129.30	ups
+candidate.crouch_slide.ramp26.e1000.w3_entry_slope	-0.2502	
+candidate.crouch_slide.ramp26.e1000.w3_mechanic_alone_ups	287.61	ups
+candidate.crouch_slide.ramp26.e1000.w5_over_best_technique_ups	-119.46	ups
+candidate.crouch_slide.ramp26.e1000.w6_aim_centroid_deg	0.00	deg
+candidate.crouch_slide.ramp26.e1000.w6_timing_centroid_ms	212	ms
+candidate.crouch_slide.ramp26.e1000.w6_top_aims	2	n
+candidate.crouch_slide.ramp26.e1000.w6_top_timings	2	n
+candidate.crouch_slide.ramp26.e1000.worst_latency	0	n
+candidate.crouch_slide.ramp26.g5a.arming_events	0	n
+candidate.crouch_slide.ramp26.g5a.available_commands	0	n
+candidate.crouch_slide.ramp26.g5a.peak_speed_ups	320.00	ups
+candidate.crouch_slide.ramp26.g5b_median	0.0000	
+candidate.crouch_slide.ramp26.w2_gap_median	1.0217	
+candidate.crouch_slide.ramp26.w3_chain_gain_best_ups	-12.19	ups
+candidate.crouch_slide.ramp26.w3_entry_slope_max	0.2761	
+candidate.crouch_slide.ramp26.w3_entry_slope_min	-0.4475	
+candidate.crouch_slide.ramp26.w4_best_delta_ups	61.70	ups
+candidate.crouch_slide.ramp50.e0320.anchor_commands	0	n
+candidate.crouch_slide.ramp50.e0320.anchor_speed_ups	320.00	ups
+candidate.crouch_slide.ramp50.e0320.avail_commands	25	n
+candidate.crouch_slide.ramp50.e0320.avail_ms	200	ms
+candidate.crouch_slide.ramp50.e0320.best_absolute_ups	440.09	ups
+candidate.crouch_slide.ramp50.e0320.best_aim_deg	300.00	deg
+candidate.crouch_slide.ramp50.e0320.best_delta_ups	13.13	ups
+candidate.crouch_slide.ramp50.e0320.best_timing_ms	248	ms
+candidate.crouch_slide.ramp50.e0320.control_best_absolute_ups	480.28	ups
+candidate.crouch_slide.ramp50.e0320.delta_aim0_ups	never-fired-at-aim-0	
+candidate.crouch_slide.ramp50.e0320.exec_window_ms	8	ms
+candidate.crouch_slide.ramp50.e0320.exec_window_span_ms	8	ms
+candidate.crouch_slide.ramp50.e0320.g3_unresponsive_candidate	0	n
+candidate.crouch_slide.ramp50.e0320.g3_unresponsive_control	0	n
+candidate.crouch_slide.ramp50.e0320.g5b_point_naive	not-meaningful	
+candidate.crouch_slide.ramp50.e0320.g7_impulse_measured_ups	16.24	ups
+candidate.crouch_slide.ramp50.e0320.g7_impulse_predicted_ups	16.24	ups
+candidate.crouch_slide.ramp50.e0320.hold_best_delta_ups	4.60	ups
+candidate.crouch_slide.ramp50.e0320.hold_naive_harmed	0	n
+candidate.crouch_slide.ramp50.e0320.material	no	
+candidate.crouch_slide.ramp50.e0320.menu.bunnyhop.absolute_ups	555.73	ups
+candidate.crouch_slide.ramp50.e0320.menu.bunnyhop.angle_deg	55.00	deg
+candidate.crouch_slide.ramp50.e0320.menu.held_forward.absolute_ups	480.29	ups
+candidate.crouch_slide.ramp50.e0320.menu.held_forward.angle_deg	55.00	deg
+candidate.crouch_slide.ramp50.e0320.menu.held_strafe.absolute_ups	480.29	ups
+candidate.crouch_slide.ramp50.e0320.menu.held_strafe.angle_deg	55.00	deg
+candidate.crouch_slide.ramp50.e0320.naive_harm_rate	0.0000	
+candidate.crouch_slide.ramp50.e0320.naive_harmed	0	n
+candidate.crouch_slide.ramp50.e0320.naive_mean_delta_ups	0.00	ups
+candidate.crouch_slide.ramp50.e0320.naive_points	416	n
+candidate.crouch_slide.ramp50.e0320.peak_gain_at_ms	408	ms
+candidate.crouch_slide.ramp50.e0320.peak_gain_ups	209.74	ups
+candidate.crouch_slide.ramp50.e0320.qualifies	no	
+candidate.crouch_slide.ramp50.e0320.reachable	yes	
+candidate.crouch_slide.ramp50.e0320.tap_minus_hold_ups	8.53	ups
+candidate.crouch_slide.ramp50.e0320.timing_degenerate	no	
+candidate.crouch_slide.ramp50.e0320.w2_gap	not-meaningful	
+candidate.crouch_slide.ramp50.e0320.w3_chain_gain_ups	-40.19	ups
+candidate.crouch_slide.ramp50.e0320.w5_over_best_technique_ups	-115.64	ups
+candidate.crouch_slide.ramp50.e0320.w6_aim_centroid_deg	0.00	deg
+candidate.crouch_slide.ramp50.e0320.w6_timing_centroid_ms	248	ms
+candidate.crouch_slide.ramp50.e0320.w6_top_aims	2	n
+candidate.crouch_slide.ramp50.e0320.w6_top_timings	1	n
+candidate.crouch_slide.ramp50.e0320.worst_latency	0	n
+candidate.crouch_slide.ramp50.e0400.absolute_aim0_ups	320.00	ups
+candidate.crouch_slide.ramp50.e0400.anchor_commands	0	n
+candidate.crouch_slide.ramp50.e0400.anchor_speed_ups	400.00	ups
+candidate.crouch_slide.ramp50.e0400.avail_commands	32	n
+candidate.crouch_slide.ramp50.e0400.avail_ms	256	ms
+candidate.crouch_slide.ramp50.e0400.best_absolute_ups	432.73	ups
+candidate.crouch_slide.ramp50.e0400.best_aim_deg	45.00	deg
+candidate.crouch_slide.ramp50.e0400.best_delta_ups	49.16	ups
+candidate.crouch_slide.ramp50.e0400.best_timing_ms	128	ms
+candidate.crouch_slide.ramp50.e0400.control_best_absolute_ups	482.62	ups
+candidate.crouch_slide.ramp50.e0400.delta_aim0_ups	0.00	ups
+candidate.crouch_slide.ramp50.e0400.exec_window_ms	8	ms
+candidate.crouch_slide.ramp50.e0400.exec_window_span_ms	8	ms
+candidate.crouch_slide.ramp50.e0400.g3_unresponsive_candidate	0	n
+candidate.crouch_slide.ramp50.e0400.g3_unresponsive_control	0	n
+candidate.crouch_slide.ramp50.e0400.g5b_point_naive	0.0000	
+candidate.crouch_slide.ramp50.e0400.g7_aim_at_deg	44.14	deg
+candidate.crouch_slide.ramp50.e0400.g7_aim_refined_ups	59.52	ups
+candidate.crouch_slide.ramp50.e0400.g7_geometry_at_units	1.094	units
+candidate.crouch_slide.ramp50.e0400.g7_geometry_refined_ups	52.75	ups
+candidate.crouch_slide.ramp50.e0400.g7_impulse_measured_ups	13.57	ups
+candidate.crouch_slide.ramp50.e0400.g7_impulse_predicted_ups	17.31	ups
+candidate.crouch_slide.ramp50.e0400.hold_best_delta_ups	70.18	ups
+candidate.crouch_slide.ramp50.e0400.hold_naive_harmed	0	n
+candidate.crouch_slide.ramp50.e0400.material	yes	
+candidate.crouch_slide.ramp50.e0400.menu.bunnyhop.absolute_ups	536.43	ups
+candidate.crouch_slide.ramp50.e0400.menu.bunnyhop.angle_deg	55.00	deg
+candidate.crouch_slide.ramp50.e0400.menu.held_forward.absolute_ups	480.32	ups
+candidate.crouch_slide.ramp50.e0400.menu.held_forward.angle_deg	55.00	deg
+candidate.crouch_slide.ramp50.e0400.menu.held_strafe.absolute_ups	480.32	ups
+candidate.crouch_slide.ramp50.e0400.menu.held_strafe.angle_deg	55.00	deg
+candidate.crouch_slide.ramp50.e0400.naive_harm_rate	0.0000	
+candidate.crouch_slide.ramp50.e0400.naive_harmed	0	n
+candidate.crouch_slide.ramp50.e0400.naive_mean_delta_ups	0.00	ups
+candidate.crouch_slide.ramp50.e0400.naive_points	416	n
+candidate.crouch_slide.ramp50.e0400.peak_gain_at_ms	1232	ms
+candidate.crouch_slide.ramp50.e0400.peak_gain_ups	55.75	ups
+candidate.crouch_slide.ramp50.e0400.qualifies	yes	
+candidate.crouch_slide.ramp50.e0400.reachable	yes	
+candidate.crouch_slide.ramp50.e0400.tap_minus_hold_ups	-21.02	ups
+candidate.crouch_slide.ramp50.e0400.timing_degenerate	no	
+candidate.crouch_slide.ramp50.e0400.w2_gap	1.0000	
+candidate.crouch_slide.ramp50.e0400.w3_chain_gain_ups	-49.89	ups
+candidate.crouch_slide.ramp50.e0400.w3_entry_slope	-0.0920	
+candidate.crouch_slide.ramp50.e0400.w3_mechanic_alone_ups	320.00	ups
+candidate.crouch_slide.ramp50.e0400.w5_over_best_technique_ups	-103.70	ups
+candidate.crouch_slide.ramp50.e0400.w6_aim_centroid_deg	0.00	deg
+candidate.crouch_slide.ramp50.e0400.w6_timing_centroid_ms	128	ms
+candidate.crouch_slide.ramp50.e0400.w6_top_aims	2	n
+candidate.crouch_slide.ramp50.e0400.w6_top_timings	1	n
+candidate.crouch_slide.ramp50.e0400.worst_latency	0	n
+candidate.crouch_slide.ramp50.e0500.absolute_aim0_ups	224.35	ups
+candidate.crouch_slide.ramp50.e0500.anchor_commands	0	n
+candidate.crouch_slide.ramp50.e0500.anchor_speed_ups	500.00	ups
+candidate.crouch_slide.ramp50.e0500.avail_commands	29	n
+candidate.crouch_slide.ramp50.e0500.avail_ms	232	ms
+candidate.crouch_slide.ramp50.e0500.best_absolute_ups	432.73	ups
+candidate.crouch_slide.ramp50.e0500.best_aim_deg	45.00	deg
+candidate.crouch_slide.ramp50.e0500.best_delta_ups	98.28	ups
+candidate.crouch_slide.ramp50.e0500.best_timing_ms	112	ms
+candidate.crouch_slide.ramp50.e0500.control_best_absolute_ups	482.98	ups
+candidate.crouch_slide.ramp50.e0500.delta_aim0_ups	-95.65	ups
+candidate.crouch_slide.ramp50.e0500.exec_window_ms	16	ms
+candidate.crouch_slide.ramp50.e0500.exec_window_span_ms	16	ms
+candidate.crouch_slide.ramp50.e0500.g3_unresponsive_candidate	0	n
+candidate.crouch_slide.ramp50.e0500.g3_unresponsive_control	0	n
+candidate.crouch_slide.ramp50.e0500.g5b_point_naive	-0.9733	
+candidate.crouch_slide.ramp50.e0500.g7_aim_at_deg	318.52	deg
+candidate.crouch_slide.ramp50.e0500.g7_aim_refined_ups	130.07	ups
+candidate.crouch_slide.ramp50.e0500.g7_geometry_at_units	1.844	units
+candidate.crouch_slide.ramp50.e0500.g7_geometry_refined_ups	111.25	ups
+candidate.crouch_slide.ramp50.e0500.g7_impulse_measured_ups	10.60	ups
+candidate.crouch_slide.ramp50.e0500.g7_impulse_predicted_ups	17.31	ups
+candidate.crouch_slide.ramp50.e0500.hold_best_delta_ups	157.54	ups
+candidate.crouch_slide.ramp50.e0500.hold_naive_harmed	0	n
+candidate.crouch_slide.ramp50.e0500.material	yes	
+candidate.crouch_slide.ramp50.e0500.menu.bunnyhop.absolute_ups	546.02	ups
+candidate.crouch_slide.ramp50.e0500.menu.bunnyhop.angle_deg	55.00	deg
+candidate.crouch_slide.ramp50.e0500.menu.held_forward.absolute_ups	482.98	ups
+candidate.crouch_slide.ramp50.e0500.menu.held_forward.angle_deg	55.00	deg
+candidate.crouch_slide.ramp50.e0500.menu.held_strafe.absolute_ups	479.05	ups
+candidate.crouch_slide.ramp50.e0500.menu.held_strafe.angle_deg	55.00	deg
+candidate.crouch_slide.ramp50.e0500.naive_harm_rate	0.0072	
+candidate.crouch_slide.ramp50.e0500.naive_harmed	3	n
+candidate.crouch_slide.ramp50.e0500.naive_mean_delta_ups	-0.53	ups
+candidate.crouch_slide.ramp50.e0500.naive_points	416	n
+candidate.crouch_slide.ramp50.e0500.peak_gain_at_ms	1160	ms
+candidate.crouch_slide.ramp50.e0500.peak_gain_ups	134.51	ups
+candidate.crouch_slide.ramp50.e0500.qualifies	yes	
+candidate.crouch_slide.ramp50.e0500.reachable	yes	
+candidate.crouch_slide.ramp50.e0500.tap_minus_hold_ups	-59.26	ups
+candidate.crouch_slide.ramp50.e0500.timing_degenerate	no	
+candidate.crouch_slide.ramp50.e0500.w2_gap	1.0054	
+candidate.crouch_slide.ramp50.e0500.w3_chain_gain_ups	-50.25	ups
+candidate.crouch_slide.ramp50.e0500.w3_entry_slope	0.0000	
+candidate.crouch_slide.ramp50.e0500.w3_mechanic_alone_ups	320.00	ups
+candidate.crouch_slide.ramp50.e0500.w5_over_best_technique_ups	-113.29	ups
+candidate.crouch_slide.ramp50.e0500.w6_aim_centroid_deg	0.00	deg
+candidate.crouch_slide.ramp50.e0500.w6_timing_centroid_ms	108	ms
+candidate.crouch_slide.ramp50.e0500.w6_top_aims	2	n
+candidate.crouch_slide.ramp50.e0500.w6_top_timings	2	n
+candidate.crouch_slide.ramp50.e0500.worst_latency	0	n
+candidate.crouch_slide.ramp50.e0640.absolute_aim0_ups	123.00	ups
+candidate.crouch_slide.ramp50.e0640.anchor_commands	0	n
+candidate.crouch_slide.ramp50.e0640.anchor_speed_ups	640.00	ups
+candidate.crouch_slide.ramp50.e0640.avail_commands	15	n
+candidate.crouch_slide.ramp50.e0640.avail_ms	120	ms
+candidate.crouch_slide.ramp50.e0640.best_absolute_ups	467.70	ups
+candidate.crouch_slide.ramp50.e0640.best_aim_deg	310.00	deg
+candidate.crouch_slide.ramp50.e0640.best_delta_ups	192.12	ups
+candidate.crouch_slide.ramp50.e0640.best_timing_ms	96	ms
+candidate.crouch_slide.ramp50.e0640.control_best_absolute_ups	431.13	ups
+candidate.crouch_slide.ramp50.e0640.delta_aim0_ups	-197.00	ups
+candidate.crouch_slide.ramp50.e0640.exec_window_ms	104	ms
+candidate.crouch_slide.ramp50.e0640.exec_window_span_ms	104	ms
+candidate.crouch_slide.ramp50.e0640.g3_unresponsive_candidate	0	n
+candidate.crouch_slide.ramp50.e0640.g3_unresponsive_control	0	n
+candidate.crouch_slide.ramp50.e0640.g5b_point_naive	-1.0254	
+candidate.crouch_slide.ramp50.e0640.g7_aim_at_deg	52.73	deg
+candidate.crouch_slide.ramp50.e0640.g7_aim_refined_ups	191.39	ups
+candidate.crouch_slide.ramp50.e0640.g7_geometry_at_units	0.844	units
+candidate.crouch_slide.ramp50.e0640.g7_geometry_refined_ups	202.12	ups
+candidate.crouch_slide.ramp50.e0640.g7_impulse_measured_ups	9.36	ups
+candidate.crouch_slide.ramp50.e0640.g7_impulse_predicted_ups	18.72	ups
+candidate.crouch_slide.ramp50.e0640.hold_best_delta_ups	275.28	ups
+candidate.crouch_slide.ramp50.e0640.hold_naive_harmed	0	n
+candidate.crouch_slide.ramp50.e0640.material	yes	
+candidate.crouch_slide.ramp50.e0640.menu.bunnyhop.absolute_ups	538.01	ups
+candidate.crouch_slide.ramp50.e0640.menu.bunnyhop.angle_deg	55.00	deg
+candidate.crouch_slide.ramp50.e0640.menu.held_forward.absolute_ups	421.42	ups
+candidate.crouch_slide.ramp50.e0640.menu.held_forward.angle_deg	60.00	deg
+candidate.crouch_slide.ramp50.e0640.menu.held_strafe.absolute_ups	461.76	ups
+candidate.crouch_slide.ramp50.e0640.menu.held_strafe.angle_deg	50.00	deg
+candidate.crouch_slide.ramp50.e0640.naive_harm_rate	0.0216	
+candidate.crouch_slide.ramp50.e0640.naive_harmed	9	n
+candidate.crouch_slide.ramp50.e0640.naive_mean_delta_ups	-2.42	ups
+candidate.crouch_slide.ramp50.e0640.naive_points	416	n
+candidate.crouch_slide.ramp50.e0640.peak_gain_at_ms	976	ms
+candidate.crouch_slide.ramp50.e0640.peak_gain_ups	266.52	ups
+candidate.crouch_slide.ramp50.e0640.qualifies	yes	
+candidate.crouch_slide.ramp50.e0640.reachable	yes	
+candidate.crouch_slide.ramp50.e0640.tap_minus_hold_ups	-83.15	ups
+candidate.crouch_slide.ramp50.e0640.timing_degenerate	no	
+candidate.crouch_slide.ramp50.e0640.w2_gap	1.0126	
+candidate.crouch_slide.ramp50.e0640.w3_chain_gain_ups	36.56	ups
+candidate.crouch_slide.ramp50.e0640.w3_entry_slope	0.2497	
+candidate.crouch_slide.ramp50.e0640.w3_mechanic_alone_ups	320.00	ups
+candidate.crouch_slide.ramp50.e0640.w5_over_best_technique_ups	-70.32	ups
+candidate.crouch_slide.ramp50.e0640.w6_aim_centroid_deg	0.00	deg
+candidate.crouch_slide.ramp50.e0640.w6_timing_centroid_ms	48	ms
+candidate.crouch_slide.ramp50.e0640.w6_top_aims	4	n
+candidate.crouch_slide.ramp50.e0640.w6_top_timings	13	n
+candidate.crouch_slide.ramp50.e0640.worst_latency	0	n
+candidate.crouch_slide.ramp50.e0800.absolute_aim0_ups	1.16	ups
+candidate.crouch_slide.ramp50.e0800.anchor_commands	0	n
+candidate.crouch_slide.ramp50.e0800.anchor_speed_ups	800.00	ups
+candidate.crouch_slide.ramp50.e0800.avail_commands	12	n
+candidate.crouch_slide.ramp50.e0800.avail_ms	96	ms
+candidate.crouch_slide.ramp50.e0800.best_absolute_ups	475.19	ups
+candidate.crouch_slide.ramp50.e0800.best_aim_deg	305.00	deg
+candidate.crouch_slide.ramp50.e0800.best_delta_ups	231.26	ups
+candidate.crouch_slide.ramp50.e0800.best_timing_ms	0	ms
+candidate.crouch_slide.ramp50.e0800.control_best_absolute_ups	381.98	ups
+candidate.crouch_slide.ramp50.e0800.delta_aim0_ups	-202.88	ups
+candidate.crouch_slide.ramp50.e0800.exec_window_ms	80	ms
+candidate.crouch_slide.ramp50.e0800.exec_window_span_ms	80	ms
+candidate.crouch_slide.ramp50.e0800.g3_unresponsive_candidate	7	n
+candidate.crouch_slide.ramp50.e0800.g3_unresponsive_control	6	n
+candidate.crouch_slide.ramp50.e0800.g5b_point_naive	-0.8773	
+candidate.crouch_slide.ramp50.e0800.g7_aim_at_deg	39.30	deg
+candidate.crouch_slide.ramp50.e0800.g7_aim_refined_ups	222.94	ups
+candidate.crouch_slide.ramp50.e0800.g7_geometry_at_units	0.719	units
+candidate.crouch_slide.ramp50.e0800.g7_geometry_refined_ups	276.19	ups
+candidate.crouch_slide.ramp50.e0800.g7_impulse_measured_ups	32.00	ups
+candidate.crouch_slide.ramp50.e0800.g7_impulse_predicted_ups	32.00	ups
+candidate.crouch_slide.ramp50.e0800.hold_best_delta_ups	313.20	ups
+candidate.crouch_slide.ramp50.e0800.hold_naive_harmed	10	n
+candidate.crouch_slide.ramp50.e0800.material	yes	
+candidate.crouch_slide.ramp50.e0800.menu.bunnyhop.absolute_ups	558.63	ups
+candidate.crouch_slide.ramp50.e0800.menu.bunnyhop.angle_deg	60.00	deg
+candidate.crouch_slide.ramp50.e0800.menu.held_forward.absolute_ups	381.98	ups
+candidate.crouch_slide.ramp50.e0800.menu.held_forward.angle_deg	35.00	deg
+candidate.crouch_slide.ramp50.e0800.menu.held_strafe.absolute_ups	423.54	ups
+candidate.crouch_slide.ramp50.e0800.menu.held_strafe.angle_deg	45.00	deg
+candidate.crouch_slide.ramp50.e0800.naive_harm_rate	0.0240	
+candidate.crouch_slide.ramp50.e0800.naive_harmed	10	n
+candidate.crouch_slide.ramp50.e0800.naive_mean_delta_ups	-1.39	ups
+candidate.crouch_slide.ramp50.e0800.naive_points	416	n
+candidate.crouch_slide.ramp50.e0800.peak_gain_at_ms	1024	ms
+candidate.crouch_slide.ramp50.e0800.peak_gain_ups	270.68	ups
+candidate.crouch_slide.ramp50.e0800.qualifies	yes	
+candidate.crouch_slide.ramp50.e0800.reachable	yes	
+candidate.crouch_slide.ramp50.e0800.tap_minus_hold_ups	-81.94	ups
+candidate.crouch_slide.ramp50.e0800.timing_degenerate	no	
+candidate.crouch_slide.ramp50.e0800.w2_gap	1.0060	
+candidate.crouch_slide.ramp50.e0800.w3_chain_gain_ups	93.21	ups
+candidate.crouch_slide.ramp50.e0800.w3_entry_slope	0.0468	
+candidate.crouch_slide.ramp50.e0800.w3_mechanic_alone_ups	187.09	ups
+candidate.crouch_slide.ramp50.e0800.w5_over_best_technique_ups	-83.43	ups
+candidate.crouch_slide.ramp50.e0800.w6_aim_centroid_deg	0.00	deg
+candidate.crouch_slide.ramp50.e0800.w6_timing_centroid_ms	36	ms
+candidate.crouch_slide.ramp50.e0800.w6_top_aims	6	n
+candidate.crouch_slide.ramp50.e0800.w6_top_timings	10	n
+candidate.crouch_slide.ramp50.e0800.worst_latency	0	n
+candidate.crouch_slide.ramp50.e1000.absolute_aim0_ups	54.03	ups
+candidate.crouch_slide.ramp50.e1000.anchor_commands	0	n
+candidate.crouch_slide.ramp50.e1000.anchor_speed_ups	1000.00	ups
+candidate.crouch_slide.ramp50.e1000.avail_commands	10	n
+candidate.crouch_slide.ramp50.e1000.avail_ms	80	ms
+candidate.crouch_slide.ramp50.e1000.best_absolute_ups	435.80	ups
+candidate.crouch_slide.ramp50.e1000.best_aim_deg	270.00	deg
+candidate.crouch_slide.ramp50.e1000.best_delta_ups	303.03	ups
+candidate.crouch_slide.ramp50.e1000.best_timing_ms	8	ms
+candidate.crouch_slide.ramp50.e1000.control_best_absolute_ups	432.73	ups
+candidate.crouch_slide.ramp50.e1000.delta_aim0_ups	-5.64	ups
+candidate.crouch_slide.ramp50.e1000.exec_window_ms	16	ms
+candidate.crouch_slide.ramp50.e1000.exec_window_span_ms	16	ms
+candidate.crouch_slide.ramp50.e1000.g3_unresponsive_candidate	0	n
+candidate.crouch_slide.ramp50.e1000.g3_unresponsive_control	0	n
+candidate.crouch_slide.ramp50.e1000.g5b_point_naive	-0.0186	
+candidate.crouch_slide.ramp50.e1000.g7_aim_at_deg	311.80	deg
+candidate.crouch_slide.ramp50.e1000.g7_aim_refined_ups	252.11	ups
+candidate.crouch_slide.ramp50.e1000.g7_geometry_at_units	-10.156	units
+candidate.crouch_slide.ramp50.e1000.g7_geometry_refined_ups	131.18	ups
+candidate.crouch_slide.ramp50.e1000.g7_impulse_measured_ups	38.11	ups
+candidate.crouch_slide.ramp50.e1000.g7_impulse_predicted_ups	38.11	ups
+candidate.crouch_slide.ramp50.e1000.hold_best_delta_ups	340.15	ups
+candidate.crouch_slide.ramp50.e1000.hold_naive_harmed	17	n
+candidate.crouch_slide.ramp50.e1000.material	yes	
+candidate.crouch_slide.ramp50.e1000.menu.bunnyhop.absolute_ups	634.61	ups
+candidate.crouch_slide.ramp50.e1000.menu.bunnyhop.angle_deg	60.00	deg
+candidate.crouch_slide.ramp50.e1000.menu.held_forward.absolute_ups	432.72	ups
+candidate.crouch_slide.ramp50.e1000.menu.held_forward.angle_deg	45.00	deg
+candidate.crouch_slide.ramp50.e1000.menu.held_strafe.absolute_ups	351.55	ups
+candidate.crouch_slide.ramp50.e1000.menu.held_strafe.angle_deg	85.00	deg
+candidate.crouch_slide.ramp50.e1000.naive_harm_rate	0.0409	
+candidate.crouch_slide.ramp50.e1000.naive_harmed	17	n
+candidate.crouch_slide.ramp50.e1000.naive_mean_delta_ups	-0.37	ups
+candidate.crouch_slide.ramp50.e1000.naive_points	416	n
+candidate.crouch_slide.ramp50.e1000.peak_gain_at_ms	1248	ms
+candidate.crouch_slide.ramp50.e1000.peak_gain_ups	303.03	ups
+candidate.crouch_slide.ramp50.e1000.qualifies	yes	
+candidate.crouch_slide.ramp50.e1000.reachable	yes	
+candidate.crouch_slide.ramp50.e1000.tap_minus_hold_ups	-37.12	ups
+candidate.crouch_slide.ramp50.e1000.timing_degenerate	no	
+candidate.crouch_slide.ramp50.e1000.w2_gap	1.0012	
+candidate.crouch_slide.ramp50.e1000.w3_chain_gain_ups	3.08	ups
+candidate.crouch_slide.ramp50.e1000.w3_entry_slope	-0.1969	
+candidate.crouch_slide.ramp50.e1000.w3_mechanic_alone_ups	54.03	ups
+candidate.crouch_slide.ramp50.e1000.w5_over_best_technique_ups	-198.80	ups
+candidate.crouch_slide.ramp50.e1000.w6_aim_centroid_deg	0.00	deg
+candidate.crouch_slide.ramp50.e1000.w6_timing_centroid_ms	4	ms
+candidate.crouch_slide.ramp50.e1000.w6_top_aims	2	n
+candidate.crouch_slide.ramp50.e1000.w6_top_timings	2	n
+candidate.crouch_slide.ramp50.e1000.worst_latency	0	n
+candidate.crouch_slide.ramp50.g5a.arming_events	0	n
+candidate.crouch_slide.ramp50.g5a.available_commands	0	n
+candidate.crouch_slide.ramp50.g5a.peak_speed_ups	320.00	ups
+candidate.crouch_slide.ramp50.g5b_median	-0.8773	
+candidate.crouch_slide.ramp50.w2_gap_median	1.0054	
+candidate.crouch_slide.ramp50.w3_chain_gain_best_ups	93.21	ups
+candidate.crouch_slide.ramp50.w3_entry_slope_max	0.2497	
+candidate.crouch_slide.ramp50.w3_entry_slope_min	-0.1969	
+candidate.crouch_slide.ramp50.w4_best_delta_ups	303.03	ups
+candidate.crouch_slide.step18.e0320.anchor_commands	0	n
+candidate.crouch_slide.step18.e0320.anchor_speed_ups	320.00	ups
+candidate.crouch_slide.step18.e0320.avail_commands	25	n
+candidate.crouch_slide.step18.e0320.avail_ms	200	ms
+candidate.crouch_slide.step18.e0320.best_absolute_ups	452.56	ups
+candidate.crouch_slide.step18.e0320.best_aim_deg	315.00	deg
+candidate.crouch_slide.step18.e0320.best_delta_ups	19.83	ups
+candidate.crouch_slide.step18.e0320.best_timing_ms	88	ms
+candidate.crouch_slide.step18.e0320.control_best_absolute_ups	480.28	ups
+candidate.crouch_slide.step18.e0320.delta_aim0_ups	never-fired-at-aim-0	
+candidate.crouch_slide.step18.e0320.exec_window_ms	32	ms
+candidate.crouch_slide.step18.e0320.exec_window_span_ms	32	ms
+candidate.crouch_slide.step18.e0320.g3_unresponsive_candidate	0	n
+candidate.crouch_slide.step18.e0320.g3_unresponsive_control	0	n
+candidate.crouch_slide.step18.e0320.g5b_point_naive	not-meaningful	
+candidate.crouch_slide.step18.e0320.g7_aim_at_deg	314.92	deg
+candidate.crouch_slide.step18.e0320.g7_aim_refined_ups	10.44	ups
+candidate.crouch_slide.step18.e0320.g7_impulse_measured_ups	17.14	ups
+candidate.crouch_slide.step18.e0320.g7_impulse_predicted_ups	17.14	ups
+candidate.crouch_slide.step18.e0320.hold_best_delta_ups	38.18	ups
+candidate.crouch_slide.step18.e0320.hold_naive_harmed	0	n
+candidate.crouch_slide.step18.e0320.material	yes	
+candidate.crouch_slide.step18.e0320.menu.bunnyhop.absolute_ups	555.73	ups
+candidate.crouch_slide.step18.e0320.menu.bunnyhop.angle_deg	55.00	deg
+candidate.crouch_slide.step18.e0320.menu.held_forward.absolute_ups	480.29	ups
+candidate.crouch_slide.step18.e0320.menu.held_forward.angle_deg	55.00	deg
+candidate.crouch_slide.step18.e0320.menu.held_strafe.absolute_ups	480.29	ups
+candidate.crouch_slide.step18.e0320.menu.held_strafe.angle_deg	55.00	deg
+candidate.crouch_slide.step18.e0320.naive_harm_rate	0.0000	
+candidate.crouch_slide.step18.e0320.naive_harmed	0	n
+candidate.crouch_slide.step18.e0320.naive_mean_delta_ups	0.00	ups
+candidate.crouch_slide.step18.e0320.naive_points	416	n
+candidate.crouch_slide.step18.e0320.peak_gain_at_ms	96	ms
+candidate.crouch_slide.step18.e0320.peak_gain_ups	21.00	ups
+candidate.crouch_slide.step18.e0320.qualifies	yes	
+candidate.crouch_slide.step18.e0320.reachable	yes	
+candidate.crouch_slide.step18.e0320.tap_minus_hold_ups	-18.34	ups
+candidate.crouch_slide.step18.e0320.timing_degenerate	no	
+candidate.crouch_slide.step18.e0320.w2_gap	1.0000	
+candidate.crouch_slide.step18.e0320.w3_chain_gain_ups	-27.72	ups
+candidate.crouch_slide.step18.e0320.w5_over_best_technique_ups	-103.17	ups
+candidate.crouch_slide.step18.e0320.w6_aim_centroid_deg	0.00	deg
+candidate.crouch_slide.step18.e0320.w6_timing_centroid_ms	76	ms
+candidate.crouch_slide.step18.e0320.w6_top_aims	2	n
+candidate.crouch_slide.step18.e0320.w6_top_timings	4	n
+candidate.crouch_slide.step18.e0320.worst_latency	0	n
+candidate.crouch_slide.step18.e0400.absolute_aim0_ups	320.00	ups
+candidate.crouch_slide.step18.e0400.anchor_commands	0	n
+candidate.crouch_slide.step18.e0400.anchor_speed_ups	400.00	ups
+candidate.crouch_slide.step18.e0400.avail_commands	32	n
+candidate.crouch_slide.step18.e0400.avail_ms	256	ms
+candidate.crouch_slide.step18.e0400.best_absolute_ups	497.81	ups
+candidate.crouch_slide.step18.e0400.best_aim_deg	310.00	deg
+candidate.crouch_slide.step18.e0400.best_delta_ups	30.12	ups
+candidate.crouch_slide.step18.e0400.best_timing_ms	72	ms
+candidate.crouch_slide.step18.e0400.control_best_absolute_ups	504.15	ups
+candidate.crouch_slide.step18.e0400.delta_aim0_ups	0.00	ups
+candidate.crouch_slide.step18.e0400.exec_window_ms	16	ms
+candidate.crouch_slide.step18.e0400.exec_window_span_ms	16	ms
+candidate.crouch_slide.step18.e0400.g3_unresponsive_candidate	0	n
+candidate.crouch_slide.step18.e0400.g3_unresponsive_control	0	n
+candidate.crouch_slide.step18.e0400.g5b_point_naive	0.0000	
+candidate.crouch_slide.step18.e0400.g7_aim_at_deg	311.95	deg
+candidate.crouch_slide.step18.e0400.g7_aim_refined_ups	18.85	ups
+candidate.crouch_slide.step18.e0400.g7_impulse_measured_ups	17.93	ups
+candidate.crouch_slide.step18.e0400.g7_impulse_predicted_ups	17.93	ups
+candidate.crouch_slide.step18.e0400.hold_best_delta_ups	34.85	ups
+candidate.crouch_slide.step18.e0400.hold_naive_harmed	2	n
+candidate.crouch_slide.step18.e0400.material	yes	
+candidate.crouch_slide.step18.e0400.menu.bunnyhop.absolute_ups	600.17	ups
+candidate.crouch_slide.step18.e0400.menu.bunnyhop.angle_deg	60.00	deg
+candidate.crouch_slide.step18.e0400.menu.held_forward.absolute_ups	480.32	ups
+candidate.crouch_slide.step18.e0400.menu.held_forward.angle_deg	55.00	deg
+candidate.crouch_slide.step18.e0400.menu.held_strafe.absolute_ups	480.32	ups
+candidate.crouch_slide.step18.e0400.menu.held_strafe.angle_deg	55.00	deg
+candidate.crouch_slide.step18.e0400.naive_harm_rate	0.0000	
+candidate.crouch_slide.step18.e0400.naive_harmed	0	n
+candidate.crouch_slide.step18.e0400.naive_mean_delta_ups	0.00	ups
+candidate.crouch_slide.step18.e0400.naive_points	416	n
+candidate.crouch_slide.step18.e0400.peak_gain_at_ms	96	ms
+candidate.crouch_slide.step18.e0400.peak_gain_ups	41.84	ups
+candidate.crouch_slide.step18.e0400.qualifies	yes	
+candidate.crouch_slide.step18.e0400.reachable	yes	
+candidate.crouch_slide.step18.e0400.tap_minus_hold_ups	-4.74	ups
+candidate.crouch_slide.step18.e0400.timing_degenerate	no	
+candidate.crouch_slide.step18.e0400.w2_gap	1.0000	
+candidate.crouch_slide.step18.e0400.w3_chain_gain_ups	-6.34	ups
+candidate.crouch_slide.step18.e0400.w3_entry_slope	0.5657	
+candidate.crouch_slide.step18.e0400.w3_mechanic_alone_ups	320.00	ups
+candidate.crouch_slide.step18.e0400.w5_over_best_technique_ups	-102.36	ups
+candidate.crouch_slide.step18.e0400.w6_aim_centroid_deg	0.00	deg
+candidate.crouch_slide.step18.e0400.w6_timing_centroid_ms	68	ms
+candidate.crouch_slide.step18.e0400.w6_top_aims	2	n
+candidate.crouch_slide.step18.e0400.w6_top_timings	2	n
+candidate.crouch_slide.step18.e0400.worst_latency	0	n
+candidate.crouch_slide.step18.e0500.absolute_aim0_ups	320.00	ups
+candidate.crouch_slide.step18.e0500.anchor_commands	0	n
+candidate.crouch_slide.step18.e0500.anchor_speed_ups	500.00	ups
+candidate.crouch_slide.step18.e0500.avail_commands	32	n
+candidate.crouch_slide.step18.e0500.avail_ms	256	ms
+candidate.crouch_slide.step18.e0500.best_absolute_ups	512.69	ups
+candidate.crouch_slide.step18.e0500.best_aim_deg	55.00	deg
+candidate.crouch_slide.step18.e0500.best_delta_ups	32.08	ups
+candidate.crouch_slide.step18.e0500.best_timing_ms	72	ms
+candidate.crouch_slide.step18.e0500.control_best_absolute_ups	480.63	ups
+candidate.crouch_slide.step18.e0500.delta_aim0_ups	0.00	ups
+candidate.crouch_slide.step18.e0500.exec_window_ms	8	ms
+candidate.crouch_slide.step18.e0500.exec_window_span_ms	8	ms
+candidate.crouch_slide.step18.e0500.g3_unresponsive_candidate	0	n
+candidate.crouch_slide.step18.e0500.g3_unresponsive_control	0	n
+candidate.crouch_slide.step18.e0500.g5b_point_naive	0.0000	
+candidate.crouch_slide.step18.e0500.g7_aim_at_deg	54.61	deg
+candidate.crouch_slide.step18.e0500.g7_aim_refined_ups	34.03	ups
+candidate.crouch_slide.step18.e0500.g7_geometry_at_units	-11.969	units
+candidate.crouch_slide.step18.e0500.g7_geometry_refined_ups	26.26	ups
+candidate.crouch_slide.step18.e0500.g7_impulse_measured_ups	19.71	ups
+candidate.crouch_slide.step18.e0500.g7_impulse_predicted_ups	19.71	ups
+candidate.crouch_slide.step18.e0500.hold_best_delta_ups	48.50	ups
+candidate.crouch_slide.step18.e0500.hold_naive_harmed	0	n
+candidate.crouch_slide.step18.e0500.material	yes	
+candidate.crouch_slide.step18.e0500.menu.bunnyhop.absolute_ups	661.56	ups
+candidate.crouch_slide.step18.e0500.menu.bunnyhop.angle_deg	65.00	deg
+candidate.crouch_slide.step18.e0500.menu.held_forward.absolute_ups	480.62	ups
+candidate.crouch_slide.step18.e0500.menu.held_forward.angle_deg	55.00	deg
+candidate.crouch_slide.step18.e0500.menu.held_strafe.absolute_ups	480.37	ups
+candidate.crouch_slide.step18.e0500.menu.held_strafe.angle_deg	55.00	deg
+candidate.crouch_slide.step18.e0500.naive_harm_rate	0.0000	
+candidate.crouch_slide.step18.e0500.naive_harmed	0	n
+candidate.crouch_slide.step18.e0500.naive_mean_delta_ups	-0.09	ups
+candidate.crouch_slide.step18.e0500.naive_points	416	n
+candidate.crouch_slide.step18.e0500.peak_gain_at_ms	152	ms
+candidate.crouch_slide.step18.e0500.peak_gain_ups	74.49	ups
+candidate.crouch_slide.step18.e0500.qualifies	yes	
+candidate.crouch_slide.step18.e0500.reachable	yes	
+candidate.crouch_slide.step18.e0500.tap_minus_hold_ups	-16.42	ups
+candidate.crouch_slide.step18.e0500.timing_degenerate	no	
+candidate.crouch_slide.step18.e0500.w2_gap	1.0027	
+candidate.crouch_slide.step18.e0500.w3_chain_gain_ups	32.05	ups
+candidate.crouch_slide.step18.e0500.w3_entry_slope	0.1487	
+candidate.crouch_slide.step18.e0500.w3_mechanic_alone_ups	320.00	ups
+candidate.crouch_slide.step18.e0500.w5_over_best_technique_ups	-148.87	ups
+candidate.crouch_slide.step18.e0500.w6_aim_centroid_deg	0.00	deg
+candidate.crouch_slide.step18.e0500.w6_timing_centroid_ms	72	ms
+candidate.crouch_slide.step18.e0500.w6_top_aims	2	n
+candidate.crouch_slide.step18.e0500.w6_top_timings	1	n
+candidate.crouch_slide.step18.e0500.worst_latency	0	n
+candidate.crouch_slide.step18.e0640.absolute_aim0_ups	320.00	ups
+candidate.crouch_slide.step18.e0640.anchor_commands	0	n
+candidate.crouch_slide.step18.e0640.anchor_speed_ups	640.00	ups
+candidate.crouch_slide.step18.e0640.avail_commands	32	n
+candidate.crouch_slide.step18.e0640.avail_ms	256	ms
+candidate.crouch_slide.step18.e0640.best_absolute_ups	517.12	ups
+candidate.crouch_slide.step18.e0640.best_aim_deg	55.00	deg
+candidate.crouch_slide.step18.e0640.best_delta_ups	36.25	ups
+candidate.crouch_slide.step18.e0640.best_timing_ms	120	ms
+candidate.crouch_slide.step18.e0640.control_best_absolute_ups	480.89	ups
+candidate.crouch_slide.step18.e0640.delta_aim0_ups	0.00	ups
+candidate.crouch_slide.step18.e0640.exec_window_ms	16	ms
+candidate.crouch_slide.step18.e0640.exec_window_span_ms	48	ms
+candidate.crouch_slide.step18.e0640.g3_unresponsive_candidate	0	n
+candidate.crouch_slide.step18.e0640.g3_unresponsive_control	0	n
+candidate.crouch_slide.step18.e0640.g5b_point_naive	0.0000	
+candidate.crouch_slide.step18.e0640.g7_aim_at_deg	305.08	deg
+candidate.crouch_slide.step18.e0640.g7_aim_refined_ups	37.28	ups
+candidate.crouch_slide.step18.e0640.g7_impulse_measured_ups	20.18	ups
+candidate.crouch_slide.step18.e0640.g7_impulse_predicted_ups	20.18	ups
+candidate.crouch_slide.step18.e0640.hold_best_delta_ups	83.46	ups
+candidate.crouch_slide.step18.e0640.hold_naive_harmed	0	n
+candidate.crouch_slide.step18.e0640.material	yes	
+candidate.crouch_slide.step18.e0640.menu.bunnyhop.absolute_ups	759.31	ups
+candidate.crouch_slide.step18.e0640.menu.bunnyhop.angle_deg	70.00	deg
+candidate.crouch_slide.step18.e0640.menu.held_forward.absolute_ups	480.87	ups
+candidate.crouch_slide.step18.e0640.menu.held_forward.angle_deg	55.00	deg
+candidate.crouch_slide.step18.e0640.menu.held_strafe.absolute_ups	480.41	ups
+candidate.crouch_slide.step18.e0640.menu.held_strafe.angle_deg	55.00	deg
+candidate.crouch_slide.step18.e0640.naive_harm_rate	0.0000	
+candidate.crouch_slide.step18.e0640.naive_harmed	0	n
+candidate.crouch_slide.step18.e0640.naive_mean_delta_ups	-0.17	ups
+candidate.crouch_slide.step18.e0640.naive_points	416	n
+candidate.crouch_slide.step18.e0640.peak_gain_at_ms	280	ms
+candidate.crouch_slide.step18.e0640.peak_gain_ups	68.73	ups
+candidate.crouch_slide.step18.e0640.qualifies	yes	
+candidate.crouch_slide.step18.e0640.reachable	yes	
+candidate.crouch_slide.step18.e0640.tap_minus_hold_ups	-47.21	ups
+candidate.crouch_slide.step18.e0640.timing_degenerate	no	
+candidate.crouch_slide.step18.e0640.w2_gap	1.0047	
+candidate.crouch_slide.step18.e0640.w3_chain_gain_ups	36.23	ups
+candidate.crouch_slide.step18.e0640.w3_entry_slope	0.0317	
+candidate.crouch_slide.step18.e0640.w3_mechanic_alone_ups	320.00	ups
+candidate.crouch_slide.step18.e0640.w5_over_best_technique_ups	-242.18	ups
+candidate.crouch_slide.step18.e0640.w6_aim_centroid_deg	0.00	deg
+candidate.crouch_slide.step18.e0640.w6_timing_centroid_ms	100	ms
+candidate.crouch_slide.step18.e0640.w6_top_aims	4	n
+candidate.crouch_slide.step18.e0640.w6_top_timings	2	n
+candidate.crouch_slide.step18.e0640.worst_latency	0	n
+candidate.crouch_slide.step18.e0800.absolute_aim0_ups	320.00	ups
+candidate.crouch_slide.step18.e0800.anchor_commands	0	n
+candidate.crouch_slide.step18.e0800.anchor_speed_ups	800.00	ups
+candidate.crouch_slide.step18.e0800.avail_commands	32	n
+candidate.crouch_slide.step18.e0800.avail_ms	256	ms
+candidate.crouch_slide.step18.e0800.best_absolute_ups	483.18	ups
+candidate.crouch_slide.step18.e0800.best_aim_deg	300.00	deg
+candidate.crouch_slide.step18.e0800.best_delta_ups	55.31	ups
+candidate.crouch_slide.step18.e0800.best_timing_ms	120	ms
+candidate.crouch_slide.step18.e0800.control_best_absolute_ups	481.33	ups
+candidate.crouch_slide.step18.e0800.delta_aim0_ups	0.00	ups
+candidate.crouch_slide.step18.e0800.exec_window_ms	8	ms
+candidate.crouch_slide.step18.e0800.exec_window_span_ms	8	ms
+candidate.crouch_slide.step18.e0800.g3_unresponsive_candidate	0	n
+candidate.crouch_slide.step18.e0800.g3_unresponsive_control	0	n
+candidate.crouch_slide.step18.e0800.g5b_point_naive	0.0000	
+candidate.crouch_slide.step18.e0800.g7_aim_at_deg	300.08	deg
+candidate.crouch_slide.step18.e0800.g7_aim_refined_ups	47.55	ups
+candidate.crouch_slide.step18.e0800.g7_geometry_at_units	8.781	units
+candidate.crouch_slide.step18.e0800.g7_geometry_refined_ups	28.93	ups
+candidate.crouch_slide.step18.e0800.g7_impulse_measured_ups	21.52	ups
+candidate.crouch_slide.step18.e0800.g7_impulse_predicted_ups	21.52	ups
+candidate.crouch_slide.step18.e0800.hold_best_delta_ups	91.02	ups
+candidate.crouch_slide.step18.e0800.hold_naive_harmed	0	n
+candidate.crouch_slide.step18.e0800.material	yes	
+candidate.crouch_slide.step18.e0800.menu.bunnyhop.absolute_ups	910.06	ups
+candidate.crouch_slide.step18.e0800.menu.bunnyhop.angle_deg	70.00	deg
+candidate.crouch_slide.step18.e0800.menu.held_forward.absolute_ups	481.32	ups
+candidate.crouch_slide.step18.e0800.menu.held_forward.angle_deg	55.00	deg
+candidate.crouch_slide.step18.e0800.menu.held_strafe.absolute_ups	480.42	ups
+candidate.crouch_slide.step18.e0800.menu.held_strafe.angle_deg	55.00	deg
+candidate.crouch_slide.step18.e0800.naive_harm_rate	0.0000	
+candidate.crouch_slide.step18.e0800.naive_harmed	0	n
+candidate.crouch_slide.step18.e0800.naive_mean_delta_ups	-0.41	ups
+candidate.crouch_slide.step18.e0800.naive_points	416	n
+candidate.crouch_slide.step18.e0800.peak_gain_at_ms	416	ms
+candidate.crouch_slide.step18.e0800.peak_gain_ups	185.77	ups
+candidate.crouch_slide.step18.e0800.qualifies	yes	
+candidate.crouch_slide.step18.e0800.reachable	yes	
+candidate.crouch_slide.step18.e0800.tap_minus_hold_ups	-35.70	ups
+candidate.crouch_slide.step18.e0800.timing_degenerate	no	
+candidate.crouch_slide.step18.e0800.w2_gap	1.0074	
+candidate.crouch_slide.step18.e0800.w3_chain_gain_ups	1.85	ups
+candidate.crouch_slide.step18.e0800.w3_entry_slope	-0.2122	
+candidate.crouch_slide.step18.e0800.w3_mechanic_alone_ups	320.00	ups
+candidate.crouch_slide.step18.e0800.w5_over_best_technique_ups	-426.88	ups
+candidate.crouch_slide.step18.e0800.w6_aim_centroid_deg	0.00	deg
+candidate.crouch_slide.step18.e0800.w6_timing_centroid_ms	120	ms
+candidate.crouch_slide.step18.e0800.w6_top_aims	2	n
+candidate.crouch_slide.step18.e0800.w6_top_timings	1	n
+candidate.crouch_slide.step18.e0800.worst_latency	0	n
+candidate.crouch_slide.step18.e1000.absolute_aim0_ups	320.00	ups
+candidate.crouch_slide.step18.e1000.anchor_commands	0	n
+candidate.crouch_slide.step18.e1000.anchor_speed_ups	1000.00	ups
+candidate.crouch_slide.step18.e1000.avail_commands	32	n
+candidate.crouch_slide.step18.e1000.avail_ms	256	ms
+candidate.crouch_slide.step18.e1000.best_absolute_ups	490.54	ups
+candidate.crouch_slide.step18.e1000.best_aim_deg	60.00	deg
+candidate.crouch_slide.step18.e1000.best_delta_ups	61.87	ups
+candidate.crouch_slide.step18.e1000.best_timing_ms	168	ms
+candidate.crouch_slide.step18.e1000.control_best_absolute_ups	482.29	ups
+candidate.crouch_slide.step18.e1000.delta_aim0_ups	0.00	ups
+candidate.crouch_slide.step18.e1000.exec_window_ms	16	ms
+candidate.crouch_slide.step18.e1000.exec_window_span_ms	64	ms
+candidate.crouch_slide.step18.e1000.g3_unresponsive_candidate	0	n
+candidate.crouch_slide.step18.e1000.g3_unresponsive_control	0	n
+candidate.crouch_slide.step18.e1000.g5b_point_naive	0.0000	
+candidate.crouch_slide.step18.e1000.g7_aim_at_deg	59.77	deg
+candidate.crouch_slide.step18.e1000.g7_aim_refined_ups	47.63	ups
+candidate.crouch_slide.step18.e1000.g7_geometry_at_units	6.156	units
+candidate.crouch_slide.step18.e1000.g7_geometry_refined_ups	9.85	ups
+candidate.crouch_slide.step18.e1000.g7_impulse_measured_ups	21.20	ups
+candidate.crouch_slide.step18.e1000.g7_impulse_predicted_ups	21.20	ups
+candidate.crouch_slide.step18.e1000.hold_best_delta_ups	107.12	ups
+candidate.crouch_slide.step18.e1000.hold_naive_harmed	0	n
+candidate.crouch_slide.step18.e1000.material	yes	
+candidate.crouch_slide.step18.e1000.menu.bunnyhop.absolute_ups	1064.49	ups
+candidate.crouch_slide.step18.e1000.menu.bunnyhop.angle_deg	75.00	deg
+candidate.crouch_slide.step18.e1000.menu.held_forward.absolute_ups	482.22	ups
+candidate.crouch_slide.step18.e1000.menu.held_forward.angle_deg	55.00	deg
+candidate.crouch_slide.step18.e1000.menu.held_strafe.absolute_ups	480.44	ups
+candidate.crouch_slide.step18.e1000.menu.held_strafe.angle_deg	55.00	deg
+candidate.crouch_slide.step18.e1000.naive_harm_rate	0.0000	
+candidate.crouch_slide.step18.e1000.naive_harmed	0	n
+candidate.crouch_slide.step18.e1000.naive_mean_delta_ups	-0.51	ups
+candidate.crouch_slide.step18.e1000.naive_points	416	n
+candidate.crouch_slide.step18.e1000.peak_gain_at_ms	536	ms
+candidate.crouch_slide.step18.e1000.peak_gain_ups	191.16	ups
+candidate.crouch_slide.step18.e1000.qualifies	yes	
+candidate.crouch_slide.step18.e1000.reachable	yes	
+candidate.crouch_slide.step18.e1000.tap_minus_hold_ups	-45.25	ups
+candidate.crouch_slide.step18.e1000.timing_degenerate	no	
+candidate.crouch_slide.step18.e1000.w2_gap	1.0082	
+candidate.crouch_slide.step18.e1000.w3_chain_gain_ups	8.25	ups
+candidate.crouch_slide.step18.e1000.w3_entry_slope	0.0368	
+candidate.crouch_slide.step18.e1000.w3_mechanic_alone_ups	320.00	ups
+candidate.crouch_slide.step18.e1000.w5_over_best_technique_ups	-573.95	ups
+candidate.crouch_slide.step18.e1000.w6_aim_centroid_deg	0.00	deg
+candidate.crouch_slide.step18.e1000.w6_timing_centroid_ms	140	ms
+candidate.crouch_slide.step18.e1000.w6_top_aims	4	n
+candidate.crouch_slide.step18.e1000.w6_top_timings	2	n
+candidate.crouch_slide.step18.e1000.worst_latency	0	n
+candidate.crouch_slide.step18.g5a.arming_events	0	n
+candidate.crouch_slide.step18.g5a.available_commands	0	n
+candidate.crouch_slide.step18.g5a.peak_speed_ups	320.00	ups
+candidate.crouch_slide.step18.g5b_median	0.0000	
+candidate.crouch_slide.step18.w2_gap_median	1.0037	
+candidate.crouch_slide.step18.w3_chain_gain_best_ups	36.23	ups
+candidate.crouch_slide.step18.w3_entry_slope_max	0.5657	
+candidate.crouch_slide.step18.w3_entry_slope_min	-0.2122	
+candidate.crouch_slide.step18.w4_best_delta_ups	61.87	ups
+candidate.crouch_slide.tap.cells_won	7	n
+candidate.crouch_slide.tap.largest_advantage_ups	229.10	ups
+candidate.crouch_slide.tap_hold.cells_tied	18	n
+candidate.crouch_slide.w1.harm_rate_pooled	0.0120	
+candidate.crouch_slide.w1.harmed_total	209	n
+candidate.crouch_slide.w1.points_total	17472	n
+candidate.crouch_slide.w2_gap_median	1.0037	
+candidate.crouch_slide.w2_qualifying_contexts	7	n
+candidate.crouch_slide.w4_distinct_kinds	4	n
+candidate.crouch_slide.w4_material_contexts	7	n
+candidate.crouch_slide.w5.air_forward.cells_not_beaten	32	n
+candidate.crouch_slide.w5.air_forward.domain_cells	41	n
+candidate.crouch_slide.w5.air_strafe.cells_not_beaten	32	n
+candidate.crouch_slide.w5.air_strafe.domain_cells	41	n
+candidate.crouch_slide.w5.bunnyhop.cells_not_beaten	12	n
+candidate.crouch_slide.w5.bunnyhop.domain_cells	12	n
+candidate.crouch_slide.w5.drop_launch.cells_not_beaten	2	n
+candidate.crouch_slide.w5.drop_launch.domain_cells	6	n
+candidate.crouch_slide.w5.ground_turn.cells_not_beaten	12	n
+candidate.crouch_slide.w5.ground_turn.domain_cells	12	n
+candidate.crouch_slide.w5.ramp_traversal.cells_not_beaten	10	n
+candidate.crouch_slide.w5.ramp_traversal.domain_cells	12	n
+candidate.crouch_slide.w5.step_up.cells_not_beaten	3	n
+candidate.crouch_slide.w5.step_up.domain_cells	6	n
+candidate.crouch_slide.w6.e0320.aim_centroid_apart_pairs	5	n
+candidate.crouch_slide.w6.e0320.aim_disjoint_pairs	9	n
+candidate.crouch_slide.w6.e0320.context_pairs	15	n
+candidate.crouch_slide.w6.e0320.timing_centroid_apart_pairs	9	n
+candidate.crouch_slide.w6.e0320.timing_disjoint_pairs	9	n
+candidate.crouch_slide.w6.e0400.aim_centroid_apart_pairs	0	n
+candidate.crouch_slide.w6.e0400.aim_disjoint_pairs	18	n
+candidate.crouch_slide.w6.e0400.context_pairs	21	n
+candidate.crouch_slide.w6.e0400.timing_centroid_apart_pairs	17	n
+candidate.crouch_slide.w6.e0400.timing_disjoint_pairs	13	n
+candidate.crouch_slide.w6.e0500.aim_centroid_apart_pairs	6	n
+candidate.crouch_slide.w6.e0500.aim_disjoint_pairs	20	n
+candidate.crouch_slide.w6.e0500.context_pairs	21	n
+candidate.crouch_slide.w6.e0500.timing_centroid_apart_pairs	17	n
+candidate.crouch_slide.w6.e0500.timing_disjoint_pairs	11	n
+candidate.crouch_slide.w6.e0640.aim_centroid_apart_pairs	6	n
+candidate.crouch_slide.w6.e0640.aim_disjoint_pairs	18	n
+candidate.crouch_slide.w6.e0640.context_pairs	21	n
+candidate.crouch_slide.w6.e0640.timing_centroid_apart_pairs	16	n
+candidate.crouch_slide.w6.e0640.timing_disjoint_pairs	11	n
+candidate.crouch_slide.w6.e0800.aim_centroid_apart_pairs	6	n
+candidate.crouch_slide.w6.e0800.aim_disjoint_pairs	18	n
+candidate.crouch_slide.w6.e0800.context_pairs	21	n
+candidate.crouch_slide.w6.e0800.timing_centroid_apart_pairs	18	n
+candidate.crouch_slide.w6.e0800.timing_disjoint_pairs	13	n
+candidate.crouch_slide.w6.e1000.aim_centroid_apart_pairs	6	n
+candidate.crouch_slide.w6.e1000.aim_disjoint_pairs	18	n
+candidate.crouch_slide.w6.e1000.context_pairs	21	n
+candidate.crouch_slide.w6.e1000.timing_centroid_apart_pairs	17	n
+candidate.crouch_slide.w6.e1000.timing_disjoint_pairs	15	n
+candidate.crouch_slide.w7.new_profile_constants	3	n
+candidate.crouch_slide.w7.new_state_fields	1	n
+candidate.crouch_slide.w7.preconditions	3	n
+candidate.crouch_slide.w7.preconditions_with_profile_guards	4	n
+candidate.dash.ceiling48.e0320.absolute_aim0_ups	80.00	ups
+candidate.dash.ceiling48.e0320.anchor_commands	17	n
+candidate.dash.ceiling48.e0320.anchor_speed_ups	320.00	ups
+candidate.dash.ceiling48.e0320.avail_commands	16	n
+candidate.dash.ceiling48.e0320.avail_ms	128	ms
+candidate.dash.ceiling48.e0320.best_absolute_ups	74.07	ups
+candidate.dash.ceiling48.e0320.best_aim_deg	65.00	deg
+candidate.dash.ceiling48.e0320.best_delta_ups	1.62	ups
+candidate.dash.ceiling48.e0320.best_timing_ms	24	ms
+candidate.dash.ceiling48.e0320.control_best_absolute_ups	120.14	ups
+candidate.dash.ceiling48.e0320.delta_aim0_ups	0.00	ups
+candidate.dash.ceiling48.e0320.exec_window_ms	128	ms
+candidate.dash.ceiling48.e0320.exec_window_span_ms	128	ms
+candidate.dash.ceiling48.e0320.g3_unresponsive_candidate	0	n
+candidate.dash.ceiling48.e0320.g3_unresponsive_control	0	n
+candidate.dash.ceiling48.e0320.g5b_point_naive	not-meaningful	
+candidate.dash.ceiling48.e0320.g7_impulse_measured_ups	248.23	ups
+candidate.dash.ceiling48.e0320.g7_impulse_predicted_ups	248.23	ups
+candidate.dash.ceiling48.e0320.material	no	
+candidate.dash.ceiling48.e0320.menu.bunnyhop.absolute_ups	558.54	ups
+candidate.dash.ceiling48.e0320.menu.bunnyhop.angle_deg	60.00	deg
+candidate.dash.ceiling48.e0320.menu.held_forward.absolute_ups	120.09	ups
+candidate.dash.ceiling48.e0320.menu.held_forward.angle_deg	55.00	deg
+candidate.dash.ceiling48.e0320.menu.held_strafe.absolute_ups	120.09	ups
+candidate.dash.ceiling48.e0320.menu.held_strafe.angle_deg	55.00	deg
+candidate.dash.ceiling48.e0320.naive_harm_rate	0.0000	
+candidate.dash.ceiling48.e0320.naive_harmed	0	n
+candidate.dash.ceiling48.e0320.naive_mean_delta_ups	0.00	ups
+candidate.dash.ceiling48.e0320.naive_points	624	n
+candidate.dash.ceiling48.e0320.peak_gain_at_ms	24	ms
+candidate.dash.ceiling48.e0320.peak_gain_ups	161.83	ups
+candidate.dash.ceiling48.e0320.qualifies	no	
+candidate.dash.ceiling48.e0320.reachable	yes	
+candidate.dash.ceiling48.e0320.timing_degenerate	no	
+candidate.dash.ceiling48.e0320.w2_gap	not-meaningful	
+candidate.dash.ceiling48.e0320.w3_chain_gain_ups	-46.07	ups
+candidate.dash.ceiling48.e0320.w3_mechanic_alone_ups	80.00	ups
+candidate.dash.ceiling48.e0320.w5_over_best_technique_ups	-484.47	ups
+candidate.dash.ceiling48.e0320.w6_aim_centroid_deg	0.00	deg
+candidate.dash.ceiling48.e0320.w6_timing_centroid_ms	76	ms
+candidate.dash.ceiling48.e0320.w6_top_aims	2	n
+candidate.dash.ceiling48.e0320.w6_top_timings	16	n
+candidate.dash.ceiling48.e0320.worst_latency	0	n
+candidate.dash.ceiling48.e0400.anchor_commands	17	n
+candidate.dash.ceiling48.e0400.anchor_speed_ups	400.00	ups
+candidate.dash.ceiling48.e0400.avail_commands	16	n
+candidate.dash.ceiling48.e0400.avail_ms	128	ms
+candidate.dash.ceiling48.e0400.best_absolute_ups	9.60	ups
+candidate.dash.ceiling48.e0400.best_aim_deg	180.00	deg
+candidate.dash.ceiling48.e0400.best_delta_ups	4.80	ups
+candidate.dash.ceiling48.e0400.best_timing_ms	16	ms
+candidate.dash.ceiling48.e0400.control_best_absolute_ups	120.14	ups
+candidate.dash.ceiling48.e0400.delta_aim0_ups	never-fired-at-aim-0	
+candidate.dash.ceiling48.e0400.exec_window_ms	40	ms
+candidate.dash.ceiling48.e0400.exec_window_span_ms	80	ms
+candidate.dash.ceiling48.e0400.g3_unresponsive_candidate	0	n
+candidate.dash.ceiling48.e0400.g3_unresponsive_control	0	n
+candidate.dash.ceiling48.e0400.g5b_point_naive	not-meaningful	
+candidate.dash.ceiling48.e0400.g7_impulse_measured_ups	675.75	ups
+candidate.dash.ceiling48.e0400.g7_impulse_predicted_ups	675.75	ups
+candidate.dash.ceiling48.e0400.material	no	
+candidate.dash.ceiling48.e0400.menu.bunnyhop.absolute_ups	635.65	ups
+candidate.dash.ceiling48.e0400.menu.bunnyhop.angle_deg	60.00	deg
+candidate.dash.ceiling48.e0400.menu.held_forward.absolute_ups	120.09	ups
+candidate.dash.ceiling48.e0400.menu.held_forward.angle_deg	55.00	deg
+candidate.dash.ceiling48.e0400.menu.held_strafe.absolute_ups	120.09	ups
+candidate.dash.ceiling48.e0400.menu.held_strafe.angle_deg	55.00	deg
+candidate.dash.ceiling48.e0400.naive_harm_rate	0.0000	
+candidate.dash.ceiling48.e0400.naive_harmed	0	n
+candidate.dash.ceiling48.e0400.naive_mean_delta_ups	0.00	ups
+candidate.dash.ceiling48.e0400.naive_points	624	n
+candidate.dash.ceiling48.e0400.peak_gain_at_ms	72	ms
+candidate.dash.ceiling48.e0400.peak_gain_ups	124.25	ups
+candidate.dash.ceiling48.e0400.qualifies	no	
+candidate.dash.ceiling48.e0400.reachable	yes	
+candidate.dash.ceiling48.e0400.timing_degenerate	no	
+candidate.dash.ceiling48.e0400.w2_gap	not-meaningful	
+candidate.dash.ceiling48.e0400.w3_chain_gain_ups	-110.54	ups
+candidate.dash.ceiling48.e0400.w3_entry_slope	-0.8059	
+candidate.dash.ceiling48.e0400.w5_over_best_technique_ups	-626.05	ups
+candidate.dash.ceiling48.e0400.w6_aim_centroid_deg	180.00	deg
+candidate.dash.ceiling48.e0400.w6_timing_centroid_ms	56	ms
+candidate.dash.ceiling48.e0400.w6_top_aims	1	n
+candidate.dash.ceiling48.e0400.w6_top_timings	5	n
+candidate.dash.ceiling48.e0400.worst_latency	0	n
+candidate.dash.ceiling48.e0500.anchor_commands	17	n
+candidate.dash.ceiling48.e0500.anchor_speed_ups	500.00	ups
+candidate.dash.ceiling48.e0500.avail_commands	16	n
+candidate.dash.ceiling48.e0500.avail_ms	128	ms
+candidate.dash.ceiling48.e0500.best_absolute_ups	9.60	ups
+candidate.dash.ceiling48.e0500.best_aim_deg	180.00	deg
+candidate.dash.ceiling48.e0500.best_delta_ups	4.80	ups
+candidate.dash.ceiling48.e0500.best_timing_ms	16	ms
+candidate.dash.ceiling48.e0500.control_best_absolute_ups	120.14	ups
+candidate.dash.ceiling48.e0500.delta_aim0_ups	never-fired-at-aim-0	
+candidate.dash.ceiling48.e0500.exec_window_ms	40	ms
+candidate.dash.ceiling48.e0500.exec_window_span_ms	80	ms
+candidate.dash.ceiling48.e0500.g3_unresponsive_candidate	0	n
+candidate.dash.ceiling48.e0500.g3_unresponsive_control	0	n
+candidate.dash.ceiling48.e0500.g5b_point_naive	not-meaningful	
+candidate.dash.ceiling48.e0500.g7_impulse_measured_ups	775.75	ups
+candidate.dash.ceiling48.e0500.g7_impulse_predicted_ups	775.75	ups
+candidate.dash.ceiling48.e0500.material	no	
+candidate.dash.ceiling48.e0500.menu.bunnyhop.absolute_ups	698.50	ups
+candidate.dash.ceiling48.e0500.menu.bunnyhop.angle_deg	65.00	deg
+candidate.dash.ceiling48.e0500.menu.held_forward.absolute_ups	120.09	ups
+candidate.dash.ceiling48.e0500.menu.held_forward.angle_deg	55.00	deg
+candidate.dash.ceiling48.e0500.menu.held_strafe.absolute_ups	120.09	ups
+candidate.dash.ceiling48.e0500.menu.held_strafe.angle_deg	55.00	deg
+candidate.dash.ceiling48.e0500.naive_harm_rate	0.0000	
+candidate.dash.ceiling48.e0500.naive_harmed	0	n
+candidate.dash.ceiling48.e0500.naive_mean_delta_ups	0.00	ups
+candidate.dash.ceiling48.e0500.naive_points	624	n
+candidate.dash.ceiling48.e0500.peak_gain_at_ms	80	ms
+candidate.dash.ceiling48.e0500.peak_gain_ups	24.25	ups
+candidate.dash.ceiling48.e0500.qualifies	no	
+candidate.dash.ceiling48.e0500.reachable	yes	
+candidate.dash.ceiling48.e0500.timing_degenerate	no	
+candidate.dash.ceiling48.e0500.w2_gap	not-meaningful	
+candidate.dash.ceiling48.e0500.w3_chain_gain_ups	-110.54	ups
+candidate.dash.ceiling48.e0500.w3_entry_slope	0.0000	
+candidate.dash.ceiling48.e0500.w5_over_best_technique_ups	-688.90	ups
+candidate.dash.ceiling48.e0500.w6_aim_centroid_deg	180.00	deg
+candidate.dash.ceiling48.e0500.w6_timing_centroid_ms	56	ms
+candidate.dash.ceiling48.e0500.w6_top_aims	1	n
+candidate.dash.ceiling48.e0500.w6_top_timings	5	n
+candidate.dash.ceiling48.e0500.worst_latency	0	n
+candidate.dash.ceiling48.e0640.anchor_commands	17	n
+candidate.dash.ceiling48.e0640.anchor_speed_ups	640.00	ups
+candidate.dash.ceiling48.e0640.avail_commands	16	n
+candidate.dash.ceiling48.e0640.avail_ms	128	ms
+candidate.dash.ceiling48.e0640.best_absolute_ups	31.69	ups
+candidate.dash.ceiling48.e0640.best_aim_deg	290.00	deg
+candidate.dash.ceiling48.e0640.best_delta_ups	0.42	ups
+candidate.dash.ceiling48.e0640.best_timing_ms	16	ms
+candidate.dash.ceiling48.e0640.control_best_absolute_ups	120.15	ups
+candidate.dash.ceiling48.e0640.delta_aim0_ups	never-fired-at-aim-0	
+candidate.dash.ceiling48.e0640.exec_window_ms	128	ms
+candidate.dash.ceiling48.e0640.exec_window_span_ms	128	ms
+candidate.dash.ceiling48.e0640.g3_unresponsive_candidate	17	n
+candidate.dash.ceiling48.e0640.g3_unresponsive_control	17	n
+candidate.dash.ceiling48.e0640.g5b_point_naive	not-meaningful	
+candidate.dash.ceiling48.e0640.g7_impulse_measured_ups	169.73	ups
+candidate.dash.ceiling48.e0640.g7_impulse_predicted_ups	169.74	ups
+candidate.dash.ceiling48.e0640.material	no	
+candidate.dash.ceiling48.e0640.menu.bunnyhop.absolute_ups	800.71	ups
+candidate.dash.ceiling48.e0640.menu.bunnyhop.angle_deg	70.00	deg
+candidate.dash.ceiling48.e0640.menu.held_forward.absolute_ups	120.09	ups
+candidate.dash.ceiling48.e0640.menu.held_forward.angle_deg	55.00	deg
+candidate.dash.ceiling48.e0640.menu.held_strafe.absolute_ups	120.09	ups
+candidate.dash.ceiling48.e0640.menu.held_strafe.angle_deg	55.00	deg
+candidate.dash.ceiling48.e0640.naive_harm_rate	0.0000	
+candidate.dash.ceiling48.e0640.naive_harmed	0	n
+candidate.dash.ceiling48.e0640.naive_mean_delta_ups	0.00	ups
+candidate.dash.ceiling48.e0640.naive_points	624	n
+candidate.dash.ceiling48.e0640.peak_gain_at_ms	16	ms
+candidate.dash.ceiling48.e0640.peak_gain_ups	76.90	ups
+candidate.dash.ceiling48.e0640.qualifies	no	
+candidate.dash.ceiling48.e0640.reachable	yes	
+candidate.dash.ceiling48.e0640.timing_degenerate	no	
+candidate.dash.ceiling48.e0640.w2_gap	not-meaningful	
+candidate.dash.ceiling48.e0640.w3_chain_gain_ups	-88.45	ups
+candidate.dash.ceiling48.e0640.w3_entry_slope	0.1578	
+candidate.dash.ceiling48.e0640.w5_over_best_technique_ups	-769.01	ups
+candidate.dash.ceiling48.e0640.w6_aim_centroid_deg	21.67	deg
+candidate.dash.ceiling48.e0640.w6_timing_centroid_ms	76	ms
+candidate.dash.ceiling48.e0640.w6_top_aims	3	n
+candidate.dash.ceiling48.e0640.w6_top_timings	16	n
+candidate.dash.ceiling48.e0640.worst_latency	0	n
+candidate.dash.ceiling48.e0800.anchor_commands	17	n
+candidate.dash.ceiling48.e0800.anchor_speed_ups	800.00	ups
+candidate.dash.ceiling48.e0800.avail_commands	16	n
+candidate.dash.ceiling48.e0800.avail_ms	128	ms
+candidate.dash.ceiling48.e0800.best_absolute_ups	9.60	ups
+candidate.dash.ceiling48.e0800.best_aim_deg	180.00	deg
+candidate.dash.ceiling48.e0800.best_delta_ups	3.36	ups
+candidate.dash.ceiling48.e0800.best_timing_ms	16	ms
+candidate.dash.ceiling48.e0800.control_best_absolute_ups	120.16	ups
+candidate.dash.ceiling48.e0800.delta_aim0_ups	never-fired-at-aim-0	
+candidate.dash.ceiling48.e0800.exec_window_ms	40	ms
+candidate.dash.ceiling48.e0800.exec_window_span_ms	80	ms
+candidate.dash.ceiling48.e0800.g3_unresponsive_candidate	0	n
+candidate.dash.ceiling48.e0800.g3_unresponsive_control	0	n
+candidate.dash.ceiling48.e0800.g5b_point_naive	not-meaningful	
+candidate.dash.ceiling48.e0800.g7_impulse_measured_ups	1075.75	ups
+candidate.dash.ceiling48.e0800.g7_impulse_predicted_ups	1075.75	ups
+candidate.dash.ceiling48.e0800.material	no	
+candidate.dash.ceiling48.e0800.menu.bunnyhop.absolute_ups	935.52	ups
+candidate.dash.ceiling48.e0800.menu.bunnyhop.angle_deg	70.00	deg
+candidate.dash.ceiling48.e0800.menu.held_forward.absolute_ups	120.09	ups
+candidate.dash.ceiling48.e0800.menu.held_forward.angle_deg	55.00	deg
+candidate.dash.ceiling48.e0800.menu.held_strafe.absolute_ups	120.09	ups
+candidate.dash.ceiling48.e0800.menu.held_strafe.angle_deg	55.00	deg
+candidate.dash.ceiling48.e0800.naive_harm_rate	0.0000	
+candidate.dash.ceiling48.e0800.naive_harmed	0	n
+candidate.dash.ceiling48.e0800.naive_mean_delta_ups	0.00	ups
+candidate.dash.ceiling48.e0800.naive_points	624	n
+candidate.dash.ceiling48.e0800.peak_gain_at_ms	352	ms
+candidate.dash.ceiling48.e0800.peak_gain_ups	3.36	ups
+candidate.dash.ceiling48.e0800.qualifies	no	
+candidate.dash.ceiling48.e0800.reachable	yes	
+candidate.dash.ceiling48.e0800.timing_degenerate	no	
+candidate.dash.ceiling48.e0800.w2_gap	not-meaningful	
+candidate.dash.ceiling48.e0800.w3_chain_gain_ups	-110.56	ups
+candidate.dash.ceiling48.e0800.w3_entry_slope	-0.1381	
+candidate.dash.ceiling48.e0800.w5_over_best_technique_ups	-925.92	ups
+candidate.dash.ceiling48.e0800.w6_aim_centroid_deg	180.00	deg
+candidate.dash.ceiling48.e0800.w6_timing_centroid_ms	56	ms
+candidate.dash.ceiling48.e0800.w6_top_aims	1	n
+candidate.dash.ceiling48.e0800.w6_top_timings	5	n
+candidate.dash.ceiling48.e0800.worst_latency	0	n
+candidate.dash.ceiling48.e1000.anchor_commands	17	n
+candidate.dash.ceiling48.e1000.anchor_speed_ups	1000.00	ups
+candidate.dash.ceiling48.e1000.avail_commands	16	n
+candidate.dash.ceiling48.e1000.avail_ms	128	ms
+candidate.dash.ceiling48.e1000.best_absolute_ups	9.60	ups
+candidate.dash.ceiling48.e1000.best_aim_deg	180.00	deg
+candidate.dash.ceiling48.e1000.best_delta_ups	4.80	ups
+candidate.dash.ceiling48.e1000.best_timing_ms	16	ms
+candidate.dash.ceiling48.e1000.control_best_absolute_ups	120.17	ups
+candidate.dash.ceiling48.e1000.delta_aim0_ups	never-fired-at-aim-0	
+candidate.dash.ceiling48.e1000.exec_window_ms	40	ms
+candidate.dash.ceiling48.e1000.exec_window_span_ms	80	ms
+candidate.dash.ceiling48.e1000.g3_unresponsive_candidate	0	n
+candidate.dash.ceiling48.e1000.g3_unresponsive_control	0	n
+candidate.dash.ceiling48.e1000.g5b_point_naive	not-meaningful	
+candidate.dash.ceiling48.e1000.g7_impulse_measured_ups	1275.75	ups
+candidate.dash.ceiling48.e1000.g7_impulse_predicted_ups	1275.75	ups
+candidate.dash.ceiling48.e1000.material	no	
+candidate.dash.ceiling48.e1000.menu.bunnyhop.absolute_ups	1121.11	ups
+candidate.dash.ceiling48.e1000.menu.bunnyhop.angle_deg	75.00	deg
+candidate.dash.ceiling48.e1000.menu.held_forward.absolute_ups	120.10	ups
+candidate.dash.ceiling48.e1000.menu.held_forward.angle_deg	55.00	deg
+candidate.dash.ceiling48.e1000.menu.held_strafe.absolute_ups	120.10	ups
+candidate.dash.ceiling48.e1000.menu.held_strafe.angle_deg	55.00	deg
+candidate.dash.ceiling48.e1000.naive_harm_rate	0.0000	
+candidate.dash.ceiling48.e1000.naive_harmed	0	n
+candidate.dash.ceiling48.e1000.naive_mean_delta_ups	0.00	ups
+candidate.dash.ceiling48.e1000.naive_points	624	n
+candidate.dash.ceiling48.e1000.peak_gain_at_ms	384	ms
+candidate.dash.ceiling48.e1000.peak_gain_ups	7.80	ups
+candidate.dash.ceiling48.e1000.qualifies	no	
+candidate.dash.ceiling48.e1000.reachable	yes	
+candidate.dash.ceiling48.e1000.timing_degenerate	no	
+candidate.dash.ceiling48.e1000.w2_gap	not-meaningful	
+candidate.dash.ceiling48.e1000.w3_chain_gain_ups	-110.57	ups
+candidate.dash.ceiling48.e1000.w3_entry_slope	0.0000	
+candidate.dash.ceiling48.e1000.w5_over_best_technique_ups	-1111.51	ups
+candidate.dash.ceiling48.e1000.w6_aim_centroid_deg	180.00	deg
+candidate.dash.ceiling48.e1000.w6_timing_centroid_ms	56	ms
+candidate.dash.ceiling48.e1000.w6_top_aims	1	n
+candidate.dash.ceiling48.e1000.w6_top_timings	5	n
+candidate.dash.ceiling48.e1000.worst_latency	0	n
+candidate.dash.ceiling48.g5a.arming_events	1	n
+candidate.dash.ceiling48.g5a.available_commands	3489	n
+candidate.dash.ceiling48.g5a.peak_speed_ups	320.00	ups
+candidate.dash.ceiling48.w3_chain_gain_best_ups	-46.07	ups
+candidate.dash.ceiling48.w3_entry_slope_max	0.1578	
+candidate.dash.ceiling48.w3_entry_slope_min	-0.8059	
+candidate.dash.ceiling48.w4_best_delta_ups	4.80	ups
+candidate.dash.corner.e0320.absolute_aim0_ups	320.00	ups
+candidate.dash.corner.e0320.anchor_commands	43	n
+candidate.dash.corner.e0320.anchor_speed_ups	15.68	ups
+candidate.dash.corner.e0320.avail_commands	47	n
+candidate.dash.corner.e0320.avail_ms	376	ms
+candidate.dash.corner.e0320.best_absolute_ups	466.04	ups
+candidate.dash.corner.e0320.best_aim_deg	50.00	deg
+candidate.dash.corner.e0320.best_delta_ups	460.75	ups
+candidate.dash.corner.e0320.best_timing_ms	32	ms
+candidate.dash.corner.e0320.control_best_absolute_ups	482.51	ups
+candidate.dash.corner.e0320.delta_aim0_ups	0.00	ups
+candidate.dash.corner.e0320.exec_window_ms	104	ms
+candidate.dash.corner.e0320.exec_window_span_ms	104	ms
+candidate.dash.corner.e0320.g3_unresponsive_candidate	5	n
+candidate.dash.corner.e0320.g3_unresponsive_control	3	n
+candidate.dash.corner.e0320.g5b_point_naive	0.0000	
+candidate.dash.corner.e0320.g7_aim_at_deg	277.89	deg
+candidate.dash.corner.e0320.g7_aim_refined_ups	273.33	ups
+candidate.dash.corner.e0320.g7_geometry_at_units	-0.031	units
+candidate.dash.corner.e0320.g7_geometry_refined_ups	461.11	ups
+candidate.dash.corner.e0320.g7_impulse_measured_ups	194.73	ups
+candidate.dash.corner.e0320.g7_impulse_predicted_ups	312.71	ups
+candidate.dash.corner.e0320.material	yes	
+candidate.dash.corner.e0320.menu.bunnyhop.absolute_ups	331.17	ups
+candidate.dash.corner.e0320.menu.bunnyhop.angle_deg	15.00	deg
+candidate.dash.corner.e0320.menu.held_forward.absolute_ups	466.08	ups
+candidate.dash.corner.e0320.menu.held_forward.angle_deg	50.00	deg
+candidate.dash.corner.e0320.menu.held_strafe.absolute_ups	466.08	ups
+candidate.dash.corner.e0320.menu.held_strafe.angle_deg	50.00	deg
+candidate.dash.corner.e0320.naive_harm_rate	0.0449	
+candidate.dash.corner.e0320.naive_harmed	28	n
+candidate.dash.corner.e0320.naive_mean_delta_ups	5.40	ups
+candidate.dash.corner.e0320.naive_points	624	n
+candidate.dash.corner.e0320.peak_gain_at_ms	1392	ms
+candidate.dash.corner.e0320.peak_gain_ups	460.75	ups
+candidate.dash.corner.e0320.qualifies	yes	
+candidate.dash.corner.e0320.reachable	yes	
+candidate.dash.corner.e0320.timing_degenerate	no	
+candidate.dash.corner.e0320.w2_gap	0.9883	
+candidate.dash.corner.e0320.w3_chain_gain_ups	-16.47	ups
+candidate.dash.corner.e0320.w3_mechanic_alone_ups	320.00	ups
+candidate.dash.corner.e0320.w5_over_best_technique_ups	-0.03	ups
+candidate.dash.corner.e0320.w6_aim_centroid_deg	50.00	deg
+candidate.dash.corner.e0320.w6_timing_centroid_ms	64	ms
+candidate.dash.corner.e0320.w6_top_aims	1	n
+candidate.dash.corner.e0320.w6_top_timings	13	n
+candidate.dash.corner.e0320.worst_latency	0	n
+candidate.dash.corner.e0400.absolute_aim0_ups	320.00	ups
+candidate.dash.corner.e0400.anchor_commands	43	n
+candidate.dash.corner.e0400.anchor_speed_ups	13.20	ups
+candidate.dash.corner.e0400.avail_commands	47	n
+candidate.dash.corner.e0400.avail_ms	376	ms
+candidate.dash.corner.e0400.best_absolute_ups	699.44	ups
+candidate.dash.corner.e0400.best_aim_deg	75.00	deg
+candidate.dash.corner.e0400.best_delta_ups	506.74	ups
+candidate.dash.corner.e0400.best_timing_ms	216	ms
+candidate.dash.corner.e0400.control_best_absolute_ups	482.53	ups
+candidate.dash.corner.e0400.delta_aim0_ups	0.00	ups
+candidate.dash.corner.e0400.exec_window_ms	8	ms
+candidate.dash.corner.e0400.exec_window_span_ms	8	ms
+candidate.dash.corner.e0400.g3_unresponsive_candidate	0	n
+candidate.dash.corner.e0400.g3_unresponsive_control	0	n
+candidate.dash.corner.e0400.g5b_point_naive	0.0000	
+candidate.dash.corner.e0400.g7_aim_at_deg	78.83	deg
+candidate.dash.corner.e0400.g7_aim_refined_ups	287.06	ups
+candidate.dash.corner.e0400.g7_geometry_at_units	-0.031	units
+candidate.dash.corner.e0400.g7_geometry_refined_ups	413.41	ups
+candidate.dash.corner.e0400.g7_impulse_measured_ups	374.68	ups
+candidate.dash.corner.e0400.g7_impulse_predicted_ups	374.68	ups
+candidate.dash.corner.e0400.material	yes	
+candidate.dash.corner.e0400.menu.bunnyhop.absolute_ups	332.03	ups
+candidate.dash.corner.e0400.menu.bunnyhop.angle_deg	20.00	deg
+candidate.dash.corner.e0400.menu.held_forward.absolute_ups	466.08	ups
+candidate.dash.corner.e0400.menu.held_forward.angle_deg	50.00	deg
+candidate.dash.corner.e0400.menu.held_strafe.absolute_ups	466.08	ups
+candidate.dash.corner.e0400.menu.held_strafe.angle_deg	50.00	deg
+candidate.dash.corner.e0400.naive_harm_rate	0.0321	
+candidate.dash.corner.e0400.naive_harmed	20	n
+candidate.dash.corner.e0400.naive_mean_delta_ups	-2.93	ups
+candidate.dash.corner.e0400.naive_points	624	n
+candidate.dash.corner.e0400.peak_gain_at_ms	1376	ms
+candidate.dash.corner.e0400.peak_gain_ups	559.13	ups
+candidate.dash.corner.e0400.qualifies	yes	
+candidate.dash.corner.e0400.reachable	yes	
+candidate.dash.corner.e0400.timing_degenerate	no	
+candidate.dash.corner.e0400.w2_gap	1.0058	
+candidate.dash.corner.e0400.w3_chain_gain_ups	216.90	ups
+candidate.dash.corner.e0400.w3_entry_slope	2.9174	
+candidate.dash.corner.e0400.w3_mechanic_alone_ups	320.00	ups
+candidate.dash.corner.e0400.w5_over_best_technique_ups	233.36	ups
+candidate.dash.corner.e0400.w6_aim_centroid_deg	75.00	deg
+candidate.dash.corner.e0400.w6_timing_centroid_ms	216	ms
+candidate.dash.corner.e0400.w6_top_aims	1	n
+candidate.dash.corner.e0400.w6_top_timings	1	n
+candidate.dash.corner.e0400.worst_latency	0	n
+candidate.dash.corner.e0500.absolute_aim0_ups	320.00	ups
+candidate.dash.corner.e0500.anchor_commands	43	n
+candidate.dash.corner.e0500.anchor_speed_ups	10.74	ups
+candidate.dash.corner.e0500.avail_commands	47	n
+candidate.dash.corner.e0500.avail_ms	376	ms
+candidate.dash.corner.e0500.best_absolute_ups	838.82	ups
+candidate.dash.corner.e0500.best_aim_deg	55.00	deg
+candidate.dash.corner.e0500.best_delta_ups	555.98	ups
+candidate.dash.corner.e0500.best_timing_ms	128	ms
+candidate.dash.corner.e0500.control_best_absolute_ups	482.53	ups
+candidate.dash.corner.e0500.delta_aim0_ups	0.00	ups
+candidate.dash.corner.e0500.exec_window_ms	8	ms
+candidate.dash.corner.e0500.exec_window_span_ms	8	ms
+candidate.dash.corner.e0500.g3_unresponsive_candidate	0	n
+candidate.dash.corner.e0500.g3_unresponsive_control	0	n
+candidate.dash.corner.e0500.g5b_point_naive	0.0000	
+candidate.dash.corner.e0500.g7_aim_at_deg	55.08	deg
+candidate.dash.corner.e0500.g7_aim_refined_ups	347.40	ups
+candidate.dash.corner.e0500.g7_geometry_at_units	13.656	units
+candidate.dash.corner.e0500.g7_geometry_refined_ups	516.62	ups
+candidate.dash.corner.e0500.g7_impulse_measured_ups	337.53	ups
+candidate.dash.corner.e0500.g7_impulse_predicted_ups	392.49	ups
+candidate.dash.corner.e0500.material	yes	
+candidate.dash.corner.e0500.menu.bunnyhop.absolute_ups	340.26	ups
+candidate.dash.corner.e0500.menu.bunnyhop.angle_deg	20.00	deg
+candidate.dash.corner.e0500.menu.held_forward.absolute_ups	466.08	ups
+candidate.dash.corner.e0500.menu.held_forward.angle_deg	50.00	deg
+candidate.dash.corner.e0500.menu.held_strafe.absolute_ups	466.08	ups
+candidate.dash.corner.e0500.menu.held_strafe.angle_deg	50.00	deg
+candidate.dash.corner.e0500.naive_harm_rate	0.0256	
+candidate.dash.corner.e0500.naive_harmed	16	n
+candidate.dash.corner.e0500.naive_mean_delta_ups	1.43	ups
+candidate.dash.corner.e0500.naive_points	624	n
+candidate.dash.corner.e0500.peak_gain_at_ms	1384	ms
+candidate.dash.corner.e0500.peak_gain_ups	607.15	ups
+candidate.dash.corner.e0500.qualifies	yes	
+candidate.dash.corner.e0500.reachable	yes	
+candidate.dash.corner.e0500.timing_degenerate	no	
+candidate.dash.corner.e0500.w2_gap	0.9974	
+candidate.dash.corner.e0500.w3_chain_gain_ups	356.29	ups
+candidate.dash.corner.e0500.w3_entry_slope	1.3939	
+candidate.dash.corner.e0500.w3_mechanic_alone_ups	320.00	ups
+candidate.dash.corner.e0500.w5_over_best_technique_ups	372.75	ups
+candidate.dash.corner.e0500.w6_aim_centroid_deg	55.00	deg
+candidate.dash.corner.e0500.w6_timing_centroid_ms	128	ms
+candidate.dash.corner.e0500.w6_top_aims	1	n
+candidate.dash.corner.e0500.w6_top_timings	1	n
+candidate.dash.corner.e0500.worst_latency	0	n
+candidate.dash.corner.e0640.absolute_aim0_ups	320.00	ups
+candidate.dash.corner.e0640.anchor_commands	43	n
+candidate.dash.corner.e0640.anchor_speed_ups	8.32	ups
+candidate.dash.corner.e0640.avail_commands	47	n
+candidate.dash.corner.e0640.avail_ms	376	ms
+candidate.dash.corner.e0640.best_absolute_ups	815.35	ups
+candidate.dash.corner.e0640.best_aim_deg	65.00	deg
+candidate.dash.corner.e0640.best_delta_ups	492.90	ups
+candidate.dash.corner.e0640.best_timing_ms	64	ms
+candidate.dash.corner.e0640.control_best_absolute_ups	482.53	ups
+candidate.dash.corner.e0640.delta_aim0_ups	0.00	ups
+candidate.dash.corner.e0640.exec_window_ms	8	ms
+candidate.dash.corner.e0640.exec_window_span_ms	8	ms
+candidate.dash.corner.e0640.g3_unresponsive_candidate	0	n
+candidate.dash.corner.e0640.g3_unresponsive_control	0	n
+candidate.dash.corner.e0640.g5b_point_naive	0.0000	
+candidate.dash.corner.e0640.g7_aim_at_deg	301.64	deg
+candidate.dash.corner.e0640.g7_aim_refined_ups	409.61	ups
+candidate.dash.corner.e0640.g7_geometry_at_units	1.906	units
+candidate.dash.corner.e0640.g7_geometry_refined_ups	459.39	ups
+candidate.dash.corner.e0640.g7_impulse_measured_ups	394.82	ups
+candidate.dash.corner.e0640.g7_impulse_predicted_ups	394.82	ups
+candidate.dash.corner.e0640.material	yes	
+candidate.dash.corner.e0640.menu.bunnyhop.absolute_ups	340.35	ups
+candidate.dash.corner.e0640.menu.bunnyhop.angle_deg	20.00	deg
+candidate.dash.corner.e0640.menu.held_forward.absolute_ups	466.08	ups
+candidate.dash.corner.e0640.menu.held_forward.angle_deg	50.00	deg
+candidate.dash.corner.e0640.menu.held_strafe.absolute_ups	466.08	ups
+candidate.dash.corner.e0640.menu.held_strafe.angle_deg	50.00	deg
+candidate.dash.corner.e0640.naive_harm_rate	0.0176	
+candidate.dash.corner.e0640.naive_harmed	11	n
+candidate.dash.corner.e0640.naive_mean_delta_ups	6.76	ups
+candidate.dash.corner.e0640.naive_points	624	n
+candidate.dash.corner.e0640.peak_gain_at_ms	1392	ms
+candidate.dash.corner.e0640.peak_gain_ups	492.90	ups
+candidate.dash.corner.e0640.qualifies	yes	
+candidate.dash.corner.e0640.reachable	yes	
+candidate.dash.corner.e0640.timing_degenerate	no	
+candidate.dash.corner.e0640.w2_gap	0.9863	
+candidate.dash.corner.e0640.w3_chain_gain_ups	332.82	ups
+candidate.dash.corner.e0640.w3_entry_slope	-0.1677	
+candidate.dash.corner.e0640.w3_mechanic_alone_ups	320.00	ups
+candidate.dash.corner.e0640.w5_over_best_technique_ups	349.27	ups
+candidate.dash.corner.e0640.w6_aim_centroid_deg	65.00	deg
+candidate.dash.corner.e0640.w6_timing_centroid_ms	64	ms
+candidate.dash.corner.e0640.w6_top_aims	1	n
+candidate.dash.corner.e0640.w6_top_timings	1	n
+candidate.dash.corner.e0640.worst_latency	0	n
+candidate.dash.corner.e0800.absolute_aim0_ups	320.00	ups
+candidate.dash.corner.e0800.anchor_commands	43	n
+candidate.dash.corner.e0800.anchor_speed_ups	8.48	ups
+candidate.dash.corner.e0800.avail_commands	47	n
+candidate.dash.corner.e0800.avail_ms	376	ms
+candidate.dash.corner.e0800.best_absolute_ups	760.12	ups
+candidate.dash.corner.e0800.best_aim_deg	70.00	deg
+candidate.dash.corner.e0800.best_delta_ups	502.51	ups
+candidate.dash.corner.e0800.best_timing_ms	240	ms
+candidate.dash.corner.e0800.control_best_absolute_ups	482.53	ups
+candidate.dash.corner.e0800.delta_aim0_ups	0.00	ups
+candidate.dash.corner.e0800.exec_window_ms	8	ms
+candidate.dash.corner.e0800.exec_window_span_ms	8	ms
+candidate.dash.corner.e0800.g3_unresponsive_candidate	0	n
+candidate.dash.corner.e0800.g3_unresponsive_control	0	n
+candidate.dash.corner.e0800.g5b_point_naive	0.0000	
+candidate.dash.corner.e0800.g7_aim_at_deg	82.73	deg
+candidate.dash.corner.e0800.g7_aim_refined_ups	315.31	ups
+candidate.dash.corner.e0800.g7_geometry_at_units	-15.469	units
+candidate.dash.corner.e0800.g7_geometry_refined_ups	492.46	ups
+candidate.dash.corner.e0800.g7_impulse_measured_ups	366.66	ups
+candidate.dash.corner.e0800.g7_impulse_predicted_ups	394.50	ups
+candidate.dash.corner.e0800.material	yes	
+candidate.dash.corner.e0800.menu.bunnyhop.absolute_ups	340.35	ups
+candidate.dash.corner.e0800.menu.bunnyhop.angle_deg	20.00	deg
+candidate.dash.corner.e0800.menu.held_forward.absolute_ups	466.08	ups
+candidate.dash.corner.e0800.menu.held_forward.angle_deg	50.00	deg
+candidate.dash.corner.e0800.menu.held_strafe.absolute_ups	466.08	ups
+candidate.dash.corner.e0800.menu.held_strafe.angle_deg	50.00	deg
+candidate.dash.corner.e0800.naive_harm_rate	0.0000	
+candidate.dash.corner.e0800.naive_harmed	0	n
+candidate.dash.corner.e0800.naive_mean_delta_ups	1.74	ups
+candidate.dash.corner.e0800.naive_points	624	n
+candidate.dash.corner.e0800.peak_gain_at_ms	1368	ms
+candidate.dash.corner.e0800.peak_gain_ups	582.43	ups
+candidate.dash.corner.e0800.qualifies	yes	
+candidate.dash.corner.e0800.reachable	yes	
+candidate.dash.corner.e0800.timing_degenerate	no	
+candidate.dash.corner.e0800.w2_gap	0.9965	
+candidate.dash.corner.e0800.w3_chain_gain_ups	277.59	ups
+candidate.dash.corner.e0800.w3_entry_slope	-0.3452	
+candidate.dash.corner.e0800.w3_mechanic_alone_ups	320.00	ups
+candidate.dash.corner.e0800.w5_over_best_technique_ups	294.05	ups
+candidate.dash.corner.e0800.w6_aim_centroid_deg	70.00	deg
+candidate.dash.corner.e0800.w6_timing_centroid_ms	240	ms
+candidate.dash.corner.e0800.w6_top_aims	1	n
+candidate.dash.corner.e0800.w6_top_timings	1	n
+candidate.dash.corner.e0800.worst_latency	0	n
+candidate.dash.corner.e1000.absolute_aim0_ups	320.00	ups
+candidate.dash.corner.e1000.anchor_commands	43	n
+candidate.dash.corner.e1000.anchor_speed_ups	6.12	ups
+candidate.dash.corner.e1000.avail_commands	47	n
+candidate.dash.corner.e1000.avail_ms	376	ms
+candidate.dash.corner.e1000.best_absolute_ups	461.60	ups
+candidate.dash.corner.e1000.best_aim_deg	55.00	deg
+candidate.dash.corner.e1000.best_delta_ups	458.18	ups
+candidate.dash.corner.e1000.best_timing_ms	240	ms
+candidate.dash.corner.e1000.control_best_absolute_ups	482.53	ups
+candidate.dash.corner.e1000.delta_aim0_ups	0.00	ups
+candidate.dash.corner.e1000.exec_window_ms	8	ms
+candidate.dash.corner.e1000.exec_window_span_ms	8	ms
+candidate.dash.corner.e1000.g3_unresponsive_candidate	0	n
+candidate.dash.corner.e1000.g3_unresponsive_control	1	n
+candidate.dash.corner.e1000.g5b_point_naive	0.0000	
+candidate.dash.corner.e1000.g7_aim_at_deg	82.89	deg
+candidate.dash.corner.e1000.g7_aim_refined_ups	317.21	ups
+candidate.dash.corner.e1000.g7_geometry_at_units	-3.094	units
+candidate.dash.corner.e1000.g7_geometry_refined_ups	437.00	ups
+candidate.dash.corner.e1000.g7_impulse_measured_ups	393.74	ups
+candidate.dash.corner.e1000.g7_impulse_predicted_ups	393.74	ups
+candidate.dash.corner.e1000.material	yes	
+candidate.dash.corner.e1000.menu.bunnyhop.absolute_ups	340.35	ups
+candidate.dash.corner.e1000.menu.bunnyhop.angle_deg	20.00	deg
+candidate.dash.corner.e1000.menu.held_forward.absolute_ups	466.08	ups
+candidate.dash.corner.e1000.menu.held_forward.angle_deg	50.00	deg
+candidate.dash.corner.e1000.menu.held_strafe.absolute_ups	466.08	ups
+candidate.dash.corner.e1000.menu.held_strafe.angle_deg	50.00	deg
+candidate.dash.corner.e1000.naive_harm_rate	0.0000	
+candidate.dash.corner.e1000.naive_harmed	0	n
+candidate.dash.corner.e1000.naive_mean_delta_ups	0.89	ups
+candidate.dash.corner.e1000.naive_points	624	n
+candidate.dash.corner.e1000.peak_gain_at_ms	968	ms
+candidate.dash.corner.e1000.peak_gain_ups	492.22	ups
+candidate.dash.corner.e1000.qualifies	yes	
+candidate.dash.corner.e1000.reachable	yes	
+candidate.dash.corner.e1000.timing_degenerate	no	
+candidate.dash.corner.e1000.w2_gap	0.9981	
+candidate.dash.corner.e1000.w3_chain_gain_ups	-20.93	ups
+candidate.dash.corner.e1000.w3_entry_slope	-1.4926	
+candidate.dash.corner.e1000.w3_mechanic_alone_ups	320.00	ups
+candidate.dash.corner.e1000.w5_over_best_technique_ups	-4.48	ups
+candidate.dash.corner.e1000.w6_aim_centroid_deg	55.00	deg
+candidate.dash.corner.e1000.w6_timing_centroid_ms	240	ms
+candidate.dash.corner.e1000.w6_top_aims	1	n
+candidate.dash.corner.e1000.w6_top_timings	1	n
+candidate.dash.corner.e1000.worst_latency	0	n
+candidate.dash.corner.g5a.arming_events	32	n
+candidate.dash.corner.g5a.available_commands	1555	n
+candidate.dash.corner.g5a.peak_speed_ups	320.00	ups
+candidate.dash.corner.g5b_median	0.0000	
+candidate.dash.corner.w2_gap_median	0.9970	
+candidate.dash.corner.w3_chain_gain_best_ups	356.29	ups
+candidate.dash.corner.w3_entry_slope_max	2.9174	
+candidate.dash.corner.w3_entry_slope_min	-1.4926	
+candidate.dash.corner.w4_best_delta_ups	555.98	ups
+candidate.dash.floor.e0320.absolute_aim0_ups	320.00	ups
+candidate.dash.floor.e0320.anchor_commands	43	n
+candidate.dash.floor.e0320.anchor_speed_ups	320.00	ups
+candidate.dash.floor.e0320.avail_commands	47	n
+candidate.dash.floor.e0320.avail_ms	376	ms
+candidate.dash.floor.e0320.best_absolute_ups	328.90	ups
+candidate.dash.floor.e0320.best_aim_deg	70.00	deg
+candidate.dash.floor.e0320.best_delta_ups	6.73	ups
+candidate.dash.floor.e0320.best_timing_ms	16	ms
+candidate.dash.floor.e0320.control_best_absolute_ups	482.51	ups
+candidate.dash.floor.e0320.delta_aim0_ups	0.00	ups
+candidate.dash.floor.e0320.exec_window_ms	192	ms
+candidate.dash.floor.e0320.exec_window_span_ms	192	ms
+candidate.dash.floor.e0320.g3_unresponsive_candidate	0	n
+candidate.dash.floor.e0320.g3_unresponsive_control	0	n
+candidate.dash.floor.e0320.g5b_point_naive	not-meaningful	
+candidate.dash.floor.e0320.g7_impulse_measured_ups	271.20	ups
+candidate.dash.floor.e0320.g7_impulse_predicted_ups	271.20	ups
+candidate.dash.floor.e0320.material	no	
+candidate.dash.floor.e0320.menu.bunnyhop.absolute_ups	598.58	ups
+candidate.dash.floor.e0320.menu.bunnyhop.angle_deg	60.00	deg
+candidate.dash.floor.e0320.menu.held_forward.absolute_ups	480.33	ups
+candidate.dash.floor.e0320.menu.held_forward.angle_deg	55.00	deg
+candidate.dash.floor.e0320.menu.held_strafe.absolute_ups	480.33	ups
+candidate.dash.floor.e0320.menu.held_strafe.angle_deg	55.00	deg
+candidate.dash.floor.e0320.naive_harm_rate	0.0000	
+candidate.dash.floor.e0320.naive_harmed	0	n
+candidate.dash.floor.e0320.naive_mean_delta_ups	0.00	ups
+candidate.dash.floor.e0320.naive_points	624	n
+candidate.dash.floor.e0320.peak_gain_at_ms	16	ms
+candidate.dash.floor.e0320.peak_gain_ups	162.46	ups
+candidate.dash.floor.e0320.qualifies	no	
+candidate.dash.floor.e0320.reachable	yes	
+candidate.dash.floor.e0320.timing_degenerate	no	
+candidate.dash.floor.e0320.w2_gap	not-meaningful	
+candidate.dash.floor.e0320.w3_chain_gain_ups	-153.61	ups
+candidate.dash.floor.e0320.w3_mechanic_alone_ups	320.00	ups
+candidate.dash.floor.e0320.w5_over_best_technique_ups	-269.68	ups
+candidate.dash.floor.e0320.w6_aim_centroid_deg	0.00	deg
+candidate.dash.floor.e0320.w6_timing_centroid_ms	108	ms
+candidate.dash.floor.e0320.w6_top_aims	4	n
+candidate.dash.floor.e0320.w6_top_timings	24	n
+candidate.dash.floor.e0320.worst_latency	0	n
+candidate.dash.floor.e0400.anchor_commands	43	n
+candidate.dash.floor.e0400.anchor_speed_ups	400.00	ups
+candidate.dash.floor.e0400.avail_commands	47	n
+candidate.dash.floor.e0400.avail_ms	376	ms
+candidate.dash.floor.e0400.best_absolute_ups	331.09	ups
+candidate.dash.floor.e0400.best_aim_deg	290.00	deg
+candidate.dash.floor.e0400.best_delta_ups	5.65	ups
+candidate.dash.floor.e0400.best_timing_ms	16	ms
+candidate.dash.floor.e0400.control_best_absolute_ups	482.53	ups
+candidate.dash.floor.e0400.delta_aim0_ups	never-fired-at-aim-0	
+candidate.dash.floor.e0400.exec_window_ms	192	ms
+candidate.dash.floor.e0400.exec_window_span_ms	192	ms
+candidate.dash.floor.e0400.g3_unresponsive_candidate	0	n
+candidate.dash.floor.e0400.g3_unresponsive_control	0	n
+candidate.dash.floor.e0400.g5b_point_naive	not-meaningful	
+candidate.dash.floor.e0400.g7_impulse_measured_ups	243.86	ups
+candidate.dash.floor.e0400.g7_impulse_predicted_ups	243.87	ups
+candidate.dash.floor.e0400.material	no	
+candidate.dash.floor.e0400.menu.bunnyhop.absolute_ups	640.01	ups
+candidate.dash.floor.e0400.menu.bunnyhop.angle_deg	60.00	deg
+candidate.dash.floor.e0400.menu.held_forward.absolute_ups	480.34	ups
+candidate.dash.floor.e0400.menu.held_forward.angle_deg	55.00	deg
+candidate.dash.floor.e0400.menu.held_strafe.absolute_ups	480.34	ups
+candidate.dash.floor.e0400.menu.held_strafe.angle_deg	55.00	deg
+candidate.dash.floor.e0400.naive_harm_rate	0.0000	
+candidate.dash.floor.e0400.naive_harmed	0	n
+candidate.dash.floor.e0400.naive_mean_delta_ups	0.00	ups
+candidate.dash.floor.e0400.naive_points	624	n
+candidate.dash.floor.e0400.peak_gain_at_ms	16	ms
+candidate.dash.floor.e0400.peak_gain_ups	133.76	ups
+candidate.dash.floor.e0400.qualifies	no	
+candidate.dash.floor.e0400.reachable	yes	
+candidate.dash.floor.e0400.timing_degenerate	no	
+candidate.dash.floor.e0400.w2_gap	not-meaningful	
+candidate.dash.floor.e0400.w3_chain_gain_ups	-151.44	ups
+candidate.dash.floor.e0400.w3_entry_slope	0.0274	
+candidate.dash.floor.e0400.w5_over_best_technique_ups	-308.91	ups
+candidate.dash.floor.e0400.w6_aim_centroid_deg	0.00	deg
+candidate.dash.floor.e0400.w6_timing_centroid_ms	108	ms
+candidate.dash.floor.e0400.w6_top_aims	6	n
+candidate.dash.floor.e0400.w6_top_timings	24	n
+candidate.dash.floor.e0400.worst_latency	0	n
+candidate.dash.floor.e0500.anchor_commands	43	n
+candidate.dash.floor.e0500.anchor_speed_ups	500.00	ups
+candidate.dash.floor.e0500.avail_commands	47	n
+candidate.dash.floor.e0500.avail_ms	376	ms
+candidate.dash.floor.e0500.best_absolute_ups	278.63	ups
+candidate.dash.floor.e0500.best_aim_deg	285.00	deg
+candidate.dash.floor.e0500.best_delta_ups	4.64	ups
+candidate.dash.floor.e0500.best_timing_ms	16	ms
+candidate.dash.floor.e0500.control_best_absolute_ups	482.53	ups
+candidate.dash.floor.e0500.delta_aim0_ups	never-fired-at-aim-0	
+candidate.dash.floor.e0500.exec_window_ms	304	ms
+candidate.dash.floor.e0500.exec_window_span_ms	304	ms
+candidate.dash.floor.e0500.g3_unresponsive_candidate	0	n
+candidate.dash.floor.e0500.g3_unresponsive_control	0	n
+candidate.dash.floor.e0500.g5b_point_naive	not-meaningful	
+candidate.dash.floor.e0500.g7_impulse_measured_ups	258.58	ups
+candidate.dash.floor.e0500.g7_impulse_predicted_ups	258.59	ups
+candidate.dash.floor.e0500.material	no	
+candidate.dash.floor.e0500.menu.bunnyhop.absolute_ups	734.64	ups
+candidate.dash.floor.e0500.menu.bunnyhop.angle_deg	65.00	deg
+candidate.dash.floor.e0500.menu.held_forward.absolute_ups	480.35	ups
+candidate.dash.floor.e0500.menu.held_forward.angle_deg	55.00	deg
+candidate.dash.floor.e0500.menu.held_strafe.absolute_ups	480.35	ups
+candidate.dash.floor.e0500.menu.held_strafe.angle_deg	55.00	deg
+candidate.dash.floor.e0500.naive_harm_rate	0.0000	
+candidate.dash.floor.e0500.naive_harmed	0	n
+candidate.dash.floor.e0500.naive_mean_delta_ups	0.00	ups
+candidate.dash.floor.e0500.naive_points	624	n
+candidate.dash.floor.e0500.peak_gain_at_ms	16	ms
+candidate.dash.floor.e0500.peak_gain_ups	118.70	ups
+candidate.dash.floor.e0500.qualifies	no	
+candidate.dash.floor.e0500.reachable	yes	
+candidate.dash.floor.e0500.timing_degenerate	no	
+candidate.dash.floor.e0500.w2_gap	not-meaningful	
+candidate.dash.floor.e0500.w3_chain_gain_ups	-203.90	ups
+candidate.dash.floor.e0500.w3_entry_slope	-0.5246	
+candidate.dash.floor.e0500.w5_over_best_technique_ups	-456.01	ups
+candidate.dash.floor.e0500.w6_aim_centroid_deg	0.00	deg
+candidate.dash.floor.e0500.w6_timing_centroid_ms	164	ms
+candidate.dash.floor.e0500.w6_top_aims	4	n
+candidate.dash.floor.e0500.w6_top_timings	38	n
+candidate.dash.floor.e0500.worst_latency	0	n
+candidate.dash.floor.e0640.anchor_commands	43	n
+candidate.dash.floor.e0640.anchor_speed_ups	640.00	ups
+candidate.dash.floor.e0640.avail_commands	47	n
+candidate.dash.floor.e0640.avail_ms	376	ms
+candidate.dash.floor.e0640.best_absolute_ups	283.13	ups
+candidate.dash.floor.e0640.best_aim_deg	75.00	deg
+candidate.dash.floor.e0640.best_delta_ups	3.64	ups
+candidate.dash.floor.e0640.best_timing_ms	16	ms
+candidate.dash.floor.e0640.control_best_absolute_ups	482.87	ups
+candidate.dash.floor.e0640.delta_aim0_ups	never-fired-at-aim-0	
+candidate.dash.floor.e0640.exec_window_ms	376	ms
+candidate.dash.floor.e0640.exec_window_span_ms	376	ms
+candidate.dash.floor.e0640.g3_unresponsive_candidate	0	n
+candidate.dash.floor.e0640.g3_unresponsive_control	0	n
+candidate.dash.floor.e0640.g5b_point_naive	not-meaningful	
+candidate.dash.floor.e0640.g7_impulse_measured_ups	222.40	ups
+candidate.dash.floor.e0640.g7_impulse_predicted_ups	222.39	ups
+candidate.dash.floor.e0640.material	no	
+candidate.dash.floor.e0640.menu.bunnyhop.absolute_ups	829.98	ups
+candidate.dash.floor.e0640.menu.bunnyhop.angle_deg	70.00	deg
+candidate.dash.floor.e0640.menu.held_forward.absolute_ups	480.35	ups
+candidate.dash.floor.e0640.menu.held_forward.angle_deg	55.00	deg
+candidate.dash.floor.e0640.menu.held_strafe.absolute_ups	480.35	ups
+candidate.dash.floor.e0640.menu.held_strafe.angle_deg	55.00	deg
+candidate.dash.floor.e0640.naive_harm_rate	0.0000	
+candidate.dash.floor.e0640.naive_harmed	0	n
+candidate.dash.floor.e0640.naive_mean_delta_ups	0.00	ups
+candidate.dash.floor.e0640.naive_points	624	n
+candidate.dash.floor.e0640.peak_gain_at_ms	16	ms
+candidate.dash.floor.e0640.peak_gain_ups	89.81	ups
+candidate.dash.floor.e0640.qualifies	no	
+candidate.dash.floor.e0640.reachable	yes	
+candidate.dash.floor.e0640.timing_degenerate	no	
+candidate.dash.floor.e0640.w2_gap	not-meaningful	
+candidate.dash.floor.e0640.w3_chain_gain_ups	-199.74	ups
+candidate.dash.floor.e0640.w3_entry_slope	0.0321	
+candidate.dash.floor.e0640.w5_over_best_technique_ups	-546.85	ups
+candidate.dash.floor.e0640.w6_aim_centroid_deg	0.00	deg
+candidate.dash.floor.e0640.w6_timing_centroid_ms	200	ms
+candidate.dash.floor.e0640.w6_top_aims	4	n
+candidate.dash.floor.e0640.w6_top_timings	47	n
+candidate.dash.floor.e0640.worst_latency	0	n
+candidate.dash.floor.e0800.anchor_commands	43	n
+candidate.dash.floor.e0800.anchor_speed_ups	800.00	ups
+candidate.dash.floor.e0800.avail_commands	47	n
+candidate.dash.floor.e0800.avail_ms	376	ms
+candidate.dash.floor.e0800.best_absolute_ups	233.40	ups
+candidate.dash.floor.e0800.best_aim_deg	80.00	deg
+candidate.dash.floor.e0800.best_delta_ups	3.00	ups
+candidate.dash.floor.e0800.best_timing_ms	24	ms
+candidate.dash.floor.e0800.control_best_absolute_ups	483.54	ups
+candidate.dash.floor.e0800.delta_aim0_ups	never-fired-at-aim-0	
+candidate.dash.floor.e0800.exec_window_ms	376	ms
+candidate.dash.floor.e0800.exec_window_span_ms	376	ms
+candidate.dash.floor.e0800.g3_unresponsive_candidate	0	n
+candidate.dash.floor.e0800.g3_unresponsive_control	0	n
+candidate.dash.floor.e0800.g5b_point_naive	not-meaningful	
+candidate.dash.floor.e0800.g7_impulse_measured_ups	254.57	ups
+candidate.dash.floor.e0800.g7_impulse_predicted_ups	254.56	ups
+candidate.dash.floor.e0800.material	no	
+candidate.dash.floor.e0800.menu.bunnyhop.absolute_ups	944.35	ups
+candidate.dash.floor.e0800.menu.bunnyhop.angle_deg	75.00	deg
+candidate.dash.floor.e0800.menu.held_forward.absolute_ups	480.35	ups
+candidate.dash.floor.e0800.menu.held_forward.angle_deg	55.00	deg
+candidate.dash.floor.e0800.menu.held_strafe.absolute_ups	480.35	ups
+candidate.dash.floor.e0800.menu.held_strafe.angle_deg	55.00	deg
+candidate.dash.floor.e0800.naive_harm_rate	0.0000	
+candidate.dash.floor.e0800.naive_harmed	0	n
+candidate.dash.floor.e0800.naive_mean_delta_ups	0.00	ups
+candidate.dash.floor.e0800.naive_points	624	n
+candidate.dash.floor.e0800.peak_gain_at_ms	24	ms
+candidate.dash.floor.e0800.peak_gain_ups	80.62	ups
+candidate.dash.floor.e0800.qualifies	no	
+candidate.dash.floor.e0800.reachable	yes	
+candidate.dash.floor.e0800.timing_degenerate	no	
+candidate.dash.floor.e0800.w2_gap	not-meaningful	
+candidate.dash.floor.e0800.w3_chain_gain_ups	-250.14	ups
+candidate.dash.floor.e0800.w3_entry_slope	-0.3108	
+candidate.dash.floor.e0800.w5_over_best_technique_ups	-710.94	ups
+candidate.dash.floor.e0800.w6_aim_centroid_deg	0.00	deg
+candidate.dash.floor.e0800.w6_timing_centroid_ms	200	ms
+candidate.dash.floor.e0800.w6_top_aims	2	n
+candidate.dash.floor.e0800.w6_top_timings	47	n
+candidate.dash.floor.e0800.worst_latency	0	n
+candidate.dash.floor.e1000.anchor_commands	43	n
+candidate.dash.floor.e1000.anchor_speed_ups	1000.00	ups
+candidate.dash.floor.e1000.avail_commands	47	n
+candidate.dash.floor.e1000.avail_ms	376	ms
+candidate.dash.floor.e1000.best_absolute_ups	240.37	ups
+candidate.dash.floor.e1000.best_aim_deg	280.00	deg
+candidate.dash.floor.e1000.best_delta_ups	2.39	ups
+candidate.dash.floor.e1000.best_timing_ms	24	ms
+candidate.dash.floor.e1000.control_best_absolute_ups	484.36	ups
+candidate.dash.floor.e1000.delta_aim0_ups	never-fired-at-aim-0	
+candidate.dash.floor.e1000.exec_window_ms	376	ms
+candidate.dash.floor.e1000.exec_window_span_ms	376	ms
+candidate.dash.floor.e1000.g3_unresponsive_candidate	0	n
+candidate.dash.floor.e1000.g3_unresponsive_control	0	n
+candidate.dash.floor.e1000.g5b_point_naive	not-meaningful	
+candidate.dash.floor.e1000.g7_impulse_measured_ups	219.89	ups
+candidate.dash.floor.e1000.g7_impulse_predicted_ups	219.85	ups
+candidate.dash.floor.e1000.material	no	
+candidate.dash.floor.e1000.menu.bunnyhop.absolute_ups	1143.73	ups
+candidate.dash.floor.e1000.menu.bunnyhop.angle_deg	75.00	deg
+candidate.dash.floor.e1000.menu.held_forward.absolute_ups	480.35	ups
+candidate.dash.floor.e1000.menu.held_forward.angle_deg	55.00	deg
+candidate.dash.floor.e1000.menu.held_strafe.absolute_ups	480.35	ups
+candidate.dash.floor.e1000.menu.held_strafe.angle_deg	55.00	deg
+candidate.dash.floor.e1000.naive_harm_rate	0.0000	
+candidate.dash.floor.e1000.naive_harmed	0	n
+candidate.dash.floor.e1000.naive_mean_delta_ups	0.00	ups
+candidate.dash.floor.e1000.naive_points	624	n
+candidate.dash.floor.e1000.peak_gain_at_ms	24	ms
+candidate.dash.floor.e1000.peak_gain_ups	60.68	ups
+candidate.dash.floor.e1000.qualifies	no	
+candidate.dash.floor.e1000.reachable	yes	
+candidate.dash.floor.e1000.timing_degenerate	no	
+candidate.dash.floor.e1000.w2_gap	not-meaningful	
+candidate.dash.floor.e1000.w3_chain_gain_ups	-244.00	ups
+candidate.dash.floor.e1000.w3_entry_slope	0.0348	
+candidate.dash.floor.e1000.w5_over_best_technique_ups	-903.37	ups
+candidate.dash.floor.e1000.w6_aim_centroid_deg	0.00	deg
+candidate.dash.floor.e1000.w6_timing_centroid_ms	200	ms
+candidate.dash.floor.e1000.w6_top_aims	4	n
+candidate.dash.floor.e1000.w6_top_timings	47	n
+candidate.dash.floor.e1000.worst_latency	0	n
+candidate.dash.floor.g5a.arming_events	30	n
+candidate.dash.floor.g5a.available_commands	1500	n
+candidate.dash.floor.g5a.peak_speed_ups	320.00	ups
+candidate.dash.floor.w3_chain_gain_best_ups	-151.44	ups
+candidate.dash.floor.w3_entry_slope_max	0.0348	
+candidate.dash.floor.w3_entry_slope_min	-0.5246	
+candidate.dash.floor.w4_best_delta_ups	6.73	ups
+candidate.dash.g2.measurements_compared	1059	n
+candidate.dash.g2.measurements_moved	0	n
+candidate.dash.g3.worst_excess_unresponsive_candidate	5	n
+candidate.dash.g3.worst_excess_unresponsive_control	3	n
+candidate.dash.g3.worst_latency_commands	0	n
+candidate.dash.g5b_median	0.0000	
+candidate.dash.g7.worst_impulse_residual_ups	117.98	ups
+candidate.dash.g7.worst_surviving_aim_step_ups	428.88	ups
+candidate.dash.g7.worst_surviving_geometry_step_ups	579.37	ups
+candidate.dash.ledge256.e0320.absolute_aim0_ups	380.80	ups
+candidate.dash.ledge256.e0320.anchor_commands	43	n
+candidate.dash.ledge256.e0320.anchor_speed_ups	320.00	ups
+candidate.dash.ledge256.e0320.avail_commands	47	n
+candidate.dash.ledge256.e0320.avail_ms	376	ms
+candidate.dash.ledge256.e0320.best_absolute_ups	527.11	ups
+candidate.dash.ledge256.e0320.best_aim_deg	85.00	deg
+candidate.dash.ledge256.e0320.best_delta_ups	169.16	ups
+candidate.dash.ledge256.e0320.best_timing_ms	24	ms
+candidate.dash.ledge256.e0320.control_best_absolute_ups	482.51	ups
+candidate.dash.ledge256.e0320.delta_aim0_ups	60.80	ups
+candidate.dash.ledge256.e0320.exec_window_ms	160	ms
+candidate.dash.ledge256.e0320.exec_window_span_ms	160	ms
+candidate.dash.ledge256.e0320.g3_unresponsive_candidate	0	n
+candidate.dash.ledge256.e0320.g3_unresponsive_control	0	n
+candidate.dash.ledge256.e0320.g5b_point_naive	0.3594	
+candidate.dash.ledge256.e0320.g7_aim_at_deg	277.27	deg
+candidate.dash.ledge256.e0320.g7_aim_refined_ups	350.13	ups
+candidate.dash.ledge256.e0320.g7_geometry_at_units	15.469	units
+candidate.dash.ledge256.e0320.g7_geometry_refined_ups	140.91	ups
+candidate.dash.ledge256.e0320.g7_impulse_measured_ups	369.06	ups
+candidate.dash.ledge256.e0320.g7_impulse_predicted_ups	369.05	ups
+candidate.dash.ledge256.e0320.material	yes	
+candidate.dash.ledge256.e0320.menu.bunnyhop.absolute_ups	598.58	ups
+candidate.dash.ledge256.e0320.menu.bunnyhop.angle_deg	60.00	deg
+candidate.dash.ledge256.e0320.menu.held_forward.absolute_ups	480.33	ups
+candidate.dash.ledge256.e0320.menu.held_forward.angle_deg	55.00	deg
+candidate.dash.ledge256.e0320.menu.held_strafe.absolute_ups	480.33	ups
+candidate.dash.ledge256.e0320.menu.held_strafe.angle_deg	55.00	deg
+candidate.dash.ledge256.e0320.naive_harm_rate	0.0000	
+candidate.dash.ledge256.e0320.naive_harmed	0	n
+candidate.dash.ledge256.e0320.naive_mean_delta_ups	13.68	ups
+candidate.dash.ledge256.e0320.naive_points	624	n
+candidate.dash.ledge256.e0320.peak_gain_at_ms	24	ms
+candidate.dash.ledge256.e0320.peak_gain_ups	187.34	ups
+candidate.dash.ledge256.e0320.qualifies	yes	
+candidate.dash.ledge256.e0320.reachable	yes	
+candidate.dash.ledge256.e0320.timing_degenerate	no	
+candidate.dash.ledge256.e0320.w2_gap	0.9191	
+candidate.dash.ledge256.e0320.w3_chain_gain_ups	44.60	ups
+candidate.dash.ledge256.e0320.w3_mechanic_alone_ups	380.80	ups
+candidate.dash.ledge256.e0320.w5_over_best_technique_ups	-71.47	ups
+candidate.dash.ledge256.e0320.w6_aim_centroid_deg	0.00	deg
+candidate.dash.ledge256.e0320.w6_timing_centroid_ms	92	ms
+candidate.dash.ledge256.e0320.w6_top_aims	2	n
+candidate.dash.ledge256.e0320.w6_top_timings	20	n
+candidate.dash.ledge256.e0320.worst_latency	0	n
+candidate.dash.ledge256.e0400.anchor_commands	43	n
+candidate.dash.ledge256.e0400.anchor_speed_ups	400.00	ups
+candidate.dash.ledge256.e0400.avail_commands	47	n
+candidate.dash.ledge256.e0400.avail_ms	376	ms
+candidate.dash.ledge256.e0400.best_absolute_ups	586.26	ups
+candidate.dash.ledge256.e0400.best_aim_deg	85.00	deg
+candidate.dash.ledge256.e0400.best_delta_ups	152.88	ups
+candidate.dash.ledge256.e0400.best_timing_ms	16	ms
+candidate.dash.ledge256.e0400.control_best_absolute_ups	530.08	ups
+candidate.dash.ledge256.e0400.delta_aim0_ups	never-fired-at-aim-0	
+candidate.dash.ledge256.e0400.exec_window_ms	376	ms
+candidate.dash.ledge256.e0400.exec_window_span_ms	376	ms
+candidate.dash.ledge256.e0400.g3_unresponsive_candidate	0	n
+candidate.dash.ledge256.e0400.g3_unresponsive_control	0	n
+candidate.dash.ledge256.e0400.g5b_point_naive	not-meaningful	
+candidate.dash.ledge256.e0400.g7_aim_at_deg	75.08	deg
+candidate.dash.ledge256.e0400.g7_aim_refined_ups	342.85	ups
+candidate.dash.ledge256.e0400.g7_geometry_at_units	12.906	units
+candidate.dash.ledge256.e0400.g7_geometry_refined_ups	149.35	ups
+candidate.dash.ledge256.e0400.g7_impulse_measured_ups	362.10	ups
+candidate.dash.ledge256.e0400.g7_impulse_predicted_ups	362.11	ups
+candidate.dash.ledge256.e0400.material	yes	
+candidate.dash.ledge256.e0400.menu.bunnyhop.absolute_ups	640.01	ups
+candidate.dash.ledge256.e0400.menu.bunnyhop.angle_deg	60.00	deg
+candidate.dash.ledge256.e0400.menu.held_forward.absolute_ups	480.34	ups
+candidate.dash.ledge256.e0400.menu.held_forward.angle_deg	55.00	deg
+candidate.dash.ledge256.e0400.menu.held_strafe.absolute_ups	480.34	ups
+candidate.dash.ledge256.e0400.menu.held_strafe.angle_deg	55.00	deg
+candidate.dash.ledge256.e0400.naive_harm_rate	0.0000	
+candidate.dash.ledge256.e0400.naive_harmed	0	n
+candidate.dash.ledge256.e0400.naive_mean_delta_ups	0.18	ups
+candidate.dash.ledge256.e0400.naive_points	624	n
+candidate.dash.ledge256.e0400.peak_gain_at_ms	16	ms
+candidate.dash.ledge256.e0400.peak_gain_ups	161.41	ups
+candidate.dash.ledge256.e0400.qualifies	yes	
+candidate.dash.ledge256.e0400.reachable	yes	
+candidate.dash.ledge256.e0400.timing_degenerate	no	
+candidate.dash.ledge256.e0400.w2_gap	0.9988	
+candidate.dash.ledge256.e0400.w3_chain_gain_ups	56.18	ups
+candidate.dash.ledge256.e0400.w3_entry_slope	0.7394	
+candidate.dash.ledge256.e0400.w5_over_best_technique_ups	-53.75	ups
+candidate.dash.ledge256.e0400.w6_aim_centroid_deg	0.00	deg
+candidate.dash.ledge256.e0400.w6_timing_centroid_ms	200	ms
+candidate.dash.ledge256.e0400.w6_top_aims	4	n
+candidate.dash.ledge256.e0400.w6_top_timings	47	n
+candidate.dash.ledge256.e0400.worst_latency	0	n
+candidate.dash.ledge256.e0500.anchor_commands	43	n
+candidate.dash.ledge256.e0500.anchor_speed_ups	500.00	ups
+candidate.dash.ledge256.e0500.avail_commands	47	n
+candidate.dash.ledge256.e0500.avail_ms	376	ms
+candidate.dash.ledge256.e0500.best_absolute_ups	670.13	ups
+candidate.dash.ledge256.e0500.best_aim_deg	70.00	deg
+candidate.dash.ledge256.e0500.best_delta_ups	192.72	ups
+candidate.dash.ledge256.e0500.best_timing_ms	16	ms
+candidate.dash.ledge256.e0500.control_best_absolute_ups	624.84	ups
+candidate.dash.ledge256.e0500.delta_aim0_ups	never-fired-at-aim-0	
+candidate.dash.ledge256.e0500.exec_window_ms	160	ms
+candidate.dash.ledge256.e0500.exec_window_span_ms	168	ms
+candidate.dash.ledge256.e0500.g3_unresponsive_candidate	0	n
+candidate.dash.ledge256.e0500.g3_unresponsive_control	0	n
+candidate.dash.ledge256.e0500.g5b_point_naive	not-meaningful	
+candidate.dash.ledge256.e0500.g7_aim_at_deg	68.83	deg
+candidate.dash.ledge256.e0500.g7_aim_refined_ups	333.83	ups
+candidate.dash.ledge256.e0500.g7_geometry_at_units	14.781	units
+candidate.dash.ledge256.e0500.g7_geometry_refined_ups	142.90	ups
+candidate.dash.ledge256.e0500.g7_impulse_measured_ups	209.69	ups
+candidate.dash.ledge256.e0500.g7_impulse_predicted_ups	209.70	ups
+candidate.dash.ledge256.e0500.material	yes	
+candidate.dash.ledge256.e0500.menu.bunnyhop.absolute_ups	734.64	ups
+candidate.dash.ledge256.e0500.menu.bunnyhop.angle_deg	65.00	deg
+candidate.dash.ledge256.e0500.menu.held_forward.absolute_ups	480.35	ups
+candidate.dash.ledge256.e0500.menu.held_forward.angle_deg	55.00	deg
+candidate.dash.ledge256.e0500.menu.held_strafe.absolute_ups	480.35	ups
+candidate.dash.ledge256.e0500.menu.held_strafe.angle_deg	55.00	deg
+candidate.dash.ledge256.e0500.naive_harm_rate	0.0000	
+candidate.dash.ledge256.e0500.naive_harmed	0	n
+candidate.dash.ledge256.e0500.naive_mean_delta_ups	0.00	ups
+candidate.dash.ledge256.e0500.naive_points	624	n
+candidate.dash.ledge256.e0500.peak_gain_at_ms	1392	ms
+candidate.dash.ledge256.e0500.peak_gain_ups	192.72	ups
+candidate.dash.ledge256.e0500.qualifies	yes	
+candidate.dash.ledge256.e0500.reachable	yes	
+candidate.dash.ledge256.e0500.timing_degenerate	no	
+candidate.dash.ledge256.e0500.w2_gap	1.0000	
+candidate.dash.ledge256.e0500.w3_chain_gain_ups	45.29	ups
+candidate.dash.ledge256.e0500.w3_entry_slope	0.8387	
+candidate.dash.ledge256.e0500.w5_over_best_technique_ups	-64.52	ups
+candidate.dash.ledge256.e0500.w6_aim_centroid_deg	0.00	deg
+candidate.dash.ledge256.e0500.w6_timing_centroid_ms	93	ms
+candidate.dash.ledge256.e0500.w6_top_aims	2	n
+candidate.dash.ledge256.e0500.w6_top_timings	20	n
+candidate.dash.ledge256.e0500.worst_latency	0	n
+candidate.dash.ledge256.e0640.anchor_commands	43	n
+candidate.dash.ledge256.e0640.anchor_speed_ups	640.00	ups
+candidate.dash.ledge256.e0640.avail_commands	47	n
+candidate.dash.ledge256.e0640.avail_ms	376	ms
+candidate.dash.ledge256.e0640.best_absolute_ups	723.11	ups
+candidate.dash.ledge256.e0640.best_aim_deg	90.00	deg
+candidate.dash.ledge256.e0640.best_delta_ups	108.15	ups
+candidate.dash.ledge256.e0640.best_timing_ms	288	ms
+candidate.dash.ledge256.e0640.control_best_absolute_ups	804.08	ups
+candidate.dash.ledge256.e0640.delta_aim0_ups	never-fired-at-aim-0	
+candidate.dash.ledge256.e0640.exec_window_ms	376	ms
+candidate.dash.ledge256.e0640.exec_window_span_ms	376	ms
+candidate.dash.ledge256.e0640.g3_unresponsive_candidate	0	n
+candidate.dash.ledge256.e0640.g3_unresponsive_control	0	n
+candidate.dash.ledge256.e0640.g5b_point_naive	not-meaningful	
+candidate.dash.ledge256.e0640.g7_aim_at_deg	93.98	deg
+candidate.dash.ledge256.e0640.g7_aim_refined_ups	418.73	ups
+candidate.dash.ledge256.e0640.g7_geometry_at_units	13.969	units
+candidate.dash.ledge256.e0640.g7_geometry_refined_ups	106.31	ups
+candidate.dash.ledge256.e0640.g7_impulse_measured_ups	395.49	ups
+candidate.dash.ledge256.e0640.g7_impulse_predicted_ups	395.47	ups
+candidate.dash.ledge256.e0640.material	yes	
+candidate.dash.ledge256.e0640.menu.bunnyhop.absolute_ups	829.98	ups
+candidate.dash.ledge256.e0640.menu.bunnyhop.angle_deg	70.00	deg
+candidate.dash.ledge256.e0640.menu.held_forward.absolute_ups	467.70	ups
+candidate.dash.ledge256.e0640.menu.held_forward.angle_deg	50.00	deg
+candidate.dash.ledge256.e0640.menu.held_strafe.absolute_ups	482.80	ups
+candidate.dash.ledge256.e0640.menu.held_strafe.angle_deg	55.00	deg
+candidate.dash.ledge256.e0640.naive_harm_rate	0.0000	
+candidate.dash.ledge256.e0640.naive_harmed	0	n
+candidate.dash.ledge256.e0640.naive_mean_delta_ups	0.00	ups
+candidate.dash.ledge256.e0640.naive_points	624	n
+candidate.dash.ledge256.e0640.peak_gain_at_ms	304	ms
+candidate.dash.ledge256.e0640.peak_gain_ups	114.50	ups
+candidate.dash.ledge256.e0640.qualifies	yes	
+candidate.dash.ledge256.e0640.reachable	yes	
+candidate.dash.ledge256.e0640.timing_degenerate	no	
+candidate.dash.ledge256.e0640.w2_gap	1.0000	
+candidate.dash.ledge256.e0640.w3_chain_gain_ups	-80.98	ups
+candidate.dash.ledge256.e0640.w3_entry_slope	0.3784	
+candidate.dash.ledge256.e0640.w5_over_best_technique_ups	-106.87	ups
+candidate.dash.ledge256.e0640.w6_aim_centroid_deg	0.00	deg
+candidate.dash.ledge256.e0640.w6_timing_centroid_ms	200	ms
+candidate.dash.ledge256.e0640.w6_top_aims	4	n
+candidate.dash.ledge256.e0640.w6_top_timings	47	n
+candidate.dash.ledge256.e0640.worst_latency	0	n
+candidate.dash.ledge256.e0800.anchor_commands	43	n
+candidate.dash.ledge256.e0800.anchor_speed_ups	800.00	ups
+candidate.dash.ledge256.e0800.avail_commands	47	n
+candidate.dash.ledge256.e0800.avail_ms	376	ms
+candidate.dash.ledge256.e0800.best_absolute_ups	896.85	ups
+candidate.dash.ledge256.e0800.best_aim_deg	90.00	deg
+candidate.dash.ledge256.e0800.best_delta_ups	131.30	ups
+candidate.dash.ledge256.e0800.best_timing_ms	48	ms
+candidate.dash.ledge256.e0800.control_best_absolute_ups	935.53	ups
+candidate.dash.ledge256.e0800.delta_aim0_ups	never-fired-at-aim-0	
+candidate.dash.ledge256.e0800.exec_window_ms	184	ms
+candidate.dash.ledge256.e0800.exec_window_span_ms	184	ms
+candidate.dash.ledge256.e0800.g3_unresponsive_candidate	0	n
+candidate.dash.ledge256.e0800.g3_unresponsive_control	0	n
+candidate.dash.ledge256.e0800.g5b_point_naive	not-meaningful	
+candidate.dash.ledge256.e0800.g7_aim_at_deg	102.73	deg
+candidate.dash.ledge256.e0800.g7_aim_refined_ups	428.88	ups
+candidate.dash.ledge256.e0800.g7_geometry_at_units	12.156	units
+candidate.dash.ledge256.e0800.g7_geometry_refined_ups	268.66	ups
+candidate.dash.ledge256.e0800.g7_impulse_measured_ups	395.49	ups
+candidate.dash.ledge256.e0800.g7_impulse_predicted_ups	395.47	ups
+candidate.dash.ledge256.e0800.material	yes	
+candidate.dash.ledge256.e0800.menu.bunnyhop.absolute_ups	944.35	ups
+candidate.dash.ledge256.e0800.menu.bunnyhop.angle_deg	75.00	deg
+candidate.dash.ledge256.e0800.menu.held_forward.absolute_ups	466.08	ups
+candidate.dash.ledge256.e0800.menu.held_forward.angle_deg	50.00	deg
+candidate.dash.ledge256.e0800.menu.held_strafe.absolute_ups	482.44	ups
+candidate.dash.ledge256.e0800.menu.held_strafe.angle_deg	55.00	deg
+candidate.dash.ledge256.e0800.naive_harm_rate	0.0000	
+candidate.dash.ledge256.e0800.naive_harmed	0	n
+candidate.dash.ledge256.e0800.naive_mean_delta_ups	0.00	ups
+candidate.dash.ledge256.e0800.naive_points	624	n
+candidate.dash.ledge256.e0800.peak_gain_at_ms	1392	ms
+candidate.dash.ledge256.e0800.peak_gain_ups	131.30	ups
+candidate.dash.ledge256.e0800.qualifies	yes	
+candidate.dash.ledge256.e0800.reachable	yes	
+candidate.dash.ledge256.e0800.timing_degenerate	no	
+candidate.dash.ledge256.e0800.w2_gap	1.0000	
+candidate.dash.ledge256.e0800.w3_chain_gain_ups	-38.68	ups
+candidate.dash.ledge256.e0800.w3_entry_slope	1.0859	
+candidate.dash.ledge256.e0800.w5_over_best_technique_ups	-47.50	ups
+candidate.dash.ledge256.e0800.w6_aim_centroid_deg	0.00	deg
+candidate.dash.ledge256.e0800.w6_timing_centroid_ms	104	ms
+candidate.dash.ledge256.e0800.w6_top_aims	4	n
+candidate.dash.ledge256.e0800.w6_top_timings	23	n
+candidate.dash.ledge256.e0800.worst_latency	0	n
+candidate.dash.ledge256.e1000.anchor_commands	43	n
+candidate.dash.ledge256.e1000.anchor_speed_ups	1000.00	ups
+candidate.dash.ledge256.e1000.avail_commands	47	n
+candidate.dash.ledge256.e1000.avail_ms	376	ms
+candidate.dash.ledge256.e1000.best_absolute_ups	688.99	ups
+candidate.dash.ledge256.e1000.best_aim_deg	240.00	deg
+candidate.dash.ledge256.e1000.best_delta_ups	408.13	ups
+candidate.dash.ledge256.e1000.best_timing_ms	288	ms
+candidate.dash.ledge256.e1000.control_best_absolute_ups	1099.34	ups
+candidate.dash.ledge256.e1000.delta_aim0_ups	never-fired-at-aim-0	
+candidate.dash.ledge256.e1000.exec_window_ms	8	ms
+candidate.dash.ledge256.e1000.exec_window_span_ms	8	ms
+candidate.dash.ledge256.e1000.g3_unresponsive_candidate	0	n
+candidate.dash.ledge256.e1000.g3_unresponsive_control	0	n
+candidate.dash.ledge256.e1000.g5b_point_naive	not-meaningful	
+candidate.dash.ledge256.e1000.g7_aim_at_deg	109.77	deg
+candidate.dash.ledge256.e1000.g7_aim_refined_ups	242.70	ups
+candidate.dash.ledge256.e1000.g7_geometry_at_units	14.469	units
+candidate.dash.ledge256.e1000.g7_geometry_refined_ups	579.37	ups
+candidate.dash.ledge256.e1000.g7_impulse_measured_ups	770.25	ups
+candidate.dash.ledge256.e1000.g7_impulse_predicted_ups	770.24	ups
+candidate.dash.ledge256.e1000.material	yes	
+candidate.dash.ledge256.e1000.menu.bunnyhop.absolute_ups	1143.73	ups
+candidate.dash.ledge256.e1000.menu.bunnyhop.angle_deg	75.00	deg
+candidate.dash.ledge256.e1000.menu.held_forward.absolute_ups	482.62	ups
+candidate.dash.ledge256.e1000.menu.held_forward.angle_deg	55.00	deg
+candidate.dash.ledge256.e1000.menu.held_strafe.absolute_ups	482.61	ups
+candidate.dash.ledge256.e1000.menu.held_strafe.angle_deg	55.00	deg
+candidate.dash.ledge256.e1000.naive_harm_rate	0.0000	
+candidate.dash.ledge256.e1000.naive_harmed	0	n
+candidate.dash.ledge256.e1000.naive_mean_delta_ups	0.00	ups
+candidate.dash.ledge256.e1000.naive_points	624	n
+candidate.dash.ledge256.e1000.peak_gain_at_ms	1392	ms
+candidate.dash.ledge256.e1000.peak_gain_ups	408.13	ups
+candidate.dash.ledge256.e1000.qualifies	yes	
+candidate.dash.ledge256.e1000.reachable	yes	
+candidate.dash.ledge256.e1000.timing_degenerate	no	
+candidate.dash.ledge256.e1000.w2_gap	1.0000	
+candidate.dash.ledge256.e1000.w3_chain_gain_ups	-410.36	ups
+candidate.dash.ledge256.e1000.w3_entry_slope	-1.0393	
+candidate.dash.ledge256.e1000.w5_over_best_technique_ups	-454.74	ups
+candidate.dash.ledge256.e1000.w6_aim_centroid_deg	0.00	deg
+candidate.dash.ledge256.e1000.w6_timing_centroid_ms	288	ms
+candidate.dash.ledge256.e1000.w6_top_aims	2	n
+candidate.dash.ledge256.e1000.w6_top_timings	1	n
+candidate.dash.ledge256.e1000.worst_latency	0	n
+candidate.dash.ledge256.g5a.arming_events	29	n
+candidate.dash.ledge256.g5a.available_commands	1450	n
+candidate.dash.ledge256.g5a.peak_speed_ups	320.00	ups
+candidate.dash.ledge256.g5b_median	0.3594	
+candidate.dash.ledge256.w2_gap_median	1.0000	
+candidate.dash.ledge256.w3_chain_gain_best_ups	56.18	ups
+candidate.dash.ledge256.w3_entry_slope_max	1.0859	
+candidate.dash.ledge256.w3_entry_slope_min	-1.0393	
+candidate.dash.ledge256.w4_best_delta_ups	408.13	ups
+candidate.dash.ramp26.e0320.absolute_aim0_ups	287.61	ups
+candidate.dash.ramp26.e0320.anchor_commands	40	n
+candidate.dash.ramp26.e0320.anchor_speed_ups	320.00	ups
+candidate.dash.ramp26.e0320.avail_commands	47	n
+candidate.dash.ramp26.e0320.avail_ms	376	ms
+candidate.dash.ramp26.e0320.best_absolute_ups	169.72	ups
+candidate.dash.ramp26.e0320.best_aim_deg	275.00	deg
+candidate.dash.ramp26.e0320.best_delta_ups	27.51	ups
+candidate.dash.ramp26.e0320.best_timing_ms	16	ms
+candidate.dash.ramp26.e0320.control_best_absolute_ups	482.51	ups
+candidate.dash.ramp26.e0320.delta_aim0_ups	0.00	ups
+candidate.dash.ramp26.e0320.exec_window_ms	376	ms
+candidate.dash.ramp26.e0320.exec_window_span_ms	376	ms
+candidate.dash.ramp26.e0320.g3_unresponsive_candidate	0	n
+candidate.dash.ramp26.e0320.g3_unresponsive_control	0	n
+candidate.dash.ramp26.e0320.g5b_point_naive	0.0000	
+candidate.dash.ramp26.e0320.g7_aim_at_deg	24.61	deg
+candidate.dash.ramp26.e0320.g7_aim_refined_ups	44.08	ups
+candidate.dash.ramp26.e0320.g7_impulse_measured_ups	381.51	ups
+candidate.dash.ramp26.e0320.g7_impulse_predicted_ups	381.51	ups
+candidate.dash.ramp26.e0320.material	yes	
+candidate.dash.ramp26.e0320.menu.bunnyhop.absolute_ups	598.58	ups
+candidate.dash.ramp26.e0320.menu.bunnyhop.angle_deg	60.00	deg
+candidate.dash.ramp26.e0320.menu.held_forward.absolute_ups	480.33	ups
+candidate.dash.ramp26.e0320.menu.held_forward.angle_deg	55.00	deg
+candidate.dash.ramp26.e0320.menu.held_strafe.absolute_ups	480.33	ups
+candidate.dash.ramp26.e0320.menu.held_strafe.angle_deg	55.00	deg
+candidate.dash.ramp26.e0320.naive_harm_rate	0.0032	
+candidate.dash.ramp26.e0320.naive_harmed	2	n
+candidate.dash.ramp26.e0320.naive_mean_delta_ups	3.33	ups
+candidate.dash.ramp26.e0320.naive_points	624	n
+candidate.dash.ramp26.e0320.peak_gain_at_ms	16	ms
+candidate.dash.ramp26.e0320.peak_gain_ups	253.91	ups
+candidate.dash.ramp26.e0320.qualifies	yes	
+candidate.dash.ramp26.e0320.reachable	yes	
+candidate.dash.ramp26.e0320.timing_degenerate	no	
+candidate.dash.ramp26.e0320.w2_gap	0.8790	
+candidate.dash.ramp26.e0320.w3_chain_gain_ups	-312.79	ups
+candidate.dash.ramp26.e0320.w3_mechanic_alone_ups	287.61	ups
+candidate.dash.ramp26.e0320.w5_over_best_technique_ups	-428.86	ups
+candidate.dash.ramp26.e0320.w6_aim_centroid_deg	0.00	deg
+candidate.dash.ramp26.e0320.w6_timing_centroid_ms	200	ms
+candidate.dash.ramp26.e0320.w6_top_aims	2	n
+candidate.dash.ramp26.e0320.w6_top_timings	47	n
+candidate.dash.ramp26.e0320.worst_latency	0	n
+candidate.dash.ramp26.e0400.absolute_aim0_ups	287.61	ups
+candidate.dash.ramp26.e0400.anchor_commands	41	n
+candidate.dash.ramp26.e0400.anchor_speed_ups	219.57	ups
+candidate.dash.ramp26.e0400.avail_commands	47	n
+candidate.dash.ramp26.e0400.avail_ms	376	ms
+candidate.dash.ramp26.e0400.best_absolute_ups	219.89	ups
+candidate.dash.ramp26.e0400.best_aim_deg	280.00	deg
+candidate.dash.ramp26.e0400.best_delta_ups	27.59	ups
+candidate.dash.ramp26.e0400.best_timing_ms	16	ms
+candidate.dash.ramp26.e0400.control_best_absolute_ups	482.53	ups
+candidate.dash.ramp26.e0400.delta_aim0_ups	0.00	ups
+candidate.dash.ramp26.e0400.exec_window_ms	376	ms
+candidate.dash.ramp26.e0400.exec_window_span_ms	376	ms
+candidate.dash.ramp26.e0400.g3_unresponsive_candidate	0	n
+candidate.dash.ramp26.e0400.g3_unresponsive_control	0	n
+candidate.dash.ramp26.e0400.g5b_point_naive	0.0000	
+candidate.dash.ramp26.e0400.g7_aim_at_deg	281.33	deg
+candidate.dash.ramp26.e0400.g7_aim_refined_ups	12.08	ups
+candidate.dash.ramp26.e0400.g7_impulse_measured_ups	351.55	ups
+candidate.dash.ramp26.e0400.g7_impulse_predicted_ups	351.56	ups
+candidate.dash.ramp26.e0400.material	yes	
+candidate.dash.ramp26.e0400.menu.bunnyhop.absolute_ups	640.01	ups
+candidate.dash.ramp26.e0400.menu.bunnyhop.angle_deg	60.00	deg
+candidate.dash.ramp26.e0400.menu.held_forward.absolute_ups	480.34	ups
+candidate.dash.ramp26.e0400.menu.held_forward.angle_deg	55.00	deg
+candidate.dash.ramp26.e0400.menu.held_strafe.absolute_ups	480.34	ups
+candidate.dash.ramp26.e0400.menu.held_strafe.angle_deg	55.00	deg
+candidate.dash.ramp26.e0400.naive_harm_rate	0.0000	
+candidate.dash.ramp26.e0400.naive_harmed	0	n
+candidate.dash.ramp26.e0400.naive_mean_delta_ups	0.32	ups
+candidate.dash.ramp26.e0400.naive_points	624	n
+candidate.dash.ramp26.e0400.peak_gain_at_ms	936	ms
+candidate.dash.ramp26.e0400.peak_gain_ups	245.47	ups
+candidate.dash.ramp26.e0400.qualifies	yes	
+candidate.dash.ramp26.e0400.reachable	yes	
+candidate.dash.ramp26.e0400.timing_degenerate	no	
+candidate.dash.ramp26.e0400.w2_gap	0.9883	
+candidate.dash.ramp26.e0400.w3_chain_gain_ups	-262.64	ups
+candidate.dash.ramp26.e0400.w3_entry_slope	0.6272	
+candidate.dash.ramp26.e0400.w3_mechanic_alone_ups	287.61	ups
+candidate.dash.ramp26.e0400.w5_over_best_technique_ups	-420.11	ups
+candidate.dash.ramp26.e0400.w6_aim_centroid_deg	0.00	deg
+candidate.dash.ramp26.e0400.w6_timing_centroid_ms	200	ms
+candidate.dash.ramp26.e0400.w6_top_aims	2	n
+candidate.dash.ramp26.e0400.w6_top_timings	47	n
+candidate.dash.ramp26.e0400.worst_latency	0	n
+candidate.dash.ramp26.e0500.absolute_aim0_ups	287.61	ups
+candidate.dash.ramp26.e0500.anchor_commands	41	n
+candidate.dash.ramp26.e0500.anchor_speed_ups	300.33	ups
+candidate.dash.ramp26.e0500.avail_commands	47	n
+candidate.dash.ramp26.e0500.avail_ms	376	ms
+candidate.dash.ramp26.e0500.best_absolute_ups	222.15	ups
+candidate.dash.ramp26.e0500.best_aim_deg	80.00	deg
+candidate.dash.ramp26.e0500.best_delta_ups	30.22	ups
+candidate.dash.ramp26.e0500.best_timing_ms	376	ms
+candidate.dash.ramp26.e0500.control_best_absolute_ups	482.53	ups
+candidate.dash.ramp26.e0500.delta_aim0_ups	0.00	ups
+candidate.dash.ramp26.e0500.exec_window_ms	376	ms
+candidate.dash.ramp26.e0500.exec_window_span_ms	376	ms
+candidate.dash.ramp26.e0500.g3_unresponsive_candidate	0	n
+candidate.dash.ramp26.e0500.g3_unresponsive_control	0	n
+candidate.dash.ramp26.e0500.g5b_point_naive	0.0000	
+candidate.dash.ramp26.e0500.g7_aim_at_deg	279.77	deg
+candidate.dash.ramp26.e0500.g7_aim_refined_ups	7.51	ups
+candidate.dash.ramp26.e0500.g7_geometry_at_units	-5.281	units
+candidate.dash.ramp26.e0500.g7_geometry_refined_ups	31.68	ups
+candidate.dash.ramp26.e0500.g7_impulse_measured_ups	335.37	ups
+candidate.dash.ramp26.e0500.g7_impulse_predicted_ups	335.37	ups
+candidate.dash.ramp26.e0500.material	yes	
+candidate.dash.ramp26.e0500.menu.bunnyhop.absolute_ups	640.02	ups
+candidate.dash.ramp26.e0500.menu.bunnyhop.angle_deg	60.00	deg
+candidate.dash.ramp26.e0500.menu.held_forward.absolute_ups	479.80	ups
+candidate.dash.ramp26.e0500.menu.held_forward.angle_deg	55.00	deg
+candidate.dash.ramp26.e0500.menu.held_strafe.absolute_ups	479.80	ups
+candidate.dash.ramp26.e0500.menu.held_strafe.angle_deg	55.00	deg
+candidate.dash.ramp26.e0500.naive_harm_rate	0.0000	
+candidate.dash.ramp26.e0500.naive_harmed	0	n
+candidate.dash.ramp26.e0500.naive_mean_delta_ups	0.15	ups
+candidate.dash.ramp26.e0500.naive_points	624	n
+candidate.dash.ramp26.e0500.peak_gain_at_ms	928	ms
+candidate.dash.ramp26.e0500.peak_gain_ups	405.79	ups
+candidate.dash.ramp26.e0500.qualifies	yes	
+candidate.dash.ramp26.e0500.reachable	yes	
+candidate.dash.ramp26.e0500.timing_degenerate	no	
+candidate.dash.ramp26.e0500.w2_gap	0.9950	
+candidate.dash.ramp26.e0500.w3_chain_gain_ups	-260.38	ups
+candidate.dash.ramp26.e0500.w3_entry_slope	0.0226	
+candidate.dash.ramp26.e0500.w3_mechanic_alone_ups	287.61	ups
+candidate.dash.ramp26.e0500.w5_over_best_technique_ups	-417.86	ups
+candidate.dash.ramp26.e0500.w6_aim_centroid_deg	0.00	deg
+candidate.dash.ramp26.e0500.w6_timing_centroid_ms	200	ms
+candidate.dash.ramp26.e0500.w6_top_aims	2	n
+candidate.dash.ramp26.e0500.w6_top_timings	47	n
+candidate.dash.ramp26.e0500.worst_latency	0	n
+candidate.dash.ramp26.e0640.anchor_commands	41	n
+candidate.dash.ramp26.e0640.anchor_speed_ups	413.40	ups
+candidate.dash.ramp26.e0640.avail_commands	47	n
+candidate.dash.ramp26.e0640.avail_ms	376	ms
+candidate.dash.ramp26.e0640.best_absolute_ups	337.67	ups
+candidate.dash.ramp26.e0640.best_aim_deg	70.00	deg
+candidate.dash.ramp26.e0640.best_delta_ups	34.09	ups
+candidate.dash.ramp26.e0640.best_timing_ms	16	ms
+candidate.dash.ramp26.e0640.control_best_absolute_ups	482.53	ups
+candidate.dash.ramp26.e0640.delta_aim0_ups	never-fired-at-aim-0	
+candidate.dash.ramp26.e0640.exec_window_ms	376	ms
+candidate.dash.ramp26.e0640.exec_window_span_ms	376	ms
+candidate.dash.ramp26.e0640.g3_unresponsive_candidate	0	n
+candidate.dash.ramp26.e0640.g3_unresponsive_control	0	n
+candidate.dash.ramp26.e0640.g5b_point_naive	not-meaningful	
+candidate.dash.ramp26.e0640.g7_aim_at_deg	289.92	deg
+candidate.dash.ramp26.e0640.g7_aim_refined_ups	7.38	ups
+candidate.dash.ramp26.e0640.g7_geometry_at_units	-12.719	units
+candidate.dash.ramp26.e0640.g7_geometry_refined_ups	21.42	ups
+candidate.dash.ramp26.e0640.g7_impulse_measured_ups	229.05	ups
+candidate.dash.ramp26.e0640.g7_impulse_predicted_ups	229.07	ups
+candidate.dash.ramp26.e0640.material	yes	
+candidate.dash.ramp26.e0640.menu.bunnyhop.absolute_ups	698.21	ups
+candidate.dash.ramp26.e0640.menu.bunnyhop.angle_deg	65.00	deg
+candidate.dash.ramp26.e0640.menu.held_forward.absolute_ups	479.39	ups
+candidate.dash.ramp26.e0640.menu.held_forward.angle_deg	55.00	deg
+candidate.dash.ramp26.e0640.menu.held_strafe.absolute_ups	479.39	ups
+candidate.dash.ramp26.e0640.menu.held_strafe.angle_deg	55.00	deg
+candidate.dash.ramp26.e0640.naive_harm_rate	0.0000	
+candidate.dash.ramp26.e0640.naive_harmed	0	n
+candidate.dash.ramp26.e0640.naive_mean_delta_ups	0.00	ups
+candidate.dash.ramp26.e0640.naive_points	624	n
+candidate.dash.ramp26.e0640.peak_gain_at_ms	936	ms
+candidate.dash.ramp26.e0640.peak_gain_ups	413.56	ups
+candidate.dash.ramp26.e0640.qualifies	yes	
+candidate.dash.ramp26.e0640.reachable	yes	
+candidate.dash.ramp26.e0640.timing_degenerate	no	
+candidate.dash.ramp26.e0640.w2_gap	1.0000	
+candidate.dash.ramp26.e0640.w3_chain_gain_ups	-144.86	ups
+candidate.dash.ramp26.e0640.w3_entry_slope	0.8251	
+candidate.dash.ramp26.e0640.w5_over_best_technique_ups	-360.54	ups
+candidate.dash.ramp26.e0640.w6_aim_centroid_deg	60.00	deg
+candidate.dash.ramp26.e0640.w6_timing_centroid_ms	200	ms
+candidate.dash.ramp26.e0640.w6_top_aims	3	n
+candidate.dash.ramp26.e0640.w6_top_timings	47	n
+candidate.dash.ramp26.e0640.worst_latency	0	n
+candidate.dash.ramp26.e0800.anchor_commands	41	n
+candidate.dash.ramp26.e0800.anchor_speed_ups	542.62	ups
+candidate.dash.ramp26.e0800.avail_commands	47	n
+candidate.dash.ramp26.e0800.avail_ms	376	ms
+candidate.dash.ramp26.e0800.best_absolute_ups	434.23	ups
+candidate.dash.ramp26.e0800.best_aim_deg	300.00	deg
+candidate.dash.ramp26.e0800.best_delta_ups	65.76	ups
+candidate.dash.ramp26.e0800.best_timing_ms	240	ms
+candidate.dash.ramp26.e0800.control_best_absolute_ups	726.49	ups
+candidate.dash.ramp26.e0800.delta_aim0_ups	never-fired-at-aim-0	
+candidate.dash.ramp26.e0800.exec_window_ms	168	ms
+candidate.dash.ramp26.e0800.exec_window_span_ms	176	ms
+candidate.dash.ramp26.e0800.g3_unresponsive_candidate	0	n
+candidate.dash.ramp26.e0800.g3_unresponsive_control	0	n
+candidate.dash.ramp26.e0800.g5b_point_naive	not-meaningful	
+candidate.dash.ramp26.e0800.g7_aim_at_deg	60.55	deg
+candidate.dash.ramp26.e0800.g7_aim_refined_ups	71.42	ups
+candidate.dash.ramp26.e0800.g7_geometry_at_units	-4.094	units
+candidate.dash.ramp26.e0800.g7_geometry_refined_ups	62.82	ups
+candidate.dash.ramp26.e0800.g7_impulse_measured_ups	81.15	ups
+candidate.dash.ramp26.e0800.g7_impulse_predicted_ups	81.13	ups
+candidate.dash.ramp26.e0800.material	yes	
+candidate.dash.ramp26.e0800.menu.bunnyhop.absolute_ups	800.00	ups
+candidate.dash.ramp26.e0800.menu.bunnyhop.angle_deg	40.00	deg
+candidate.dash.ramp26.e0800.menu.held_forward.absolute_ups	476.81	ups
+candidate.dash.ramp26.e0800.menu.held_forward.angle_deg	55.00	deg
+candidate.dash.ramp26.e0800.menu.held_strafe.absolute_ups	476.81	ups
+candidate.dash.ramp26.e0800.menu.held_strafe.angle_deg	55.00	deg
+candidate.dash.ramp26.e0800.naive_harm_rate	0.0000	
+candidate.dash.ramp26.e0800.naive_harmed	0	n
+candidate.dash.ramp26.e0800.naive_mean_delta_ups	0.00	ups
+candidate.dash.ramp26.e0800.naive_points	624	n
+candidate.dash.ramp26.e0800.peak_gain_at_ms	904	ms
+candidate.dash.ramp26.e0800.peak_gain_ups	185.72	ups
+candidate.dash.ramp26.e0800.qualifies	yes	
+candidate.dash.ramp26.e0800.reachable	yes	
+candidate.dash.ramp26.e0800.timing_degenerate	no	
+candidate.dash.ramp26.e0800.w2_gap	1.0000	
+candidate.dash.ramp26.e0800.w3_chain_gain_ups	-292.25	ups
+candidate.dash.ramp26.e0800.w3_entry_slope	0.6035	
+candidate.dash.ramp26.e0800.w5_over_best_technique_ups	-365.77	ups
+candidate.dash.ramp26.e0800.w6_aim_centroid_deg	0.00	deg
+candidate.dash.ramp26.e0800.w6_timing_centroid_ms	303	ms
+candidate.dash.ramp26.e0800.w6_top_aims	2	n
+candidate.dash.ramp26.e0800.w6_top_timings	21	n
+candidate.dash.ramp26.e0800.worst_latency	0	n
+candidate.dash.ramp26.e1000.anchor_commands	41	n
+candidate.dash.ramp26.e1000.anchor_speed_ups	704.15	ups
+candidate.dash.ramp26.e1000.avail_commands	38	n
+candidate.dash.ramp26.e1000.avail_ms	304	ms
+candidate.dash.ramp26.e1000.best_absolute_ups	38.40	ups
+candidate.dash.ramp26.e1000.best_aim_deg	180.00	deg
+candidate.dash.ramp26.e1000.best_delta_ups	33.60	ups
+candidate.dash.ramp26.e1000.best_timing_ms	16	ms
+candidate.dash.ramp26.e1000.control_best_absolute_ups	754.18	ups
+candidate.dash.ramp26.e1000.delta_aim0_ups	never-fired-at-aim-0	
+candidate.dash.ramp26.e1000.exec_window_ms	136	ms
+candidate.dash.ramp26.e1000.exec_window_span_ms	136	ms
+candidate.dash.ramp26.e1000.g3_unresponsive_candidate	0	n
+candidate.dash.ramp26.e1000.g3_unresponsive_control	0	n
+candidate.dash.ramp26.e1000.g5b_point_naive	not-meaningful	
+candidate.dash.ramp26.e1000.g7_aim_at_deg	183.98	deg
+candidate.dash.ramp26.e1000.g7_aim_refined_ups	3.53	ups
+candidate.dash.ramp26.e1000.g7_geometry_at_units	14.281	units
+candidate.dash.ramp26.e1000.g7_geometry_refined_ups	29.71	ups
+candidate.dash.ramp26.e1000.g7_impulse_measured_ups	1109.35	ups
+candidate.dash.ramp26.e1000.g7_impulse_predicted_ups	1109.35	ups
+candidate.dash.ramp26.e1000.material	yes	
+candidate.dash.ramp26.e1000.menu.bunnyhop.absolute_ups	860.62	ups
+candidate.dash.ramp26.e1000.menu.bunnyhop.angle_deg	70.00	deg
+candidate.dash.ramp26.e1000.menu.held_forward.absolute_ups	469.56	ups
+candidate.dash.ramp26.e1000.menu.held_forward.angle_deg	55.00	deg
+candidate.dash.ramp26.e1000.menu.held_strafe.absolute_ups	469.56	ups
+candidate.dash.ramp26.e1000.menu.held_strafe.angle_deg	55.00	deg
+candidate.dash.ramp26.e1000.naive_harm_rate	0.0000	
+candidate.dash.ramp26.e1000.naive_harmed	0	n
+candidate.dash.ramp26.e1000.naive_mean_delta_ups	0.00	ups
+candidate.dash.ramp26.e1000.naive_points	624	n
+candidate.dash.ramp26.e1000.peak_gain_at_ms	368	ms
+candidate.dash.ramp26.e1000.peak_gain_ups	115.26	ups
+candidate.dash.ramp26.e1000.qualifies	yes	
+candidate.dash.ramp26.e1000.reachable	yes	
+candidate.dash.ramp26.e1000.timing_degenerate	no	
+candidate.dash.ramp26.e1000.w2_gap	1.0000	
+candidate.dash.ramp26.e1000.w3_chain_gain_ups	-715.78	ups
+candidate.dash.ramp26.e1000.w3_entry_slope	-1.9792	
+candidate.dash.ramp26.e1000.w5_over_best_technique_ups	-822.22	ups
+candidate.dash.ramp26.e1000.w6_aim_centroid_deg	180.00	deg
+candidate.dash.ramp26.e1000.w6_timing_centroid_ms	80	ms
+candidate.dash.ramp26.e1000.w6_top_aims	1	n
+candidate.dash.ramp26.e1000.w6_top_timings	17	n
+candidate.dash.ramp26.e1000.worst_latency	0	n
+candidate.dash.ramp26.g5a.arming_events	32	n
+candidate.dash.ramp26.g5a.available_commands	1600	n
+candidate.dash.ramp26.g5a.peak_speed_ups	320.00	ups
+candidate.dash.ramp26.g5b_median	0.0000	
+candidate.dash.ramp26.w2_gap_median	0.9975	
+candidate.dash.ramp26.w3_chain_gain_best_ups	-144.86	ups
+candidate.dash.ramp26.w3_entry_slope_max	0.8251	
+candidate.dash.ramp26.w3_entry_slope_min	-1.9792	
+candidate.dash.ramp26.w4_best_delta_ups	65.76	ups
+candidate.dash.ramp50.e0320.absolute_aim0_ups	320.00	ups
+candidate.dash.ramp50.e0320.anchor_commands	64	n
+candidate.dash.ramp50.e0320.anchor_speed_ups	83.23	ups
+candidate.dash.ramp50.e0320.avail_commands	47	n
+candidate.dash.ramp50.e0320.avail_ms	376	ms
+candidate.dash.ramp50.e0320.best_absolute_ups	173.18	ups
+candidate.dash.ramp50.e0320.best_aim_deg	235.00	deg
+candidate.dash.ramp50.e0320.best_delta_ups	141.33	ups
+candidate.dash.ramp50.e0320.best_timing_ms	328	ms
+candidate.dash.ramp50.e0320.control_best_absolute_ups	482.51	ups
+candidate.dash.ramp50.e0320.delta_aim0_ups	0.00	ups
+candidate.dash.ramp50.e0320.exec_window_ms	8	ms
+candidate.dash.ramp50.e0320.exec_window_span_ms	8	ms
+candidate.dash.ramp50.e0320.g3_unresponsive_candidate	0	n
+candidate.dash.ramp50.e0320.g3_unresponsive_control	0	n
+candidate.dash.ramp50.e0320.g5b_point_naive	0.0000	
+candidate.dash.ramp50.e0320.g7_aim_at_deg	234.77	deg
+candidate.dash.ramp50.e0320.g7_aim_refined_ups	149.63	ups
+candidate.dash.ramp50.e0320.g7_geometry_at_units	-12.156	units
+candidate.dash.ramp50.e0320.g7_geometry_refined_ups	54.83	ups
+candidate.dash.ramp50.e0320.g7_impulse_measured_ups	408.92	ups
+candidate.dash.ramp50.e0320.g7_impulse_predicted_ups	408.92	ups
+candidate.dash.ramp50.e0320.material	yes	
+candidate.dash.ramp50.e0320.menu.bunnyhop.absolute_ups	598.58	ups
+candidate.dash.ramp50.e0320.menu.bunnyhop.angle_deg	60.00	deg
+candidate.dash.ramp50.e0320.menu.held_forward.absolute_ups	480.33	ups
+candidate.dash.ramp50.e0320.menu.held_forward.angle_deg	55.00	deg
+candidate.dash.ramp50.e0320.menu.held_strafe.absolute_ups	480.33	ups
+candidate.dash.ramp50.e0320.menu.held_strafe.angle_deg	55.00	deg
+candidate.dash.ramp50.e0320.naive_harm_rate	0.0032	
+candidate.dash.ramp50.e0320.naive_harmed	2	n
+candidate.dash.ramp50.e0320.naive_mean_delta_ups	18.34	ups
+candidate.dash.ramp50.e0320.naive_points	624	n
+candidate.dash.ramp50.e0320.peak_gain_at_ms	328	ms
+candidate.dash.ramp50.e0320.peak_gain_ups	379.29	ups
+candidate.dash.ramp50.e0320.qualifies	yes	
+candidate.dash.ramp50.e0320.reachable	yes	
+candidate.dash.ramp50.e0320.timing_degenerate	no	
+candidate.dash.ramp50.e0320.w2_gap	0.8702	
+candidate.dash.ramp50.e0320.w3_chain_gain_ups	-309.33	ups
+candidate.dash.ramp50.e0320.w3_mechanic_alone_ups	320.00	ups
+candidate.dash.ramp50.e0320.w5_over_best_technique_ups	-425.40	ups
+candidate.dash.ramp50.e0320.w6_aim_centroid_deg	0.00	deg
+candidate.dash.ramp50.e0320.w6_timing_centroid_ms	328	ms
+candidate.dash.ramp50.e0320.w6_top_aims	2	n
+candidate.dash.ramp50.e0320.w6_top_timings	1	n
+candidate.dash.ramp50.e0320.worst_latency	0	n
+candidate.dash.ramp50.e0400.absolute_aim0_ups	320.00	ups
+candidate.dash.ramp50.e0400.anchor_commands	83	n
+candidate.dash.ramp50.e0400.anchor_speed_ups	97.36	ups
+candidate.dash.ramp50.e0400.avail_commands	47	n
+candidate.dash.ramp50.e0400.avail_ms	376	ms
+candidate.dash.ramp50.e0400.best_absolute_ups	120.47	ups
+candidate.dash.ramp50.e0400.best_aim_deg	210.00	deg
+candidate.dash.ramp50.e0400.best_delta_ups	96.60	ups
+candidate.dash.ramp50.e0400.best_timing_ms	240	ms
+candidate.dash.ramp50.e0400.control_best_absolute_ups	482.53	ups
+candidate.dash.ramp50.e0400.delta_aim0_ups	0.00	ups
+candidate.dash.ramp50.e0400.exec_window_ms	8	ms
+candidate.dash.ramp50.e0400.exec_window_span_ms	8	ms
+candidate.dash.ramp50.e0400.g3_unresponsive_candidate	0	n
+candidate.dash.ramp50.e0400.g3_unresponsive_control	0	n
+candidate.dash.ramp50.e0400.g5b_point_naive	0.0000	
+candidate.dash.ramp50.e0400.g7_aim_at_deg	150.08	deg
+candidate.dash.ramp50.e0400.g7_aim_refined_ups	74.74	ups
+candidate.dash.ramp50.e0400.g7_geometry_at_units	-3.969	units
+candidate.dash.ramp50.e0400.g7_geometry_refined_ups	67.94	ups
+candidate.dash.ramp50.e0400.g7_impulse_measured_ups	397.71	ups
+candidate.dash.ramp50.e0400.g7_impulse_predicted_ups	397.71	ups
+candidate.dash.ramp50.e0400.material	yes	
+candidate.dash.ramp50.e0400.menu.bunnyhop.absolute_ups	640.01	ups
+candidate.dash.ramp50.e0400.menu.bunnyhop.angle_deg	60.00	deg
+candidate.dash.ramp50.e0400.menu.held_forward.absolute_ups	480.34	ups
+candidate.dash.ramp50.e0400.menu.held_forward.angle_deg	55.00	deg
+candidate.dash.ramp50.e0400.menu.held_strafe.absolute_ups	480.34	ups
+candidate.dash.ramp50.e0400.menu.held_strafe.angle_deg	55.00	deg
+candidate.dash.ramp50.e0400.naive_harm_rate	0.0000	
+candidate.dash.ramp50.e0400.naive_harmed	0	n
+candidate.dash.ramp50.e0400.naive_mean_delta_ups	0.00	ups
+candidate.dash.ramp50.e0400.naive_points	624	n
+candidate.dash.ramp50.e0400.peak_gain_at_ms	240	ms
+candidate.dash.ramp50.e0400.peak_gain_ups	397.70	ups
+candidate.dash.ramp50.e0400.qualifies	yes	
+candidate.dash.ramp50.e0400.reachable	yes	
+candidate.dash.ramp50.e0400.timing_degenerate	no	
+candidate.dash.ramp50.e0400.w2_gap	1.0000	
+candidate.dash.ramp50.e0400.w3_chain_gain_ups	-362.07	ups
+candidate.dash.ramp50.e0400.w3_entry_slope	-0.6590	
+candidate.dash.ramp50.e0400.w3_mechanic_alone_ups	320.00	ups
+candidate.dash.ramp50.e0400.w5_over_best_technique_ups	-519.54	ups
+candidate.dash.ramp50.e0400.w6_aim_centroid_deg	0.00	deg
+candidate.dash.ramp50.e0400.w6_timing_centroid_ms	240	ms
+candidate.dash.ramp50.e0400.w6_top_aims	2	n
+candidate.dash.ramp50.e0400.w6_top_timings	1	n
+candidate.dash.ramp50.e0400.worst_latency	0	n
+candidate.dash.ramp50.e0500.absolute_aim0_ups	320.00	ups
+candidate.dash.ramp50.e0500.anchor_commands	112	n
+candidate.dash.ramp50.e0500.anchor_speed_ups	137.91	ups
+candidate.dash.ramp50.e0500.avail_commands	47	n
+candidate.dash.ramp50.e0500.avail_ms	376	ms
+candidate.dash.ramp50.e0500.best_absolute_ups	150.15	ups
+candidate.dash.ramp50.e0500.best_aim_deg	260.00	deg
+candidate.dash.ramp50.e0500.best_delta_ups	82.07	ups
+candidate.dash.ramp50.e0500.best_timing_ms	368	ms
+candidate.dash.ramp50.e0500.control_best_absolute_ups	482.53	ups
+candidate.dash.ramp50.e0500.delta_aim0_ups	0.00	ups
+candidate.dash.ramp50.e0500.exec_window_ms	24	ms
+candidate.dash.ramp50.e0500.exec_window_span_ms	24	ms
+candidate.dash.ramp50.e0500.g3_unresponsive_candidate	0	n
+candidate.dash.ramp50.e0500.g3_unresponsive_control	0	n
+candidate.dash.ramp50.e0500.g5b_point_naive	0.0000	
+candidate.dash.ramp50.e0500.g7_aim_at_deg	261.33	deg
+candidate.dash.ramp50.e0500.g7_aim_refined_ups	108.02	ups
+candidate.dash.ramp50.e0500.g7_geometry_at_units	0.969	units
+candidate.dash.ramp50.e0500.g7_geometry_refined_ups	55.47	ups
+candidate.dash.ramp50.e0500.g7_impulse_measured_ups	427.74	ups
+candidate.dash.ramp50.e0500.g7_impulse_predicted_ups	427.74	ups
+candidate.dash.ramp50.e0500.material	yes	
+candidate.dash.ramp50.e0500.menu.bunnyhop.absolute_ups	639.81	ups
+candidate.dash.ramp50.e0500.menu.bunnyhop.angle_deg	60.00	deg
+candidate.dash.ramp50.e0500.menu.held_forward.absolute_ups	480.36	ups
+candidate.dash.ramp50.e0500.menu.held_forward.angle_deg	55.00	deg
+candidate.dash.ramp50.e0500.menu.held_strafe.absolute_ups	467.69	ups
+candidate.dash.ramp50.e0500.menu.held_strafe.angle_deg	50.00	deg
+candidate.dash.ramp50.e0500.naive_harm_rate	0.0000	
+candidate.dash.ramp50.e0500.naive_harmed	0	n
+candidate.dash.ramp50.e0500.naive_mean_delta_ups	0.00	ups
+candidate.dash.ramp50.e0500.naive_points	624	n
+candidate.dash.ramp50.e0500.peak_gain_at_ms	368	ms
+candidate.dash.ramp50.e0500.peak_gain_ups	254.78	ups
+candidate.dash.ramp50.e0500.qualifies	yes	
+candidate.dash.ramp50.e0500.reachable	yes	
+candidate.dash.ramp50.e0500.timing_degenerate	no	
+candidate.dash.ramp50.e0500.w2_gap	1.0000	
+candidate.dash.ramp50.e0500.w3_chain_gain_ups	-332.38	ups
+candidate.dash.ramp50.e0500.w3_entry_slope	0.2969	
+candidate.dash.ramp50.e0500.w3_mechanic_alone_ups	320.00	ups
+candidate.dash.ramp50.e0500.w5_over_best_technique_ups	-489.66	ups
+candidate.dash.ramp50.e0500.w6_aim_centroid_deg	0.00	deg
+candidate.dash.ramp50.e0500.w6_timing_centroid_ms	376	ms
+candidate.dash.ramp50.e0500.w6_top_aims	4	n
+candidate.dash.ramp50.e0500.w6_top_timings	3	n
+candidate.dash.ramp50.e0500.worst_latency	0	n
+candidate.dash.ramp50.e0640.absolute_aim0_ups	320.00	ups
+candidate.dash.ramp50.e0640.anchor_commands	156	n
+candidate.dash.ramp50.e0640.anchor_speed_ups	207.09	ups
+candidate.dash.ramp50.e0640.avail_commands	47	n
+candidate.dash.ramp50.e0640.avail_ms	376	ms
+candidate.dash.ramp50.e0640.best_absolute_ups	226.21	ups
+candidate.dash.ramp50.e0640.best_aim_deg	100.00	deg
+candidate.dash.ramp50.e0640.best_delta_ups	158.12	ups
+candidate.dash.ramp50.e0640.best_timing_ms	368	ms
+candidate.dash.ramp50.e0640.control_best_absolute_ups	482.53	ups
+candidate.dash.ramp50.e0640.delta_aim0_ups	0.00	ups
+candidate.dash.ramp50.e0640.exec_window_ms	16	ms
+candidate.dash.ramp50.e0640.exec_window_span_ms	16	ms
+candidate.dash.ramp50.e0640.g3_unresponsive_candidate	0	n
+candidate.dash.ramp50.e0640.g3_unresponsive_control	0	n
+candidate.dash.ramp50.e0640.g5b_point_naive	0.0000	
+candidate.dash.ramp50.e0640.g7_aim_at_deg	155.70	deg
+candidate.dash.ramp50.e0640.g7_aim_refined_ups	98.28	ups
+candidate.dash.ramp50.e0640.g7_geometry_at_units	0.031	units
+candidate.dash.ramp50.e0640.g7_geometry_refined_ups	76.83	ups
+candidate.dash.ramp50.e0640.g7_impulse_measured_ups	427.81	ups
+candidate.dash.ramp50.e0640.g7_impulse_predicted_ups	427.81	ups
+candidate.dash.ramp50.e0640.material	yes	
+candidate.dash.ramp50.e0640.menu.bunnyhop.absolute_ups	640.00	ups
+candidate.dash.ramp50.e0640.menu.bunnyhop.angle_deg	30.00	deg
+candidate.dash.ramp50.e0640.menu.held_forward.absolute_ups	480.28	ups
+candidate.dash.ramp50.e0640.menu.held_forward.angle_deg	55.00	deg
+candidate.dash.ramp50.e0640.menu.held_strafe.absolute_ups	472.92	ups
+candidate.dash.ramp50.e0640.menu.held_strafe.angle_deg	55.00	deg
+candidate.dash.ramp50.e0640.naive_harm_rate	0.0000	
+candidate.dash.ramp50.e0640.naive_harmed	0	n
+candidate.dash.ramp50.e0640.naive_mean_delta_ups	0.00	ups
+candidate.dash.ramp50.e0640.naive_points	624	n
+candidate.dash.ramp50.e0640.peak_gain_at_ms	368	ms
+candidate.dash.ramp50.e0640.peak_gain_ups	254.55	ups
+candidate.dash.ramp50.e0640.qualifies	yes	
+candidate.dash.ramp50.e0640.reachable	yes	
+candidate.dash.ramp50.e0640.timing_degenerate	no	
+candidate.dash.ramp50.e0640.w2_gap	1.0000	
+candidate.dash.ramp50.e0640.w3_chain_gain_ups	-256.33	ups
+candidate.dash.ramp50.e0640.w3_entry_slope	0.5432	
+candidate.dash.ramp50.e0640.w3_mechanic_alone_ups	320.00	ups
+candidate.dash.ramp50.e0640.w5_over_best_technique_ups	-413.79	ups
+candidate.dash.ramp50.e0640.w6_aim_centroid_deg	0.00	deg
+candidate.dash.ramp50.e0640.w6_timing_centroid_ms	372	ms
+candidate.dash.ramp50.e0640.w6_top_aims	2	n
+candidate.dash.ramp50.e0640.w6_top_timings	2	n
+candidate.dash.ramp50.e0640.worst_latency	0	n
+candidate.dash.ramp50.e0800.absolute_aim0_ups	320.00	ups
+candidate.dash.ramp50.e0800.anchor_commands	208	n
+candidate.dash.ramp50.e0800.anchor_speed_ups	294.28	ups
+candidate.dash.ramp50.e0800.avail_commands	47	n
+candidate.dash.ramp50.e0800.avail_ms	376	ms
+candidate.dash.ramp50.e0800.best_absolute_ups	226.61	ups
+candidate.dash.ramp50.e0800.best_aim_deg	100.00	deg
+candidate.dash.ramp50.e0800.best_delta_ups	158.52	ups
+candidate.dash.ramp50.e0800.best_timing_ms	336	ms
+candidate.dash.ramp50.e0800.control_best_absolute_ups	482.53	ups
+candidate.dash.ramp50.e0800.delta_aim0_ups	0.00	ups
+candidate.dash.ramp50.e0800.exec_window_ms	16	ms
+candidate.dash.ramp50.e0800.exec_window_span_ms	16	ms
+candidate.dash.ramp50.e0800.g3_unresponsive_candidate	0	n
+candidate.dash.ramp50.e0800.g3_unresponsive_control	0	n
+candidate.dash.ramp50.e0800.g5b_point_naive	0.0000	
+candidate.dash.ramp50.e0800.g7_aim_at_deg	245.70	deg
+candidate.dash.ramp50.e0800.g7_aim_refined_ups	151.08	ups
+candidate.dash.ramp50.e0800.g7_geometry_at_units	-0.906	units
+candidate.dash.ramp50.e0800.g7_geometry_refined_ups	37.77	ups
+candidate.dash.ramp50.e0800.g7_impulse_measured_ups	430.85	ups
+candidate.dash.ramp50.e0800.g7_impulse_predicted_ups	430.85	ups
+candidate.dash.ramp50.e0800.material	yes	
+candidate.dash.ramp50.e0800.menu.bunnyhop.absolute_ups	709.61	ups
+candidate.dash.ramp50.e0800.menu.bunnyhop.angle_deg	35.00	deg
+candidate.dash.ramp50.e0800.menu.held_forward.absolute_ups	480.50	ups
+candidate.dash.ramp50.e0800.menu.held_forward.angle_deg	55.00	deg
+candidate.dash.ramp50.e0800.menu.held_strafe.absolute_ups	480.25	ups
+candidate.dash.ramp50.e0800.menu.held_strafe.angle_deg	55.00	deg
+candidate.dash.ramp50.e0800.naive_harm_rate	0.0000	
+candidate.dash.ramp50.e0800.naive_harmed	0	n
+candidate.dash.ramp50.e0800.naive_mean_delta_ups	0.00	ups
+candidate.dash.ramp50.e0800.naive_points	624	n
+candidate.dash.ramp50.e0800.peak_gain_at_ms	336	ms
+candidate.dash.ramp50.e0800.peak_gain_ups	244.50	ups
+candidate.dash.ramp50.e0800.qualifies	yes	
+candidate.dash.ramp50.e0800.reachable	yes	
+candidate.dash.ramp50.e0800.timing_degenerate	no	
+candidate.dash.ramp50.e0800.w2_gap	1.0000	
+candidate.dash.ramp50.e0800.w3_chain_gain_ups	-255.92	ups
+candidate.dash.ramp50.e0800.w3_entry_slope	0.0025	
+candidate.dash.ramp50.e0800.w3_mechanic_alone_ups	320.00	ups
+candidate.dash.ramp50.e0800.w5_over_best_technique_ups	-483.00	ups
+candidate.dash.ramp50.e0800.w6_aim_centroid_deg	0.00	deg
+candidate.dash.ramp50.e0800.w6_timing_centroid_ms	340	ms
+candidate.dash.ramp50.e0800.w6_top_aims	2	n
+candidate.dash.ramp50.e0800.w6_top_timings	2	n
+candidate.dash.ramp50.e0800.worst_latency	0	n
+candidate.dash.ramp50.e1000.absolute_aim0_ups	320.00	ups
+candidate.dash.ramp50.e1000.anchor_commands	276	n
+candidate.dash.ramp50.e1000.anchor_speed_ups	391.01	ups
+candidate.dash.ramp50.e1000.avail_commands	47	n
+candidate.dash.ramp50.e1000.avail_ms	376	ms
+candidate.dash.ramp50.e1000.best_absolute_ups	299.49	ups
+candidate.dash.ramp50.e1000.best_aim_deg	175.00	deg
+candidate.dash.ramp50.e1000.best_delta_ups	249.00	ups
+candidate.dash.ramp50.e1000.best_timing_ms	352	ms
+candidate.dash.ramp50.e1000.control_best_absolute_ups	482.53	ups
+candidate.dash.ramp50.e1000.delta_aim0_ups	0.00	ups
+candidate.dash.ramp50.e1000.exec_window_ms	16	ms
+candidate.dash.ramp50.e1000.exec_window_span_ms	16	ms
+candidate.dash.ramp50.e1000.g3_unresponsive_candidate	0	n
+candidate.dash.ramp50.e1000.g3_unresponsive_control	0	n
+candidate.dash.ramp50.e1000.g5b_point_naive	0.0000	
+candidate.dash.ramp50.e1000.g7_aim_at_deg	152.89	deg
+candidate.dash.ramp50.e1000.g7_aim_refined_ups	232.63	ups
+candidate.dash.ramp50.e1000.g7_geometry_at_units	4.594	units
+candidate.dash.ramp50.e1000.g7_geometry_refined_ups	150.42	ups
+candidate.dash.ramp50.e1000.g7_impulse_measured_ups	626.44	ups
+candidate.dash.ramp50.e1000.g7_impulse_predicted_ups	626.44	ups
+candidate.dash.ramp50.e1000.material	yes	
+candidate.dash.ramp50.e1000.menu.bunnyhop.absolute_ups	783.38	ups
+candidate.dash.ramp50.e1000.menu.bunnyhop.angle_deg	35.00	deg
+candidate.dash.ramp50.e1000.menu.held_forward.absolute_ups	480.35	ups
+candidate.dash.ramp50.e1000.menu.held_forward.angle_deg	55.00	deg
+candidate.dash.ramp50.e1000.menu.held_strafe.absolute_ups	599.05	ups
+candidate.dash.ramp50.e1000.menu.held_strafe.angle_deg	35.00	deg
+candidate.dash.ramp50.e1000.naive_harm_rate	0.0000	
+candidate.dash.ramp50.e1000.naive_harmed	0	n
+candidate.dash.ramp50.e1000.naive_mean_delta_ups	0.00	ups
+candidate.dash.ramp50.e1000.naive_points	624	n
+candidate.dash.ramp50.e1000.peak_gain_at_ms	1384	ms
+candidate.dash.ramp50.e1000.peak_gain_ups	304.77	ups
+candidate.dash.ramp50.e1000.qualifies	yes	
+candidate.dash.ramp50.e1000.reachable	yes	
+candidate.dash.ramp50.e1000.timing_degenerate	no	
+candidate.dash.ramp50.e1000.w2_gap	1.0000	
+candidate.dash.ramp50.e1000.w3_chain_gain_ups	-183.04	ups
+candidate.dash.ramp50.e1000.w3_entry_slope	0.3644	
+candidate.dash.ramp50.e1000.w3_mechanic_alone_ups	320.00	ups
+candidate.dash.ramp50.e1000.w5_over_best_technique_ups	-483.89	ups
+candidate.dash.ramp50.e1000.w6_aim_centroid_deg	0.00	deg
+candidate.dash.ramp50.e1000.w6_timing_centroid_ms	356	ms
+candidate.dash.ramp50.e1000.w6_top_aims	2	n
+candidate.dash.ramp50.e1000.w6_top_timings	2	n
+candidate.dash.ramp50.e1000.worst_latency	0	n
+candidate.dash.ramp50.g5a.arming_events	17	n
+candidate.dash.ramp50.g5a.available_commands	850	n
+candidate.dash.ramp50.g5a.peak_speed_ups	320.00	ups
+candidate.dash.ramp50.g5b_median	0.0000	
+candidate.dash.ramp50.w2_gap_median	1.0000	
+candidate.dash.ramp50.w3_chain_gain_best_ups	-183.04	ups
+candidate.dash.ramp50.w3_entry_slope_max	0.5432	
+candidate.dash.ramp50.w3_entry_slope_min	-0.6590	
+candidate.dash.ramp50.w4_best_delta_ups	249.00	ups
+candidate.dash.step18.e0320.absolute_aim0_ups	320.00	ups
+candidate.dash.step18.e0320.anchor_commands	37	n
+candidate.dash.step18.e0320.anchor_speed_ups	320.00	ups
+candidate.dash.step18.e0320.avail_commands	47	n
+candidate.dash.step18.e0320.avail_ms	376	ms
+candidate.dash.step18.e0320.best_absolute_ups	268.21	ups
+candidate.dash.step18.e0320.best_aim_deg	280.00	deg
+candidate.dash.step18.e0320.best_delta_ups	53.52	ups
+candidate.dash.step18.e0320.best_timing_ms	16	ms
+candidate.dash.step18.e0320.control_best_absolute_ups	482.51	ups
+candidate.dash.step18.e0320.delta_aim0_ups	0.00	ups
+candidate.dash.step18.e0320.exec_window_ms	376	ms
+candidate.dash.step18.e0320.exec_window_span_ms	376	ms
+candidate.dash.step18.e0320.g3_unresponsive_candidate	0	n
+candidate.dash.step18.e0320.g3_unresponsive_control	0	n
+candidate.dash.step18.e0320.g5b_point_naive	0.0000	
+candidate.dash.step18.e0320.g7_aim_at_deg	276.95	deg
+candidate.dash.step18.e0320.g7_aim_refined_ups	49.25	ups
+candidate.dash.step18.e0320.g7_geometry_at_units	-8.719	units
+candidate.dash.step18.e0320.g7_geometry_refined_ups	42.54	ups
+candidate.dash.step18.e0320.g7_impulse_measured_ups	338.38	ups
+candidate.dash.step18.e0320.g7_impulse_predicted_ups	338.38	ups
+candidate.dash.step18.e0320.material	yes	
+candidate.dash.step18.e0320.menu.bunnyhop.absolute_ups	598.58	ups
+candidate.dash.step18.e0320.menu.bunnyhop.angle_deg	60.00	deg
+candidate.dash.step18.e0320.menu.held_forward.absolute_ups	480.33	ups
+candidate.dash.step18.e0320.menu.held_forward.angle_deg	55.00	deg
+candidate.dash.step18.e0320.menu.held_strafe.absolute_ups	480.33	ups
+candidate.dash.step18.e0320.menu.held_strafe.angle_deg	55.00	deg
+candidate.dash.step18.e0320.naive_harm_rate	0.0000	
+candidate.dash.step18.e0320.naive_harmed	0	n
+candidate.dash.step18.e0320.naive_mean_delta_ups	0.00	ups
+candidate.dash.step18.e0320.naive_points	624	n
+candidate.dash.step18.e0320.peak_gain_at_ms	1200	ms
+candidate.dash.step18.e0320.peak_gain_ups	221.52	ups
+candidate.dash.step18.e0320.qualifies	yes	
+candidate.dash.step18.e0320.reachable	yes	
+candidate.dash.step18.e0320.timing_degenerate	no	
+candidate.dash.step18.e0320.w2_gap	1.0000	
+candidate.dash.step18.e0320.w3_chain_gain_ups	-214.30	ups
+candidate.dash.step18.e0320.w3_mechanic_alone_ups	320.00	ups
+candidate.dash.step18.e0320.w5_over_best_technique_ups	-330.37	ups
+candidate.dash.step18.e0320.w6_aim_centroid_deg	0.00	deg
+candidate.dash.step18.e0320.w6_timing_centroid_ms	200	ms
+candidate.dash.step18.e0320.w6_top_aims	2	n
+candidate.dash.step18.e0320.w6_top_timings	47	n
+candidate.dash.step18.e0320.worst_latency	0	n
+candidate.dash.step18.e0400.anchor_commands	38	n
+candidate.dash.step18.e0400.anchor_speed_ups	400.00	ups
+candidate.dash.step18.e0400.avail_commands	47	n
+candidate.dash.step18.e0400.avail_ms	376	ms
+candidate.dash.step18.e0400.best_absolute_ups	336.18	ups
+candidate.dash.step18.e0400.best_aim_deg	285.00	deg
+candidate.dash.step18.e0400.best_delta_ups	66.04	ups
+candidate.dash.step18.e0400.best_timing_ms	16	ms
+candidate.dash.step18.e0400.control_best_absolute_ups	531.68	ups
+candidate.dash.step18.e0400.delta_aim0_ups	never-fired-at-aim-0	
+candidate.dash.step18.e0400.exec_window_ms	376	ms
+candidate.dash.step18.e0400.exec_window_span_ms	376	ms
+candidate.dash.step18.e0400.g3_unresponsive_candidate	0	n
+candidate.dash.step18.e0400.g3_unresponsive_control	0	n
+candidate.dash.step18.e0400.g5b_point_naive	not-meaningful	
+candidate.dash.step18.e0400.g7_aim_at_deg	76.02	deg
+candidate.dash.step18.e0400.g7_aim_refined_ups	66.06	ups
+candidate.dash.step18.e0400.g7_geometry_at_units	-13.531	units
+candidate.dash.step18.e0400.g7_geometry_refined_ups	55.39	ups
+candidate.dash.step18.e0400.g7_impulse_measured_ups	285.31	ups
+candidate.dash.step18.e0400.g7_impulse_predicted_ups	285.31	ups
+candidate.dash.step18.e0400.material	yes	
+candidate.dash.step18.e0400.menu.bunnyhop.absolute_ups	639.54	ups
+candidate.dash.step18.e0400.menu.bunnyhop.angle_deg	60.00	deg
+candidate.dash.step18.e0400.menu.held_forward.absolute_ups	480.34	ups
+candidate.dash.step18.e0400.menu.held_forward.angle_deg	55.00	deg
+candidate.dash.step18.e0400.menu.held_strafe.absolute_ups	480.34	ups
+candidate.dash.step18.e0400.menu.held_strafe.angle_deg	55.00	deg
+candidate.dash.step18.e0400.naive_harm_rate	0.0000	
+candidate.dash.step18.e0400.naive_harmed	0	n
+candidate.dash.step18.e0400.naive_mean_delta_ups	0.00	ups
+candidate.dash.step18.e0400.naive_points	624	n
+candidate.dash.step18.e0400.peak_gain_at_ms	16	ms
+candidate.dash.step18.e0400.peak_gain_ups	146.72	ups
+candidate.dash.step18.e0400.qualifies	yes	
+candidate.dash.step18.e0400.reachable	yes	
+candidate.dash.step18.e0400.timing_degenerate	no	
+candidate.dash.step18.e0400.w2_gap	1.0000	
+candidate.dash.step18.e0400.w3_chain_gain_ups	-195.50	ups
+candidate.dash.step18.e0400.w3_entry_slope	0.8496	
+candidate.dash.step18.e0400.w5_over_best_technique_ups	-303.36	ups
+candidate.dash.step18.e0400.w6_aim_centroid_deg	0.00	deg
+candidate.dash.step18.e0400.w6_timing_centroid_ms	200	ms
+candidate.dash.step18.e0400.w6_top_aims	2	n
+candidate.dash.step18.e0400.w6_top_timings	47	n
+candidate.dash.step18.e0400.worst_latency	0	n
+candidate.dash.step18.e0500.anchor_commands	39	n
+candidate.dash.step18.e0500.anchor_speed_ups	500.00	ups
+candidate.dash.step18.e0500.avail_commands	47	n
+candidate.dash.step18.e0500.avail_ms	376	ms
+candidate.dash.step18.e0500.best_absolute_ups	412.96	ups
+candidate.dash.step18.e0500.best_aim_deg	290.00	deg
+candidate.dash.step18.e0500.best_delta_ups	83.47	ups
+candidate.dash.step18.e0500.best_timing_ms	16	ms
+candidate.dash.step18.e0500.control_best_absolute_ups	507.36	ups
+candidate.dash.step18.e0500.delta_aim0_ups	never-fired-at-aim-0	
+candidate.dash.step18.e0500.exec_window_ms	376	ms
+candidate.dash.step18.e0500.exec_window_span_ms	376	ms
+candidate.dash.step18.e0500.g3_unresponsive_candidate	0	n
+candidate.dash.step18.e0500.g3_unresponsive_control	0	n
+candidate.dash.step18.e0500.g5b_point_naive	not-meaningful	
+candidate.dash.step18.e0500.g7_aim_at_deg	289.61	deg
+candidate.dash.step18.e0500.g7_aim_refined_ups	78.40	ups
+candidate.dash.step18.e0500.g7_geometry_at_units	-12.406	units
+candidate.dash.step18.e0500.g7_geometry_refined_ups	69.29	ups
+candidate.dash.step18.e0500.g7_impulse_measured_ups	210.91	ups
+candidate.dash.step18.e0500.g7_impulse_predicted_ups	210.90	ups
+candidate.dash.step18.e0500.material	yes	
+candidate.dash.step18.e0500.menu.bunnyhop.absolute_ups	731.39	ups
+candidate.dash.step18.e0500.menu.bunnyhop.angle_deg	65.00	deg
+candidate.dash.step18.e0500.menu.held_forward.absolute_ups	480.40	ups
+candidate.dash.step18.e0500.menu.held_forward.angle_deg	55.00	deg
+candidate.dash.step18.e0500.menu.held_strafe.absolute_ups	480.36	ups
+candidate.dash.step18.e0500.menu.held_strafe.angle_deg	55.00	deg
+candidate.dash.step18.e0500.naive_harm_rate	0.0000	
+candidate.dash.step18.e0500.naive_harmed	0	n
+candidate.dash.step18.e0500.naive_mean_delta_ups	0.00	ups
+candidate.dash.step18.e0500.naive_points	624	n
+candidate.dash.step18.e0500.peak_gain_at_ms	16	ms
+candidate.dash.step18.e0500.peak_gain_ups	105.43	ups
+candidate.dash.step18.e0500.qualifies	yes	
+candidate.dash.step18.e0500.reachable	yes	
+candidate.dash.step18.e0500.timing_degenerate	no	
+candidate.dash.step18.e0500.w2_gap	1.0000	
+candidate.dash.step18.e0500.w3_chain_gain_ups	-94.40	ups
+candidate.dash.step18.e0500.w3_entry_slope	0.7678	
+candidate.dash.step18.e0500.w5_over_best_technique_ups	-318.43	ups
+candidate.dash.step18.e0500.w6_aim_centroid_deg	0.00	deg
+candidate.dash.step18.e0500.w6_timing_centroid_ms	200	ms
+candidate.dash.step18.e0500.w6_top_aims	2	n
+candidate.dash.step18.e0500.w6_top_timings	47	n
+candidate.dash.step18.e0500.worst_latency	0	n
+candidate.dash.step18.e0640.anchor_commands	40	n
+candidate.dash.step18.e0640.anchor_speed_ups	640.00	ups
+candidate.dash.step18.e0640.avail_commands	48	n
+candidate.dash.step18.e0640.avail_ms	384	ms
+candidate.dash.step18.e0640.best_absolute_ups	138.67	ups
+candidate.dash.step18.e0640.best_aim_deg	265.00	deg
+candidate.dash.step18.e0640.best_delta_ups	42.44	ups
+candidate.dash.step18.e0640.best_timing_ms	120	ms
+candidate.dash.step18.e0640.control_best_absolute_ups	482.53	ups
+candidate.dash.step18.e0640.delta_aim0_ups	never-fired-at-aim-0	
+candidate.dash.step18.e0640.exec_window_ms	256	ms
+candidate.dash.step18.e0640.exec_window_span_ms	256	ms
+candidate.dash.step18.e0640.g3_unresponsive_candidate	0	n
+candidate.dash.step18.e0640.g3_unresponsive_control	0	n
+candidate.dash.step18.e0640.g5b_point_naive	not-meaningful	
+candidate.dash.step18.e0640.g7_aim_at_deg	91.64	deg
+candidate.dash.step18.e0640.g7_aim_refined_ups	58.00	ups
+candidate.dash.step18.e0640.g7_geometry_at_units	-2.406	units
+candidate.dash.step18.e0640.g7_geometry_refined_ups	39.40	ups
+candidate.dash.step18.e0640.g7_impulse_measured_ups	448.67	ups
+candidate.dash.step18.e0640.g7_impulse_predicted_ups	448.66	ups
+candidate.dash.step18.e0640.material	yes	
+candidate.dash.step18.e0640.menu.bunnyhop.absolute_ups	827.34	ups
+candidate.dash.step18.e0640.menu.bunnyhop.angle_deg	70.00	deg
+candidate.dash.step18.e0640.menu.held_forward.absolute_ups	483.91	ups
+candidate.dash.step18.e0640.menu.held_forward.angle_deg	55.00	deg
+candidate.dash.step18.e0640.menu.held_strafe.absolute_ups	480.30	ups
+candidate.dash.step18.e0640.menu.held_strafe.angle_deg	55.00	deg
+candidate.dash.step18.e0640.naive_harm_rate	0.0000	
+candidate.dash.step18.e0640.naive_harmed	0	n
+candidate.dash.step18.e0640.naive_mean_delta_ups	0.00	ups
+candidate.dash.step18.e0640.naive_points	624	n
+candidate.dash.step18.e0640.peak_gain_at_ms	1144	ms
+candidate.dash.step18.e0640.peak_gain_ups	483.49	ups
+candidate.dash.step18.e0640.qualifies	yes	
+candidate.dash.step18.e0640.reachable	yes	
+candidate.dash.step18.e0640.timing_degenerate	no	
+candidate.dash.step18.e0640.w2_gap	1.0000	
+candidate.dash.step18.e0640.w3_chain_gain_ups	-343.87	ups
+candidate.dash.step18.e0640.w3_entry_slope	-1.9593	
+candidate.dash.step18.e0640.w5_over_best_technique_ups	-688.67	ups
+candidate.dash.step18.e0640.w6_aim_centroid_deg	0.00	deg
+candidate.dash.step18.e0640.w6_timing_centroid_ms	228	ms
+candidate.dash.step18.e0640.w6_top_aims	2	n
+candidate.dash.step18.e0640.w6_top_timings	32	n
+candidate.dash.step18.e0640.worst_latency	0	n
+candidate.dash.step18.e0800.anchor_commands	40	n
+candidate.dash.step18.e0800.anchor_speed_ups	800.00	ups
+candidate.dash.step18.e0800.avail_commands	47	n
+candidate.dash.step18.e0800.avail_ms	376	ms
+candidate.dash.step18.e0800.best_absolute_ups	233.36	ups
+candidate.dash.step18.e0800.best_aim_deg	280.00	deg
+candidate.dash.step18.e0800.best_delta_ups	3.00	ups
+candidate.dash.step18.e0800.best_timing_ms	16	ms
+candidate.dash.step18.e0800.control_best_absolute_ups	483.54	ups
+candidate.dash.step18.e0800.delta_aim0_ups	never-fired-at-aim-0	
+candidate.dash.step18.e0800.exec_window_ms	376	ms
+candidate.dash.step18.e0800.exec_window_span_ms	376	ms
+candidate.dash.step18.e0800.g3_unresponsive_candidate	0	n
+candidate.dash.step18.e0800.g3_unresponsive_control	0	n
+candidate.dash.step18.e0800.g5b_point_naive	not-meaningful	
+candidate.dash.step18.e0800.g7_impulse_measured_ups	254.90	ups
+candidate.dash.step18.e0800.g7_impulse_predicted_ups	254.87	ups
+candidate.dash.step18.e0800.material	no	
+candidate.dash.step18.e0800.menu.bunnyhop.absolute_ups	942.35	ups
+candidate.dash.step18.e0800.menu.bunnyhop.angle_deg	75.00	deg
+candidate.dash.step18.e0800.menu.held_forward.absolute_ups	517.36	ups
+candidate.dash.step18.e0800.menu.held_forward.angle_deg	55.00	deg
+candidate.dash.step18.e0800.menu.held_strafe.absolute_ups	480.37	ups
+candidate.dash.step18.e0800.menu.held_strafe.angle_deg	55.00	deg
+candidate.dash.step18.e0800.naive_harm_rate	0.0000	
+candidate.dash.step18.e0800.naive_harmed	0	n
+candidate.dash.step18.e0800.naive_mean_delta_ups	0.00	ups
+candidate.dash.step18.e0800.naive_points	624	n
+candidate.dash.step18.e0800.peak_gain_at_ms	16	ms
+candidate.dash.step18.e0800.peak_gain_ups	80.84	ups
+candidate.dash.step18.e0800.qualifies	no	
+candidate.dash.step18.e0800.reachable	yes	
+candidate.dash.step18.e0800.timing_degenerate	no	
+candidate.dash.step18.e0800.w2_gap	not-meaningful	
+candidate.dash.step18.e0800.w3_chain_gain_ups	-250.18	ups
+candidate.dash.step18.e0800.w3_entry_slope	0.5918	
+candidate.dash.step18.e0800.w5_over_best_technique_ups	-708.99	ups
+candidate.dash.step18.e0800.w6_aim_centroid_deg	0.00	deg
+candidate.dash.step18.e0800.w6_timing_centroid_ms	200	ms
+candidate.dash.step18.e0800.w6_top_aims	2	n
+candidate.dash.step18.e0800.w6_top_timings	47	n
+candidate.dash.step18.e0800.worst_latency	0	n
+candidate.dash.step18.e1000.anchor_commands	41	n
+candidate.dash.step18.e1000.anchor_speed_ups	1000.00	ups
+candidate.dash.step18.e1000.avail_commands	47	n
+candidate.dash.step18.e1000.avail_ms	376	ms
+candidate.dash.step18.e1000.best_absolute_ups	38.40	ups
+candidate.dash.step18.e1000.best_aim_deg	180.00	deg
+candidate.dash.step18.e1000.best_delta_ups	10.44	ups
+candidate.dash.step18.e1000.best_timing_ms	16	ms
+candidate.dash.step18.e1000.control_best_absolute_ups	484.37	ups
+candidate.dash.step18.e1000.delta_aim0_ups	never-fired-at-aim-0	
+candidate.dash.step18.e1000.exec_window_ms	24	ms
+candidate.dash.step18.e1000.exec_window_span_ms	24	ms
+candidate.dash.step18.e1000.g3_unresponsive_candidate	0	n
+candidate.dash.step18.e1000.g3_unresponsive_control	0	n
+candidate.dash.step18.e1000.g5b_point_naive	not-meaningful	
+candidate.dash.step18.e1000.g7_geometry_at_units	9.781	units
+candidate.dash.step18.e1000.g7_geometry_refined_ups	23.89	ups
+candidate.dash.step18.e1000.g7_impulse_measured_ups	1109.35	ups
+candidate.dash.step18.e1000.g7_impulse_predicted_ups	1109.35	ups
+candidate.dash.step18.e1000.material	no	
+candidate.dash.step18.e1000.menu.bunnyhop.absolute_ups	1142.40	ups
+candidate.dash.step18.e1000.menu.bunnyhop.angle_deg	75.00	deg
+candidate.dash.step18.e1000.menu.held_forward.absolute_ups	481.05	ups
+candidate.dash.step18.e1000.menu.held_forward.angle_deg	55.00	deg
+candidate.dash.step18.e1000.menu.held_strafe.absolute_ups	480.38	ups
+candidate.dash.step18.e1000.menu.held_strafe.angle_deg	55.00	deg
+candidate.dash.step18.e1000.naive_harm_rate	0.0000	
+candidate.dash.step18.e1000.naive_harmed	0	n
+candidate.dash.step18.e1000.naive_mean_delta_ups	0.00	ups
+candidate.dash.step18.e1000.naive_points	624	n
+candidate.dash.step18.e1000.peak_gain_at_ms	136	ms
+candidate.dash.step18.e1000.peak_gain_ups	288.76	ups
+candidate.dash.step18.e1000.qualifies	no	
+candidate.dash.step18.e1000.reachable	yes	
+candidate.dash.step18.e1000.timing_degenerate	no	
+candidate.dash.step18.e1000.w2_gap	not-meaningful	
+candidate.dash.step18.e1000.w3_chain_gain_ups	-445.97	ups
+candidate.dash.step18.e1000.w3_entry_slope	-0.9748	
+candidate.dash.step18.e1000.w5_over_best_technique_ups	-1104.00	ups
+candidate.dash.step18.e1000.w6_aim_centroid_deg	180.00	deg
+candidate.dash.step18.e1000.w6_timing_centroid_ms	24	ms
+candidate.dash.step18.e1000.w6_top_aims	1	n
+candidate.dash.step18.e1000.w6_top_timings	3	n
+candidate.dash.step18.e1000.worst_latency	0	n
+candidate.dash.step18.g5a.arming_events	30	n
+candidate.dash.step18.g5a.available_commands	1500	n
+candidate.dash.step18.g5a.peak_speed_ups	320.00	ups
+candidate.dash.step18.g5b_median	0.0000	
+candidate.dash.step18.w2_gap_median	1.0000	
+candidate.dash.step18.w3_chain_gain_best_ups	-94.40	ups
+candidate.dash.step18.w3_entry_slope_max	0.8496	
+candidate.dash.step18.w3_entry_slope_min	-1.9593	
+candidate.dash.step18.w4_best_delta_ups	83.47	ups
+candidate.dash.w1.harm_rate_pooled	0.0030	
+candidate.dash.w1.harmed_total	79	n
+candidate.dash.w1.points_total	26208	n
+candidate.dash.w2_gap_median	1.0000	
+candidate.dash.w2_qualifying_contexts	5	n
+candidate.dash.w4_distinct_kinds	3	n
+candidate.dash.w4_material_contexts	5	n
+candidate.dash.w5.air_forward.cells_not_beaten	32	n
+candidate.dash.w5.air_forward.domain_cells	42	n
+candidate.dash.w5.air_strafe.cells_not_beaten	32	n
+candidate.dash.w5.air_strafe.domain_cells	42	n
+candidate.dash.w5.bunnyhop.cells_not_beaten	12	n
+candidate.dash.w5.bunnyhop.domain_cells	12	n
+candidate.dash.w5.drop_launch.cells_not_beaten	0	n
+candidate.dash.w5.drop_launch.domain_cells	6	n
+candidate.dash.w5.ground_turn.cells_not_beaten	12	n
+candidate.dash.w5.ground_turn.domain_cells	12	n
+candidate.dash.w5.ramp_traversal.cells_not_beaten	12	n
+candidate.dash.w5.ramp_traversal.domain_cells	12	n
+candidate.dash.w5.step_up.cells_not_beaten	6	n
+candidate.dash.w5.step_up.domain_cells	6	n
+candidate.dash.w6.e0320.aim_centroid_apart_pairs	6	n
+candidate.dash.w6.e0320.aim_disjoint_pairs	19	n
+candidate.dash.w6.e0320.context_pairs	21	n
+candidate.dash.w6.e0320.timing_centroid_apart_pairs	15	n
+candidate.dash.w6.e0320.timing_disjoint_pairs	4	n
+candidate.dash.w6.e0400.aim_centroid_apart_pairs	11	n
+candidate.dash.w6.e0400.aim_disjoint_pairs	17	n
+candidate.dash.w6.e0400.context_pairs	21	n
+candidate.dash.w6.e0400.timing_centroid_apart_pairs	11	n
+candidate.dash.w6.e0400.timing_disjoint_pairs	5	n
+candidate.dash.w6.e0500.aim_centroid_apart_pairs	11	n
+candidate.dash.w6.e0500.aim_disjoint_pairs	18	n
+candidate.dash.w6.e0500.context_pairs	21	n
+candidate.dash.w6.e0500.timing_centroid_apart_pairs	15	n
+candidate.dash.w6.e0500.timing_disjoint_pairs	5	n
+candidate.dash.w6.e0640.aim_centroid_apart_pairs	10	n
+candidate.dash.w6.e0640.aim_disjoint_pairs	19	n
+candidate.dash.w6.e0640.context_pairs	21	n
+candidate.dash.w6.e0640.timing_centroid_apart_pairs	14	n
+candidate.dash.w6.e0640.timing_disjoint_pairs	4	n
+candidate.dash.w6.e0800.aim_centroid_apart_pairs	11	n
+candidate.dash.w6.e0800.aim_disjoint_pairs	20	n
+candidate.dash.w6.e0800.context_pairs	21	n
+candidate.dash.w6.e0800.timing_centroid_apart_pairs	17	n
+candidate.dash.w6.e0800.timing_disjoint_pairs	7	n
+candidate.dash.w6.e1000.aim_centroid_apart_pairs	15	n
+candidate.dash.w6.e1000.aim_disjoint_pairs	18	n
+candidate.dash.w6.e1000.context_pairs	21	n
+candidate.dash.w6.e1000.timing_centroid_apart_pairs	18	n
+candidate.dash.w6.e1000.timing_disjoint_pairs	12	n
+candidate.dash.w7.new_profile_constants	2	n
+candidate.dash.w7.new_state_fields	1	n
+candidate.dash.w7.preconditions	5	n
+candidate.dash.w7.preconditions_with_profile_guards	7	n
+candidate.dash_retuned.ceiling48.e0320.aims_armed	0	n
+candidate.dash_retuned.ceiling48.e0320.avail_commands	0	n
+candidate.dash_retuned.ceiling48.e0320.best_delta_ups	never-fired	
+candidate.dash_retuned.ceiling48.e0320.naive_harmed	0	n
+candidate.dash_retuned.ceiling48.e0320.naive_points	624	n
+candidate.dash_retuned.ceiling48.e0320.reachable	no	
+candidate.dash_retuned.ceiling48.e0400.aims_armed	29	n
+candidate.dash_retuned.ceiling48.e0400.avail_commands	16	n
+candidate.dash_retuned.ceiling48.e0400.best_delta_ups	1.16	ups
+candidate.dash_retuned.ceiling48.e0400.naive_harmed	0	n
+candidate.dash_retuned.ceiling48.e0400.naive_points	624	n
+candidate.dash_retuned.ceiling48.e0400.reachable	yes	
+candidate.dash_retuned.ceiling48.e0500.aims_armed	63	n
+candidate.dash_retuned.ceiling48.e0500.avail_commands	16	n
+candidate.dash_retuned.ceiling48.e0500.best_delta_ups	0.76	ups
+candidate.dash_retuned.ceiling48.e0500.naive_harmed	0	n
+candidate.dash_retuned.ceiling48.e0500.naive_points	624	n
+candidate.dash_retuned.ceiling48.e0500.reachable	yes	
+candidate.dash_retuned.ceiling48.e0640.aims_armed	72	n
+candidate.dash_retuned.ceiling48.e0640.avail_commands	16	n
+candidate.dash_retuned.ceiling48.e0640.best_delta_ups	0.42	ups
+candidate.dash_retuned.ceiling48.e0640.naive_harmed	0	n
+candidate.dash_retuned.ceiling48.e0640.naive_points	624	n
+candidate.dash_retuned.ceiling48.e0640.reachable	yes	
+candidate.dash_retuned.ceiling48.e0800.aims_armed	72	n
+candidate.dash_retuned.ceiling48.e0800.avail_commands	16	n
+candidate.dash_retuned.ceiling48.e0800.best_delta_ups	3.36	ups
+candidate.dash_retuned.ceiling48.e0800.naive_harmed	0	n
+candidate.dash_retuned.ceiling48.e0800.naive_points	624	n
+candidate.dash_retuned.ceiling48.e0800.reachable	yes	
+candidate.dash_retuned.ceiling48.e1000.aims_armed	72	n
+candidate.dash_retuned.ceiling48.e1000.avail_commands	16	n
+candidate.dash_retuned.ceiling48.e1000.best_delta_ups	4.80	ups
+candidate.dash_retuned.ceiling48.e1000.naive_harmed	0	n
+candidate.dash_retuned.ceiling48.e1000.naive_points	624	n
+candidate.dash_retuned.ceiling48.e1000.reachable	yes	
+candidate.dash_retuned.ceiling48.g5a.arming_events	0	n
+candidate.dash_retuned.corner.e0320.aims_armed	1	n
+candidate.dash_retuned.corner.e0320.avail_commands	47	n
+candidate.dash_retuned.corner.e0320.best_delta_ups	0.01	ups
+candidate.dash_retuned.corner.e0320.naive_harmed	0	n
+candidate.dash_retuned.corner.e0320.naive_points	624	n
+candidate.dash_retuned.corner.e0320.reachable	yes	
+candidate.dash_retuned.corner.e0400.aims_armed	8	n
+candidate.dash_retuned.corner.e0400.avail_commands	47	n
+candidate.dash_retuned.corner.e0400.best_delta_ups	3.27	ups
+candidate.dash_retuned.corner.e0400.naive_harmed	19	n
+candidate.dash_retuned.corner.e0400.naive_points	624	n
+candidate.dash_retuned.corner.e0400.reachable	yes	
+candidate.dash_retuned.corner.e0500.aims_armed	14	n
+candidate.dash_retuned.corner.e0500.avail_commands	47	n
+candidate.dash_retuned.corner.e0500.best_delta_ups	555.98	ups
+candidate.dash_retuned.corner.e0500.naive_harmed	0	n
+candidate.dash_retuned.corner.e0500.naive_points	624	n
+candidate.dash_retuned.corner.e0500.reachable	yes	
+candidate.dash_retuned.corner.e0640.aims_armed	33	n
+candidate.dash_retuned.corner.e0640.avail_commands	47	n
+candidate.dash_retuned.corner.e0640.best_delta_ups	440.16	ups
+candidate.dash_retuned.corner.e0640.naive_harmed	0	n
+candidate.dash_retuned.corner.e0640.naive_points	624	n
+candidate.dash_retuned.corner.e0640.reachable	yes	
+candidate.dash_retuned.corner.e0800.aims_armed	44	n
+candidate.dash_retuned.corner.e0800.avail_commands	47	n
+candidate.dash_retuned.corner.e0800.best_delta_ups	317.73	ups
+candidate.dash_retuned.corner.e0800.naive_harmed	0	n
+candidate.dash_retuned.corner.e0800.naive_points	624	n
+candidate.dash_retuned.corner.e0800.reachable	yes	
+candidate.dash_retuned.corner.e1000.aims_armed	37	n
+candidate.dash_retuned.corner.e1000.avail_commands	47	n
+candidate.dash_retuned.corner.e1000.best_delta_ups	223.73	ups
+candidate.dash_retuned.corner.e1000.naive_harmed	0	n
+candidate.dash_retuned.corner.e1000.naive_points	624	n
+candidate.dash_retuned.corner.e1000.reachable	yes	
+candidate.dash_retuned.corner.g5a.arming_events	0	n
+candidate.dash_retuned.floor.e0320.aims_armed	2	n
+candidate.dash_retuned.floor.e0320.avail_commands	47	n
+candidate.dash_retuned.floor.e0320.best_delta_ups	0.01	ups
+candidate.dash_retuned.floor.e0320.naive_harmed	0	n
+candidate.dash_retuned.floor.e0320.naive_points	624	n
+candidate.dash_retuned.floor.e0320.reachable	yes	
+candidate.dash_retuned.floor.e0400.aims_armed	30	n
+candidate.dash_retuned.floor.e0400.avail_commands	47	n
+candidate.dash_retuned.floor.e0400.best_delta_ups	5.65	ups
+candidate.dash_retuned.floor.e0400.naive_harmed	0	n
+candidate.dash_retuned.floor.e0400.naive_points	624	n
+candidate.dash_retuned.floor.e0400.reachable	yes	
+candidate.dash_retuned.floor.e0500.aims_armed	45	n
+candidate.dash_retuned.floor.e0500.avail_commands	47	n
+candidate.dash_retuned.floor.e0500.best_delta_ups	4.64	ups
+candidate.dash_retuned.floor.e0500.naive_harmed	0	n
+candidate.dash_retuned.floor.e0500.naive_points	624	n
+candidate.dash_retuned.floor.e0500.reachable	yes	
+candidate.dash_retuned.floor.e0640.aims_armed	61	n
+candidate.dash_retuned.floor.e0640.avail_commands	47	n
+candidate.dash_retuned.floor.e0640.best_delta_ups	3.64	ups
+candidate.dash_retuned.floor.e0640.naive_harmed	0	n
+candidate.dash_retuned.floor.e0640.naive_points	624	n
+candidate.dash_retuned.floor.e0640.reachable	yes	
+candidate.dash_retuned.floor.e0800.aims_armed	72	n
+candidate.dash_retuned.floor.e0800.avail_commands	47	n
+candidate.dash_retuned.floor.e0800.best_delta_ups	3.00	ups
+candidate.dash_retuned.floor.e0800.naive_harmed	0	n
+candidate.dash_retuned.floor.e0800.naive_points	624	n
+candidate.dash_retuned.floor.e0800.reachable	yes	
+candidate.dash_retuned.floor.e1000.aims_armed	72	n
+candidate.dash_retuned.floor.e1000.avail_commands	47	n
+candidate.dash_retuned.floor.e1000.best_delta_ups	2.39	ups
+candidate.dash_retuned.floor.e1000.naive_harmed	0	n
+candidate.dash_retuned.floor.e1000.naive_points	624	n
+candidate.dash_retuned.floor.e1000.reachable	yes	
+candidate.dash_retuned.floor.g5a.arming_events	0	n
+candidate.dash_retuned.ledge256.e0320.aims_armed	2	n
+candidate.dash_retuned.ledge256.e0320.avail_commands	47	n
+candidate.dash_retuned.ledge256.e0320.best_delta_ups	0.01	ups
+candidate.dash_retuned.ledge256.e0320.naive_harmed	0	n
+candidate.dash_retuned.ledge256.e0320.naive_points	624	n
+candidate.dash_retuned.ledge256.e0320.reachable	yes	
+candidate.dash_retuned.ledge256.e0400.aims_armed	30	n
+candidate.dash_retuned.ledge256.e0400.avail_commands	47	n
+candidate.dash_retuned.ledge256.e0400.best_delta_ups	152.88	ups
+candidate.dash_retuned.ledge256.e0400.naive_harmed	0	n
+candidate.dash_retuned.ledge256.e0400.naive_points	624	n
+candidate.dash_retuned.ledge256.e0400.reachable	yes	
+candidate.dash_retuned.ledge256.e0500.aims_armed	45	n
+candidate.dash_retuned.ledge256.e0500.avail_commands	47	n
+candidate.dash_retuned.ledge256.e0500.best_delta_ups	192.72	ups
+candidate.dash_retuned.ledge256.e0500.naive_harmed	0	n
+candidate.dash_retuned.ledge256.e0500.naive_points	624	n
+candidate.dash_retuned.ledge256.e0500.reachable	yes	
+candidate.dash_retuned.ledge256.e0640.aims_armed	61	n
+candidate.dash_retuned.ledge256.e0640.avail_commands	47	n
+candidate.dash_retuned.ledge256.e0640.best_delta_ups	108.15	ups
+candidate.dash_retuned.ledge256.e0640.naive_harmed	0	n
+candidate.dash_retuned.ledge256.e0640.naive_points	624	n
+candidate.dash_retuned.ledge256.e0640.reachable	yes	
+candidate.dash_retuned.ledge256.e0800.aims_armed	72	n
+candidate.dash_retuned.ledge256.e0800.avail_commands	47	n
+candidate.dash_retuned.ledge256.e0800.best_delta_ups	131.30	ups
+candidate.dash_retuned.ledge256.e0800.naive_harmed	0	n
+candidate.dash_retuned.ledge256.e0800.naive_points	624	n
+candidate.dash_retuned.ledge256.e0800.reachable	yes	
+candidate.dash_retuned.ledge256.e1000.aims_armed	72	n
+candidate.dash_retuned.ledge256.e1000.avail_commands	47	n
+candidate.dash_retuned.ledge256.e1000.best_delta_ups	408.13	ups
+candidate.dash_retuned.ledge256.e1000.naive_harmed	0	n
+candidate.dash_retuned.ledge256.e1000.naive_points	624	n
+candidate.dash_retuned.ledge256.e1000.reachable	yes	
+candidate.dash_retuned.ledge256.g5a.arming_events	0	n
+candidate.dash_retuned.ramp26.e0320.aims_armed	2	n
+candidate.dash_retuned.ramp26.e0320.avail_commands	47	n
+candidate.dash_retuned.ramp26.e0320.best_delta_ups	0.01	ups
+candidate.dash_retuned.ramp26.e0320.naive_harmed	0	n
+candidate.dash_retuned.ramp26.e0320.naive_points	624	n
+candidate.dash_retuned.ramp26.e0320.reachable	yes	
+candidate.dash_retuned.ramp26.e0400.aims_armed	18	n
+candidate.dash_retuned.ramp26.e0400.avail_commands	47	n
+candidate.dash_retuned.ramp26.e0400.best_delta_ups	16.34	ups
+candidate.dash_retuned.ramp26.e0400.naive_harmed	0	n
+candidate.dash_retuned.ramp26.e0400.naive_points	624	n
+candidate.dash_retuned.ramp26.e0400.reachable	yes	
+candidate.dash_retuned.ramp26.e0500.aims_armed	24	n
+candidate.dash_retuned.ramp26.e0500.avail_commands	47	n
+candidate.dash_retuned.ramp26.e0500.best_delta_ups	6.17	ups
+candidate.dash_retuned.ramp26.e0500.naive_harmed	0	n
+candidate.dash_retuned.ramp26.e0500.naive_points	624	n
+candidate.dash_retuned.ramp26.e0500.reachable	yes	
+candidate.dash_retuned.ramp26.e0640.aims_armed	59	n
+candidate.dash_retuned.ramp26.e0640.avail_commands	47	n
+candidate.dash_retuned.ramp26.e0640.best_delta_ups	34.09	ups
+candidate.dash_retuned.ramp26.e0640.naive_harmed	0	n
+candidate.dash_retuned.ramp26.e0640.naive_points	624	n
+candidate.dash_retuned.ramp26.e0640.reachable	yes	
+candidate.dash_retuned.ramp26.e0800.aims_armed	72	n
+candidate.dash_retuned.ramp26.e0800.avail_commands	47	n
+candidate.dash_retuned.ramp26.e0800.best_delta_ups	65.76	ups
+candidate.dash_retuned.ramp26.e0800.naive_harmed	0	n
+candidate.dash_retuned.ramp26.e0800.naive_points	624	n
+candidate.dash_retuned.ramp26.e0800.reachable	yes	
+candidate.dash_retuned.ramp26.e1000.aims_armed	72	n
+candidate.dash_retuned.ramp26.e1000.avail_commands	38	n
+candidate.dash_retuned.ramp26.e1000.best_delta_ups	33.60	ups
+candidate.dash_retuned.ramp26.e1000.naive_harmed	0	n
+candidate.dash_retuned.ramp26.e1000.naive_points	624	n
+candidate.dash_retuned.ramp26.e1000.reachable	yes	
+candidate.dash_retuned.ramp26.g5a.arming_events	0	n
+candidate.dash_retuned.ramp50.e0320.aims_armed	2	n
+candidate.dash_retuned.ramp50.e0320.avail_commands	47	n
+candidate.dash_retuned.ramp50.e0320.best_delta_ups	0.01	ups
+candidate.dash_retuned.ramp50.e0320.naive_harmed	0	n
+candidate.dash_retuned.ramp50.e0320.naive_points	624	n
+candidate.dash_retuned.ramp50.e0320.reachable	yes	
+candidate.dash_retuned.ramp50.e0400.aims_armed	16	n
+candidate.dash_retuned.ramp50.e0400.avail_commands	47	n
+candidate.dash_retuned.ramp50.e0400.best_delta_ups	0.86	ups
+candidate.dash_retuned.ramp50.e0400.naive_harmed	0	n
+candidate.dash_retuned.ramp50.e0400.naive_points	624	n
+candidate.dash_retuned.ramp50.e0400.reachable	yes	
+candidate.dash_retuned.ramp50.e0500.aims_armed	22	n
+candidate.dash_retuned.ramp50.e0500.avail_commands	47	n
+candidate.dash_retuned.ramp50.e0500.best_delta_ups	2.07	ups
+candidate.dash_retuned.ramp50.e0500.naive_harmed	0	n
+candidate.dash_retuned.ramp50.e0500.naive_points	624	n
+candidate.dash_retuned.ramp50.e0500.reachable	yes	
+candidate.dash_retuned.ramp50.e0640.aims_armed	36	n
+candidate.dash_retuned.ramp50.e0640.avail_commands	47	n
+candidate.dash_retuned.ramp50.e0640.best_delta_ups	6.06	ups
+candidate.dash_retuned.ramp50.e0640.naive_harmed	0	n
+candidate.dash_retuned.ramp50.e0640.naive_points	624	n
+candidate.dash_retuned.ramp50.e0640.reachable	yes	
+candidate.dash_retuned.ramp50.e0800.aims_armed	49	n
+candidate.dash_retuned.ramp50.e0800.avail_commands	47	n
+candidate.dash_retuned.ramp50.e0800.best_delta_ups	97.39	ups
+candidate.dash_retuned.ramp50.e0800.naive_harmed	0	n
+candidate.dash_retuned.ramp50.e0800.naive_points	624	n
+candidate.dash_retuned.ramp50.e0800.reachable	yes	
+candidate.dash_retuned.ramp50.e1000.aims_armed	53	n
+candidate.dash_retuned.ramp50.e1000.avail_commands	47	n
+candidate.dash_retuned.ramp50.e1000.best_delta_ups	249.00	ups
+candidate.dash_retuned.ramp50.e1000.naive_harmed	0	n
+candidate.dash_retuned.ramp50.e1000.naive_points	624	n
+candidate.dash_retuned.ramp50.e1000.reachable	yes	
+candidate.dash_retuned.ramp50.g5a.arming_events	0	n
+candidate.dash_retuned.step18.e0320.aims_armed	2	n
+candidate.dash_retuned.step18.e0320.avail_commands	47	n
+candidate.dash_retuned.step18.e0320.best_delta_ups	0.01	ups
+candidate.dash_retuned.step18.e0320.naive_harmed	0	n
+candidate.dash_retuned.step18.e0320.naive_points	624	n
+candidate.dash_retuned.step18.e0320.reachable	yes	
+candidate.dash_retuned.step18.e0400.aims_armed	30	n
+candidate.dash_retuned.step18.e0400.avail_commands	47	n
+candidate.dash_retuned.step18.e0400.best_delta_ups	66.04	ups
+candidate.dash_retuned.step18.e0400.naive_harmed	0	n
+candidate.dash_retuned.step18.e0400.naive_points	624	n
+candidate.dash_retuned.step18.e0400.reachable	yes	
+candidate.dash_retuned.step18.e0500.aims_armed	41	n
+candidate.dash_retuned.step18.e0500.avail_commands	47	n
+candidate.dash_retuned.step18.e0500.best_delta_ups	83.47	ups
+candidate.dash_retuned.step18.e0500.naive_harmed	0	n
+candidate.dash_retuned.step18.e0500.naive_points	624	n
+candidate.dash_retuned.step18.e0500.reachable	yes	
+candidate.dash_retuned.step18.e0640.aims_armed	59	n
+candidate.dash_retuned.step18.e0640.avail_commands	48	n
+candidate.dash_retuned.step18.e0640.best_delta_ups	42.44	ups
+candidate.dash_retuned.step18.e0640.naive_harmed	0	n
+candidate.dash_retuned.step18.e0640.naive_points	624	n
+candidate.dash_retuned.step18.e0640.reachable	yes	
+candidate.dash_retuned.step18.e0800.aims_armed	70	n
+candidate.dash_retuned.step18.e0800.avail_commands	47	n
+candidate.dash_retuned.step18.e0800.best_delta_ups	3.00	ups
+candidate.dash_retuned.step18.e0800.naive_harmed	0	n
+candidate.dash_retuned.step18.e0800.naive_points	624	n
+candidate.dash_retuned.step18.e0800.reachable	yes	
+candidate.dash_retuned.step18.e1000.aims_armed	68	n
+candidate.dash_retuned.step18.e1000.avail_commands	47	n
+candidate.dash_retuned.step18.e1000.best_delta_ups	10.44	ups
+candidate.dash_retuned.step18.e1000.naive_harmed	0	n
+candidate.dash_retuned.step18.e1000.naive_points	624	n
+candidate.dash_retuned.step18.e1000.reachable	yes	
+candidate.dash_retuned.step18.g5a.arming_events	0	n
+candidate.dash_retuned.w4_distinct_kinds	3	n
+candidate.dash_retuned.w4_material_contexts	5	n
+candidate.dash_retuned.w4_material_contexts_before	5	n
+candidate.wall_jump.ceiling48.e0320.reachable	no	
+candidate.wall_jump.ceiling48.e0400.reachable	no	
+candidate.wall_jump.ceiling48.e0500.reachable	no	
+candidate.wall_jump.ceiling48.e0640.reachable	no	
+candidate.wall_jump.ceiling48.e0800.reachable	no	
+candidate.wall_jump.ceiling48.e1000.reachable	no	
+candidate.wall_jump.ceiling48.g5a.arming_events	0	n
+candidate.wall_jump.ceiling48.g5a.available_commands	0	n
+candidate.wall_jump.ceiling48.g5a.peak_speed_ups	320.00	ups
+candidate.wall_jump.ceiling48.w4_best_delta_ups	0.00	ups
+candidate.wall_jump.corner.e0320.absolute_aim0_ups	320.00	ups
+candidate.wall_jump.corner.e0320.anchor_commands	37	n
+candidate.wall_jump.corner.e0320.anchor_speed_ups	0.32	ups
+candidate.wall_jump.corner.e0320.avail_commands	15	n
+candidate.wall_jump.corner.e0320.avail_ms	120	ms
+candidate.wall_jump.corner.e0320.best_absolute_ups	166.86	ups
+candidate.wall_jump.corner.e0320.best_aim_deg	275.00	deg
+candidate.wall_jump.corner.e0320.best_delta_ups	163.12	ups
+candidate.wall_jump.corner.e0320.best_timing_ms	0	ms
+candidate.wall_jump.corner.e0320.control_best_absolute_ups	466.08	ups
+candidate.wall_jump.corner.e0320.delta_aim0_ups	0.00	ups
+candidate.wall_jump.corner.e0320.exec_window_ms	48	ms
+candidate.wall_jump.corner.e0320.exec_window_span_ms	48	ms
+candidate.wall_jump.corner.e0320.g3_unresponsive_candidate	0	n
+candidate.wall_jump.corner.e0320.g3_unresponsive_control	27	n
+candidate.wall_jump.corner.e0320.g5b_point_naive	0.0000	
+candidate.wall_jump.corner.e0320.g7_aim_at_deg	293.67	deg
+candidate.wall_jump.corner.e0320.g7_aim_refined_ups	184.07	ups
+candidate.wall_jump.corner.e0320.g7_geometry_at_units	-13.531	units
+candidate.wall_jump.corner.e0320.g7_geometry_refined_ups	160.96	ups
+candidate.wall_jump.corner.e0320.g7_impulse_measured_ups	200.00	ups
+candidate.wall_jump.corner.e0320.g7_impulse_predicted_ups	200.00	ups
+candidate.wall_jump.corner.e0320.material	yes	
+candidate.wall_jump.corner.e0320.menu.bunnyhop.absolute_ups	324.88	ups
+candidate.wall_jump.corner.e0320.menu.bunnyhop.angle_deg	10.00	deg
+candidate.wall_jump.corner.e0320.menu.held_forward.absolute_ups	466.08	ups
+candidate.wall_jump.corner.e0320.menu.held_forward.angle_deg	50.00	deg
+candidate.wall_jump.corner.e0320.menu.held_strafe.absolute_ups	466.08	ups
+candidate.wall_jump.corner.e0320.menu.held_strafe.angle_deg	50.00	deg
+candidate.wall_jump.corner.e0320.naive_harm_rate	0.0000	
+candidate.wall_jump.corner.e0320.naive_harmed	0	n
+candidate.wall_jump.corner.e0320.naive_mean_delta_ups	0.00	ups
+candidate.wall_jump.corner.e0320.naive_points	325	n
+candidate.wall_jump.corner.e0320.peak_gain_at_ms	712	ms
+candidate.wall_jump.corner.e0320.peak_gain_ups	371.68	ups
+candidate.wall_jump.corner.e0320.qualifies	yes	
+candidate.wall_jump.corner.e0320.reachable	yes	
+candidate.wall_jump.corner.e0320.timing_degenerate	no	
+candidate.wall_jump.corner.e0320.w2_gap	1.0000	
+candidate.wall_jump.corner.e0320.w3_chain_gain_ups	-299.22	ups
+candidate.wall_jump.corner.e0320.w3_mechanic_alone_ups	320.00	ups
+candidate.wall_jump.corner.e0320.w5_over_best_technique_ups	-299.22	ups
+candidate.wall_jump.corner.e0320.w6_aim_centroid_deg	0.00	deg
+candidate.wall_jump.corner.e0320.w6_timing_centroid_ms	20	ms
+candidate.wall_jump.corner.e0320.w6_top_aims	2	n
+candidate.wall_jump.corner.e0320.w6_top_timings	6	n
+candidate.wall_jump.corner.e0320.worst_latency	0	n
+candidate.wall_jump.corner.e0400.absolute_aim0_ups	320.00	ups
+candidate.wall_jump.corner.e0400.anchor_commands	38	n
+candidate.wall_jump.corner.e0400.anchor_speed_ups	0.40	ups
+candidate.wall_jump.corner.e0400.avail_commands	15	n
+candidate.wall_jump.corner.e0400.avail_ms	120	ms
+candidate.wall_jump.corner.e0400.best_absolute_ups	165.02	ups
+candidate.wall_jump.corner.e0400.best_aim_deg	275.00	deg
+candidate.wall_jump.corner.e0400.best_delta_ups	161.28	ups
+candidate.wall_jump.corner.e0400.best_timing_ms	32	ms
+candidate.wall_jump.corner.e0400.control_best_absolute_ups	522.28	ups
+candidate.wall_jump.corner.e0400.delta_aim0_ups	0.00	ups
+candidate.wall_jump.corner.e0400.exec_window_ms	40	ms
+candidate.wall_jump.corner.e0400.exec_window_span_ms	40	ms
+candidate.wall_jump.corner.e0400.g3_unresponsive_candidate	0	n
+candidate.wall_jump.corner.e0400.g3_unresponsive_control	31	n
+candidate.wall_jump.corner.e0400.g5b_point_naive	0.0000	
+candidate.wall_jump.corner.e0400.g7_aim_at_deg	89.92	deg
+candidate.wall_jump.corner.e0400.g7_aim_refined_ups	125.96	ups
+candidate.wall_jump.corner.e0400.g7_geometry_at_units	-1.406	units
+candidate.wall_jump.corner.e0400.g7_geometry_refined_ups	161.28	ups
+candidate.wall_jump.corner.e0400.g7_impulse_measured_ups	200.00	ups
+candidate.wall_jump.corner.e0400.g7_impulse_predicted_ups	200.00	ups
+candidate.wall_jump.corner.e0400.material	yes	
+candidate.wall_jump.corner.e0400.menu.bunnyhop.absolute_ups	324.88	ups
+candidate.wall_jump.corner.e0400.menu.bunnyhop.angle_deg	10.00	deg
+candidate.wall_jump.corner.e0400.menu.held_forward.absolute_ups	466.08	ups
+candidate.wall_jump.corner.e0400.menu.held_forward.angle_deg	50.00	deg
+candidate.wall_jump.corner.e0400.menu.held_strafe.absolute_ups	466.08	ups
+candidate.wall_jump.corner.e0400.menu.held_strafe.angle_deg	50.00	deg
+candidate.wall_jump.corner.e0400.naive_harm_rate	0.0000	
+candidate.wall_jump.corner.e0400.naive_harmed	0	n
+candidate.wall_jump.corner.e0400.naive_mean_delta_ups	0.57	ups
+candidate.wall_jump.corner.e0400.naive_points	325	n
+candidate.wall_jump.corner.e0400.peak_gain_at_ms	704	ms
+candidate.wall_jump.corner.e0400.peak_gain_ups	257.14	ups
+candidate.wall_jump.corner.e0400.qualifies	yes	
+candidate.wall_jump.corner.e0400.reachable	yes	
+candidate.wall_jump.corner.e0400.timing_degenerate	no	
+candidate.wall_jump.corner.e0400.w2_gap	0.9965	
+candidate.wall_jump.corner.e0400.w3_chain_gain_ups	-357.26	ups
+candidate.wall_jump.corner.e0400.w3_entry_slope	-0.0230	
+candidate.wall_jump.corner.e0400.w3_mechanic_alone_ups	320.00	ups
+candidate.wall_jump.corner.e0400.w5_over_best_technique_ups	-301.06	ups
+candidate.wall_jump.corner.e0400.w6_aim_centroid_deg	-23.33	deg
+candidate.wall_jump.corner.e0400.w6_timing_centroid_ms	16	ms
+candidate.wall_jump.corner.e0400.w6_top_aims	3	n
+candidate.wall_jump.corner.e0400.w6_top_timings	5	n
+candidate.wall_jump.corner.e0400.worst_latency	0	n
+candidate.wall_jump.corner.e0500.absolute_aim0_ups	320.00	ups
+candidate.wall_jump.corner.e0500.anchor_commands	39	n
+candidate.wall_jump.corner.e0500.anchor_speed_ups	0.50	ups
+candidate.wall_jump.corner.e0500.avail_commands	18	n
+candidate.wall_jump.corner.e0500.avail_ms	144	ms
+candidate.wall_jump.corner.e0500.best_absolute_ups	665.35	ups
+candidate.wall_jump.corner.e0500.best_aim_deg	15.00	deg
+candidate.wall_jump.corner.e0500.best_delta_ups	335.20	ups
+candidate.wall_jump.corner.e0500.best_timing_ms	96	ms
+candidate.wall_jump.corner.e0500.control_best_absolute_ups	478.82	ups
+candidate.wall_jump.corner.e0500.delta_aim0_ups	0.00	ups
+candidate.wall_jump.corner.e0500.exec_window_ms	8	ms
+candidate.wall_jump.corner.e0500.exec_window_span_ms	8	ms
+candidate.wall_jump.corner.e0500.g3_unresponsive_candidate	0	n
+candidate.wall_jump.corner.e0500.g3_unresponsive_control	1	n
+candidate.wall_jump.corner.e0500.g5b_point_naive	0.0000	
+candidate.wall_jump.corner.e0500.g7_aim_at_deg	14.92	deg
+candidate.wall_jump.corner.e0500.g7_aim_refined_ups	199.04	ups
+candidate.wall_jump.corner.e0500.g7_geometry_at_units	-4.094	units
+candidate.wall_jump.corner.e0500.g7_geometry_refined_ups	334.18	ups
+candidate.wall_jump.corner.e0500.g7_impulse_measured_ups	191.48	ups
+candidate.wall_jump.corner.e0500.g7_impulse_predicted_ups	200.00	ups
+candidate.wall_jump.corner.e0500.material	yes	
+candidate.wall_jump.corner.e0500.menu.bunnyhop.absolute_ups	324.88	ups
+candidate.wall_jump.corner.e0500.menu.bunnyhop.angle_deg	10.00	deg
+candidate.wall_jump.corner.e0500.menu.held_forward.absolute_ups	466.08	ups
+candidate.wall_jump.corner.e0500.menu.held_forward.angle_deg	50.00	deg
+candidate.wall_jump.corner.e0500.menu.held_strafe.absolute_ups	466.08	ups
+candidate.wall_jump.corner.e0500.menu.held_strafe.angle_deg	50.00	deg
+candidate.wall_jump.corner.e0500.naive_harm_rate	0.0000	
+candidate.wall_jump.corner.e0500.naive_harmed	0	n
+candidate.wall_jump.corner.e0500.naive_mean_delta_ups	2.22	ups
+candidate.wall_jump.corner.e0500.naive_points	325	n
+candidate.wall_jump.corner.e0500.peak_gain_at_ms	1192	ms
+candidate.wall_jump.corner.e0500.peak_gain_ups	335.20	ups
+candidate.wall_jump.corner.e0500.qualifies	yes	
+candidate.wall_jump.corner.e0500.reachable	yes	
+candidate.wall_jump.corner.e0500.timing_degenerate	no	
+candidate.wall_jump.corner.e0500.w2_gap	0.9934	
+candidate.wall_jump.corner.e0500.w3_chain_gain_ups	186.54	ups
+candidate.wall_jump.corner.e0500.w3_entry_slope	5.0033	
+candidate.wall_jump.corner.e0500.w3_mechanic_alone_ups	320.00	ups
+candidate.wall_jump.corner.e0500.w5_over_best_technique_ups	199.28	ups
+candidate.wall_jump.corner.e0500.w6_aim_centroid_deg	15.00	deg
+candidate.wall_jump.corner.e0500.w6_timing_centroid_ms	96	ms
+candidate.wall_jump.corner.e0500.w6_top_aims	1	n
+candidate.wall_jump.corner.e0500.w6_top_timings	1	n
+candidate.wall_jump.corner.e0500.worst_latency	0	n
+candidate.wall_jump.corner.e0640.absolute_aim0_ups	320.00	ups
+candidate.wall_jump.corner.e0640.anchor_commands	40	n
+candidate.wall_jump.corner.e0640.anchor_speed_ups	0.64	ups
+candidate.wall_jump.corner.e0640.avail_commands	15	n
+candidate.wall_jump.corner.e0640.avail_ms	120	ms
+candidate.wall_jump.corner.e0640.best_absolute_ups	164.86	ups
+candidate.wall_jump.corner.e0640.best_aim_deg	275.00	deg
+candidate.wall_jump.corner.e0640.best_delta_ups	161.12	ups
+candidate.wall_jump.corner.e0640.best_timing_ms	16	ms
+candidate.wall_jump.corner.e0640.control_best_absolute_ups	477.96	ups
+candidate.wall_jump.corner.e0640.delta_aim0_ups	0.00	ups
+candidate.wall_jump.corner.e0640.exec_window_ms	24	ms
+candidate.wall_jump.corner.e0640.exec_window_span_ms	24	ms
+candidate.wall_jump.corner.e0640.g3_unresponsive_candidate	0	n
+candidate.wall_jump.corner.e0640.g3_unresponsive_control	28	n
+candidate.wall_jump.corner.e0640.g5b_point_naive	0.0000	
+candidate.wall_jump.corner.e0640.g7_aim_at_deg	292.11	deg
+candidate.wall_jump.corner.e0640.g7_aim_refined_ups	127.11	ups
+candidate.wall_jump.corner.e0640.g7_geometry_at_units	-4.156	units
+candidate.wall_jump.corner.e0640.g7_geometry_refined_ups	161.12	ups
+candidate.wall_jump.corner.e0640.g7_impulse_measured_ups	200.00	ups
+candidate.wall_jump.corner.e0640.g7_impulse_predicted_ups	200.00	ups
+candidate.wall_jump.corner.e0640.material	yes	
+candidate.wall_jump.corner.e0640.menu.bunnyhop.absolute_ups	324.88	ups
+candidate.wall_jump.corner.e0640.menu.bunnyhop.angle_deg	10.00	deg
+candidate.wall_jump.corner.e0640.menu.held_forward.absolute_ups	466.08	ups
+candidate.wall_jump.corner.e0640.menu.held_forward.angle_deg	50.00	deg
+candidate.wall_jump.corner.e0640.menu.held_strafe.absolute_ups	466.08	ups
+candidate.wall_jump.corner.e0640.menu.held_strafe.angle_deg	50.00	deg
+candidate.wall_jump.corner.e0640.naive_harm_rate	0.0062	
+candidate.wall_jump.corner.e0640.naive_harmed	2	n
+candidate.wall_jump.corner.e0640.naive_mean_delta_ups	-0.79	ups
+candidate.wall_jump.corner.e0640.naive_points	325	n
+candidate.wall_jump.corner.e0640.peak_gain_at_ms	688	ms
+candidate.wall_jump.corner.e0640.peak_gain_ups	254.64	ups
+candidate.wall_jump.corner.e0640.qualifies	yes	
+candidate.wall_jump.corner.e0640.reachable	yes	
+candidate.wall_jump.corner.e0640.timing_degenerate	no	
+candidate.wall_jump.corner.e0640.w2_gap	1.0049	
+candidate.wall_jump.corner.e0640.w3_chain_gain_ups	-313.11	ups
+candidate.wall_jump.corner.e0640.w3_entry_slope	-3.5750	
+candidate.wall_jump.corner.e0640.w3_mechanic_alone_ups	320.00	ups
+candidate.wall_jump.corner.e0640.w5_over_best_technique_ups	-301.22	ups
+candidate.wall_jump.corner.e0640.w6_aim_centroid_deg	0.00	deg
+candidate.wall_jump.corner.e0640.w6_timing_centroid_ms	8	ms
+candidate.wall_jump.corner.e0640.w6_top_aims	2	n
+candidate.wall_jump.corner.e0640.w6_top_timings	3	n
+candidate.wall_jump.corner.e0640.worst_latency	0	n
+candidate.wall_jump.corner.e0800.absolute_aim0_ups	320.00	ups
+candidate.wall_jump.corner.e0800.anchor_commands	40	n
+candidate.wall_jump.corner.e0800.anchor_speed_ups	0.80	ups
+candidate.wall_jump.corner.e0800.avail_commands	25	n
+candidate.wall_jump.corner.e0800.avail_ms	200	ms
+candidate.wall_jump.corner.e0800.best_absolute_ups	164.85	ups
+candidate.wall_jump.corner.e0800.best_aim_deg	85.00	deg
+candidate.wall_jump.corner.e0800.best_delta_ups	161.12	ups
+candidate.wall_jump.corner.e0800.best_timing_ms	16	ms
+candidate.wall_jump.corner.e0800.control_best_absolute_ups	519.34	ups
+candidate.wall_jump.corner.e0800.delta_aim0_ups	0.00	ups
+candidate.wall_jump.corner.e0800.exec_window_ms	24	ms
+candidate.wall_jump.corner.e0800.exec_window_span_ms	24	ms
+candidate.wall_jump.corner.e0800.g3_unresponsive_candidate	0	n
+candidate.wall_jump.corner.e0800.g3_unresponsive_control	27	n
+candidate.wall_jump.corner.e0800.g5b_point_naive	0.0000	
+candidate.wall_jump.corner.e0800.g7_aim_at_deg	293.05	deg
+candidate.wall_jump.corner.e0800.g7_aim_refined_ups	221.43	ups
+candidate.wall_jump.corner.e0800.g7_geometry_at_units	-1.594	units
+candidate.wall_jump.corner.e0800.g7_geometry_refined_ups	161.12	ups
+candidate.wall_jump.corner.e0800.g7_impulse_measured_ups	200.00	ups
+candidate.wall_jump.corner.e0800.g7_impulse_predicted_ups	200.00	ups
+candidate.wall_jump.corner.e0800.material	yes	
+candidate.wall_jump.corner.e0800.menu.bunnyhop.absolute_ups	324.88	ups
+candidate.wall_jump.corner.e0800.menu.bunnyhop.angle_deg	10.00	deg
+candidate.wall_jump.corner.e0800.menu.held_forward.absolute_ups	466.08	ups
+candidate.wall_jump.corner.e0800.menu.held_forward.angle_deg	50.00	deg
+candidate.wall_jump.corner.e0800.menu.held_strafe.absolute_ups	466.08	ups
+candidate.wall_jump.corner.e0800.menu.held_strafe.angle_deg	50.00	deg
+candidate.wall_jump.corner.e0800.naive_harm_rate	0.0062	
+candidate.wall_jump.corner.e0800.naive_harmed	2	n
+candidate.wall_jump.corner.e0800.naive_mean_delta_ups	-0.34	ups
+candidate.wall_jump.corner.e0800.naive_points	325	n
+candidate.wall_jump.corner.e0800.peak_gain_at_ms	688	ms
+candidate.wall_jump.corner.e0800.peak_gain_ups	254.71	ups
+candidate.wall_jump.corner.e0800.qualifies	yes	
+candidate.wall_jump.corner.e0800.reachable	yes	
+candidate.wall_jump.corner.e0800.timing_degenerate	no	
+candidate.wall_jump.corner.e0800.w2_gap	1.0021	
+candidate.wall_jump.corner.e0800.w3_chain_gain_ups	-354.49	ups
+candidate.wall_jump.corner.e0800.w3_entry_slope	0.0000	
+candidate.wall_jump.corner.e0800.w3_mechanic_alone_ups	320.00	ups
+candidate.wall_jump.corner.e0800.w5_over_best_technique_ups	-301.22	ups
+candidate.wall_jump.corner.e0800.w6_aim_centroid_deg	0.00	deg
+candidate.wall_jump.corner.e0800.w6_timing_centroid_ms	8	ms
+candidate.wall_jump.corner.e0800.w6_top_aims	2	n
+candidate.wall_jump.corner.e0800.w6_top_timings	3	n
+candidate.wall_jump.corner.e0800.worst_latency	0	n
+candidate.wall_jump.corner.e1000.absolute_aim0_ups	320.00	ups
+candidate.wall_jump.corner.e1000.anchor_commands	41	n
+candidate.wall_jump.corner.e1000.anchor_speed_ups	1.00	ups
+candidate.wall_jump.corner.e1000.avail_commands	15	n
+candidate.wall_jump.corner.e1000.avail_ms	120	ms
+candidate.wall_jump.corner.e1000.best_absolute_ups	264.07	ups
+candidate.wall_jump.corner.e1000.best_aim_deg	285.00	deg
+candidate.wall_jump.corner.e1000.best_delta_ups	263.89	ups
+candidate.wall_jump.corner.e1000.best_timing_ms	0	ms
+candidate.wall_jump.corner.e1000.control_best_absolute_ups	519.60	ups
+candidate.wall_jump.corner.e1000.delta_aim0_ups	0.00	ups
+candidate.wall_jump.corner.e1000.exec_window_ms	8	ms
+candidate.wall_jump.corner.e1000.exec_window_span_ms	8	ms
+candidate.wall_jump.corner.e1000.g3_unresponsive_candidate	0	n
+candidate.wall_jump.corner.e1000.g3_unresponsive_control	0	n
+candidate.wall_jump.corner.e1000.g5b_point_naive	0.0000	
+candidate.wall_jump.corner.e1000.g7_aim_at_deg	298.67	deg
+candidate.wall_jump.corner.e1000.g7_aim_refined_ups	239.51	ups
+candidate.wall_jump.corner.e1000.g7_geometry_at_units	-7.719	units
+candidate.wall_jump.corner.e1000.g7_geometry_refined_ups	197.87	ups
+candidate.wall_jump.corner.e1000.g7_impulse_measured_ups	200.00	ups
+candidate.wall_jump.corner.e1000.g7_impulse_predicted_ups	200.00	ups
+candidate.wall_jump.corner.e1000.material	yes	
+candidate.wall_jump.corner.e1000.menu.bunnyhop.absolute_ups	324.88	ups
+candidate.wall_jump.corner.e1000.menu.bunnyhop.angle_deg	10.00	deg
+candidate.wall_jump.corner.e1000.menu.held_forward.absolute_ups	466.08	ups
+candidate.wall_jump.corner.e1000.menu.held_forward.angle_deg	50.00	deg
+candidate.wall_jump.corner.e1000.menu.held_strafe.absolute_ups	466.08	ups
+candidate.wall_jump.corner.e1000.menu.held_strafe.angle_deg	50.00	deg
+candidate.wall_jump.corner.e1000.naive_harm_rate	0.0062	
+candidate.wall_jump.corner.e1000.naive_harmed	2	n
+candidate.wall_jump.corner.e1000.naive_mean_delta_ups	-0.69	ups
+candidate.wall_jump.corner.e1000.naive_points	325	n
+candidate.wall_jump.corner.e1000.peak_gain_at_ms	752	ms
+candidate.wall_jump.corner.e1000.peak_gain_ups	268.40	ups
+candidate.wall_jump.corner.e1000.qualifies	yes	
+candidate.wall_jump.corner.e1000.reachable	yes	
+candidate.wall_jump.corner.e1000.timing_degenerate	no	
+candidate.wall_jump.corner.e1000.w2_gap	1.0026	
+candidate.wall_jump.corner.e1000.w3_chain_gain_ups	-255.53	ups
+candidate.wall_jump.corner.e1000.w3_entry_slope	0.4961	
+candidate.wall_jump.corner.e1000.w3_mechanic_alone_ups	320.00	ups
+candidate.wall_jump.corner.e1000.w5_over_best_technique_ups	-202.01	ups
+candidate.wall_jump.corner.e1000.w6_aim_centroid_deg	-75.00	deg
+candidate.wall_jump.corner.e1000.w6_timing_centroid_ms	0	ms
+candidate.wall_jump.corner.e1000.w6_top_aims	1	n
+candidate.wall_jump.corner.e1000.w6_top_timings	1	n
+candidate.wall_jump.corner.e1000.worst_latency	0	n
+candidate.wall_jump.corner.g5a.arming_events	1	n
+candidate.wall_jump.corner.g5a.available_commands	3494	n
+candidate.wall_jump.corner.g5a.peak_speed_ups	320.00	ups
+candidate.wall_jump.corner.g5b_median	0.0000	
+candidate.wall_jump.corner.w2_gap_median	1.0011	
+candidate.wall_jump.corner.w3_chain_gain_best_ups	186.54	ups
+candidate.wall_jump.corner.w3_entry_slope_max	5.0033	
+candidate.wall_jump.corner.w3_entry_slope_min	-3.5750	
+candidate.wall_jump.corner.w4_best_delta_ups	335.20	ups
+candidate.wall_jump.floor.e0320.reachable	no	
+candidate.wall_jump.floor.e0400.reachable	no	
+candidate.wall_jump.floor.e0500.reachable	no	
+candidate.wall_jump.floor.e0640.reachable	no	
+candidate.wall_jump.floor.e0800.reachable	no	
+candidate.wall_jump.floor.e1000.reachable	no	
+candidate.wall_jump.floor.g5a.arming_events	0	n
+candidate.wall_jump.floor.g5a.available_commands	0	n
+candidate.wall_jump.floor.g5a.peak_speed_ups	320.00	ups
+candidate.wall_jump.floor.w4_best_delta_ups	0.00	ups
+candidate.wall_jump.g2.measurements_compared	1059	n
+candidate.wall_jump.g2.measurements_moved	0	n
+candidate.wall_jump.g3.worst_excess_unresponsive_candidate	0	n
+candidate.wall_jump.g3.worst_excess_unresponsive_control	0	n
+candidate.wall_jump.g3.worst_latency_commands	0	n
+candidate.wall_jump.g5b_median	0.0000	
+candidate.wall_jump.g7.worst_impulse_residual_ups	8.52	ups
+candidate.wall_jump.g7.worst_surviving_aim_step_ups	239.51	ups
+candidate.wall_jump.g7.worst_surviving_geometry_step_ups	334.18	ups
+candidate.wall_jump.ledge256.e0320.reachable	no	
+candidate.wall_jump.ledge256.e0400.reachable	no	
+candidate.wall_jump.ledge256.e0500.reachable	no	
+candidate.wall_jump.ledge256.e0640.reachable	no	
+candidate.wall_jump.ledge256.e0800.reachable	no	
+candidate.wall_jump.ledge256.e1000.reachable	no	
+candidate.wall_jump.ledge256.g5a.arming_events	0	n
+candidate.wall_jump.ledge256.g5a.available_commands	0	n
+candidate.wall_jump.ledge256.g5a.peak_speed_ups	320.00	ups
+candidate.wall_jump.ledge256.w4_best_delta_ups	0.00	ups
+candidate.wall_jump.ramp26.e0320.reachable	no	
+candidate.wall_jump.ramp26.e0400.reachable	no	
+candidate.wall_jump.ramp26.e0500.reachable	no	
+candidate.wall_jump.ramp26.e0640.reachable	no	
+candidate.wall_jump.ramp26.e0800.reachable	no	
+candidate.wall_jump.ramp26.e1000.reachable	no	
+candidate.wall_jump.ramp26.g5a.arming_events	0	n
+candidate.wall_jump.ramp26.g5a.available_commands	0	n
+candidate.wall_jump.ramp26.g5a.peak_speed_ups	320.00	ups
+candidate.wall_jump.ramp26.w4_best_delta_ups	0.00	ups
+candidate.wall_jump.ramp50.e0320.reachable	no	
+candidate.wall_jump.ramp50.e0400.reachable	no	
+candidate.wall_jump.ramp50.e0500.reachable	no	
+candidate.wall_jump.ramp50.e0640.reachable	no	
+candidate.wall_jump.ramp50.e0800.reachable	no	
+candidate.wall_jump.ramp50.e1000.reachable	no	
+candidate.wall_jump.ramp50.g5a.arming_events	0	n
+candidate.wall_jump.ramp50.g5a.available_commands	0	n
+candidate.wall_jump.ramp50.g5a.peak_speed_ups	320.00	ups
+candidate.wall_jump.ramp50.w4_best_delta_ups	0.00	ups
+candidate.wall_jump.step18.e0320.reachable	no	
+candidate.wall_jump.step18.e0400.reachable	no	
+candidate.wall_jump.step18.e0500.reachable	no	
+candidate.wall_jump.step18.e0640.reachable	no	
+candidate.wall_jump.step18.e0800.reachable	no	
+candidate.wall_jump.step18.e1000.reachable	no	
+candidate.wall_jump.step18.g5a.arming_events	0	n
+candidate.wall_jump.step18.g5a.available_commands	0	n
+candidate.wall_jump.step18.g5a.peak_speed_ups	320.00	ups
+candidate.wall_jump.step18.w4_best_delta_ups	0.00	ups
+candidate.wall_jump.w1.harm_rate_pooled	0.0031	
+candidate.wall_jump.w1.harmed_total	6	n
+candidate.wall_jump.w1.points_total	1950	n
+candidate.wall_jump.w2_gap_median	1.0011	
+candidate.wall_jump.w2_qualifying_contexts	1	n
+candidate.wall_jump.w4_distinct_kinds	1	n
+candidate.wall_jump.w4_material_contexts	1	n
+candidate.wall_jump.w5.air_forward.cells_not_beaten	5	n
+candidate.wall_jump.w5.air_forward.domain_cells	6	n
+candidate.wall_jump.w5.air_strafe.cells_not_beaten	5	n
+candidate.wall_jump.w5.air_strafe.domain_cells	6	n
+candidate.wall_jump.w5.bunnyhop.cells_not_beaten	0	n
+candidate.wall_jump.w5.bunnyhop.domain_cells	0	n
+candidate.wall_jump.w5.drop_launch.cells_not_beaten	0	n
+candidate.wall_jump.w5.drop_launch.domain_cells	0	n
+candidate.wall_jump.w5.ground_turn.cells_not_beaten	0	n
+candidate.wall_jump.w5.ground_turn.domain_cells	0	n
+candidate.wall_jump.w5.ramp_traversal.cells_not_beaten	0	n
+candidate.wall_jump.w5.ramp_traversal.domain_cells	0	n
+candidate.wall_jump.w5.step_up.cells_not_beaten	0	n
+candidate.wall_jump.w5.step_up.domain_cells	0	n
+candidate.wall_jump.w6.e0320.aim_centroid_apart_pairs	0	n
+candidate.wall_jump.w6.e0320.aim_disjoint_pairs	0	n
+candidate.wall_jump.w6.e0320.context_pairs	0	n
+candidate.wall_jump.w6.e0320.timing_centroid_apart_pairs	0	n
+candidate.wall_jump.w6.e0320.timing_disjoint_pairs	0	n
+candidate.wall_jump.w6.e0400.aim_centroid_apart_pairs	0	n
+candidate.wall_jump.w6.e0400.aim_disjoint_pairs	0	n
+candidate.wall_jump.w6.e0400.context_pairs	0	n
+candidate.wall_jump.w6.e0400.timing_centroid_apart_pairs	0	n
+candidate.wall_jump.w6.e0400.timing_disjoint_pairs	0	n
+candidate.wall_jump.w6.e0500.aim_centroid_apart_pairs	0	n
+candidate.wall_jump.w6.e0500.aim_disjoint_pairs	0	n
+candidate.wall_jump.w6.e0500.context_pairs	0	n
+candidate.wall_jump.w6.e0500.timing_centroid_apart_pairs	0	n
+candidate.wall_jump.w6.e0500.timing_disjoint_pairs	0	n
+candidate.wall_jump.w6.e0640.aim_centroid_apart_pairs	0	n
+candidate.wall_jump.w6.e0640.aim_disjoint_pairs	0	n
+candidate.wall_jump.w6.e0640.context_pairs	0	n
+candidate.wall_jump.w6.e0640.timing_centroid_apart_pairs	0	n
+candidate.wall_jump.w6.e0640.timing_disjoint_pairs	0	n
+candidate.wall_jump.w6.e0800.aim_centroid_apart_pairs	0	n
+candidate.wall_jump.w6.e0800.aim_disjoint_pairs	0	n
+candidate.wall_jump.w6.e0800.context_pairs	0	n
+candidate.wall_jump.w6.e0800.timing_centroid_apart_pairs	0	n
+candidate.wall_jump.w6.e0800.timing_disjoint_pairs	0	n
+candidate.wall_jump.w6.e1000.aim_centroid_apart_pairs	0	n
+candidate.wall_jump.w6.e1000.aim_disjoint_pairs	0	n
+candidate.wall_jump.w6.e1000.context_pairs	0	n
+candidate.wall_jump.w6.e1000.timing_centroid_apart_pairs	0	n
+candidate.wall_jump.w6.e1000.timing_disjoint_pairs	0	n
+candidate.wall_jump.w7.new_profile_constants	3	n
+candidate.wall_jump.w7.new_state_fields	2	n
+candidate.wall_jump.w7.preconditions	4	n
+candidate.wall_jump.w7.preconditions_with_profile_guards	6	n
 cpm.edge.clip.drop032.speed200.worst_command_loss_ups	0.00	ups
 cpm.edge.clip.drop032.speed400.worst_command_loss_ups	0.00	ups
 cpm.edge.clip.drop032.speed600.worst_command_loss_ups	0.00	ups
@@ -1599,6 +7735,17 @@ crossvalidation.vq3.ramp.deg26.uphill_seam_ratio_less_friction.agrees	1.0000
 crossvalidation.vq3.ramp.deg45.uphill_seam_ratio_less_friction.agrees	1.0000	
 crossvalidation.vq3.ramp.flip_angle_observed.agrees	1.0000	
 crossvalidation.vq3.step.highest_climbable.agrees	1.0000	
+g7.selftest.aim_floor_needed_deg	0.25	deg
+g7.selftest.overbounce.at_units	125.344	units
+g7.selftest.overbounce.coarse_step_ups	447.55	ups
+g7.selftest.overbounce.refined_step_ups	447.55	ups
+g7.selftest.overbounce.survives	yes	
+g7.selftest.passed	yes	
+g7.selftest.strafejump.coarse_step_ups	83.19	ups
+g7.selftest.strafejump.refined_step_ups	56.75	ups
+g7.selftest.strafejump.survives	yes	
+g7.selftest.strafejump_fine.refined_step_ups	14.60	ups
+g7.selftest.strafejump_fine.survives	no	
 substep.air_control.ms0008.speed_ups	640.00	ups
 substep.air_control.ms0008.turned_deg	24.78	deg
 substep.air_control.ms0033.speed_ups	640.00	ups

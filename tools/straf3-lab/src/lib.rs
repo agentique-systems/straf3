@@ -50,6 +50,7 @@
 
 pub mod candidate;
 pub mod dataset;
+pub mod gates;
 pub mod geometry;
 pub mod harness;
 pub mod measure;
