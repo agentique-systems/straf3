@@ -29,7 +29,8 @@ usage: straf3-capture --out <file.png> [options]
   --no-raise             do not try to bring the window to the front first
   --min-visible <n>      refuse to capture unless at least n/1000 of the
                          window's area hit-tests as that window and not as
-                         something covering it (default: 900, i.e. 90 %)
+                         something covering it (default: 1000, i.e. nothing
+                         may be on top of it at all)
   --desktop              capture the whole virtual desktop. Diagnostic only —
                          see below. --out must be under target/.
   --list                 list visible top-level windows and exit
@@ -130,7 +131,13 @@ pub fn parse<I: IntoIterator<Item = String>>(argv: I) -> Result<Request, String>
     let mut settle_ms = 300u64;
     let mut desktop = false;
     let mut raise = true;
-    let mut min_visible_permille = 900u32;
+    // Nothing on top, not "mostly nothing on top". The standing rule in
+    // PLAYING.md is that a committed image shows the straf3 window and nothing
+    // else; a 90 % floor licenses a tenth of the frame to be somebody's mail
+    // client, which is not a weaker version of that rule but a different one.
+    // See `win::SAMPLE_STEPS` for the capture that made the difference
+    // concrete.
+    let mut min_visible_permille = 1000u32;
     let mut list = false;
     let mut policy = BlankPolicy::default();
 
@@ -280,7 +287,7 @@ mod tests {
                 title: "straf3".to_owned(),
                 process: Some("straf3.exe".to_owned()),
                 raise: true,
-                min_visible_permille: 900,
+                min_visible_permille: 1000,
             }
         );
         assert_eq!(o.settle_ms, 300);
@@ -355,11 +362,24 @@ mod tests {
     }
 
     #[test]
-    fn the_occlusion_check_is_on_by_default_and_can_be_tightened() {
-        // It defaults on because the first real capture this tool took was a
-        // picture of a browser sitting in front of the game: non-blank, valid,
-        // and completely wrong. Off-by-default would put that back.
-        let o = options(&["--out", "s.png", "--min-visible", "1000", "--no-raise"]);
+    fn nothing_may_be_on_top_of_the_window_unless_that_is_asked_for() {
+        // The default is the strictest the flag can express, so loosening it is
+        // a decision someone types. It is not 900 because 900 was measured
+        // letting the operator's Start menu — mail, LinkedIn and WhatsApp
+        // tiles — into a capture that exited 0. See `win::SAMPLE_STEPS`.
+        match options(&["--out", "s.png"]).source {
+            Source::Window {
+                min_visible_permille,
+                ..
+            } => assert_eq!(
+                min_visible_permille, 1000,
+                "a committed image shows the straf3 window and nothing else, so \
+                 the default cannot license a fraction of it to be something else"
+            ),
+            other => panic!("expected a window source, got {other:?}"),
+        }
+
+        let o = options(&["--out", "s.png", "--min-visible", "900", "--no-raise"]);
         match o.source {
             Source::Window {
                 raise,
@@ -367,7 +387,7 @@ mod tests {
                 ..
             } => {
                 assert!(!raise);
-                assert_eq!(min_visible_permille, 1000);
+                assert_eq!(min_visible_permille, 900);
             }
             other => panic!("expected a window source, got {other:?}"),
         }

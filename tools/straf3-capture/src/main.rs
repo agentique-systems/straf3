@@ -137,7 +137,7 @@ fn run(request: Request) -> ExitCode {
                         .find(|w| w.hwnd == best.hwnd)
                         .map_or(best.rect, |w| w.rect);
 
-                    let visible = win::occlusion(best.hwnd, rect, 7);
+                    let visible = win::occlusion(best.hwnd, rect, win::SAMPLE_STEPS);
                     println!(
                         "capture: {} of {} hit-test points inside the window are the window \
                          ({}.{} %)",

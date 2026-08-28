@@ -119,6 +119,32 @@ impl From<RECT> for Rect {
 /// at.
 pub const EDGE_BLEED_PX: i32 = 1;
 
+/// Points per axis in the occlusion hit-test grid, so `SAMPLE_STEPS.pow(2)`
+/// points in all.
+///
+/// # Why this is not a small number
+///
+/// It was 7 — a 49-point grid — and that is how the operator's Start menu got
+/// into a capture that exited 0.
+///
+/// Measured on this project's own host: the straf3 window at 1280x750 with the
+/// Start menu open over its lower-left corner. The menu covered roughly 13 % of
+/// the window's area, which the 90 % floor is meant to refuse. It landed on 4 of
+/// the 49 grid points, scored 91.8 %, passed, and wrote a PNG with the
+/// operator's mail, LinkedIn and WhatsApp tiles composited into the frame.
+///
+/// The failure is not that 49 points give an imprecise estimate. It is that a
+/// compact occluder falls *between* the points of a coarse grid, so the error
+/// is biased towards reporting the window as clear — the one direction in which
+/// being wrong lets a bad capture through. Sample spacing has to be small
+/// against the things being detected: a notification toast, a menu, a tooltip.
+///
+/// At 127 the spacing on a 1280-wide window is ten pixels, so nothing large
+/// enough to carry readable text can hide between samples. The cost is
+/// `WindowFromPoint` 16 129 times, which measures well under the frame the
+/// tool already spends settling.
+pub const SAMPLE_STEPS: u32 = 127;
+
 /// A top-level window found by enumeration.
 #[derive(Debug, Clone)]
 pub struct Found {
@@ -476,6 +502,9 @@ impl Occlusion {
 ///
 /// The grid deliberately avoids the outermost edge, where DWM's extended
 /// frame bounds and the hit-test region disagree by a pixel or two.
+///
+/// See [`SAMPLE_STEPS`] for why the grid is as dense as it is: a coarse one
+/// does not merely report an imprecise number, it reports a *reassuring* one.
 #[must_use]
 pub fn occlusion(hwnd_bits: isize, rect: Rect, steps: u32) -> Occlusion {
     let hwnd = hwnd_bits as HWND;
