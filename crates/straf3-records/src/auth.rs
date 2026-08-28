@@ -123,6 +123,24 @@ impl Jwks {
         }
     }
 
+    /// A cache pre-loaded with a key set and no endpoint behind it.
+    ///
+    /// For tests that need the *verification* path — signature, `alg`, `exp`,
+    /// `iss` — without a network. It cannot re-fetch, so it also pins down the
+    /// unknown-`kid` behaviour: an unknown key id has nowhere to go and the
+    /// token is refused rather than accepted.
+    #[must_use]
+    pub fn with_keys(keys: JwkSet, issuer: Option<String>) -> Self {
+        let jwks = Self::new(Some(String::from("preloaded")), issuer);
+        {
+            // `try_write` on a freshly constructed lock cannot fail.
+            let mut cache = jwks.cache.try_write().expect("a new lock is uncontended");
+            cache.keys = Some(keys);
+            cache.fetched_at = Some(Instant::now());
+        }
+        jwks
+    }
+
     /// Whether a JWKS endpoint is configured at all.
     #[must_use]
     pub const fn is_configured(&self) -> bool {

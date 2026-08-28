@@ -134,6 +134,11 @@ zstd = "0.13.3"
 serde_json = "1.0.151"
 http-body-util = "0.1.3"
 tower = "0.5.2"
+base64 = "0.23.1"
+# Test-only, so `straf3-records`'s integration tests can mint an Ed25519 JWT and
+# the JWK that verifies it. Never a runtime dependency: verification goes
+# through `jsonwebtoken`, against keys the auth endpoint published.
+ed25519-dalek = { version = "2.2.0", features = ["pkcs8"] }
 
 [profile.dev]
 opt-level = 1        # the simulation is unusable to feel at opt-level 0

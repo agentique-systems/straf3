@@ -50,3 +50,5 @@ env_logger.workspace = true
 [dev-dependencies]
 http-body-util.workspace = true
 tower.workspace = true
+base64.workspace = true
+ed25519-dalek.workspace = true
