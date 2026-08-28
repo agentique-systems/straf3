@@ -40,53 +40,77 @@ fn horizontal_speed(st: &SimState) -> Scalar {
     (v.x * v.x + v.y * v.y).sqrt()
 }
 
-/// **G5(a), dash — the exposure Part 1 disclosed, run rather than read.**
-///
-/// §1.3 G5(a): run a player who never exceeds `max_speed`, on flat open ground,
-/// and count how many times the mechanic becomes available. *Fails if the count
-/// on flat ground is not zero.*
-///
-/// The player here never exceeds `max_speed` by the widest possible margin:
-/// they never move horizontally at all. They stand still and jump on the spot.
-#[test]
-fn the_dash_arms_on_flat_ground_at_zero_speed() {
-    let p = PhysicsProfile::experimental();
+/// Count how many times a dash arms for a player standing still on flat ground
+/// and jumping on the spot — G5(a)'s test, at the widest possible margin below
+/// `max_speed`, since this player never moves horizontally at all.
+fn dash_armings_at_zero_speed(p: &PhysicsProfile) -> u32 {
     let world = FlatGround::at(s(0.0));
-
-    let mut st = settled(&world, &p);
+    let mut st = settled(&world, p);
     let mut armings = 0;
 
-    // Jump on the spot, land, repeat. Ten cycles is enough to establish that
-    // the count is unbounded rather than incidental.
+    // Ten cycles, to establish that the count is unbounded rather than
+    // incidental to one landing.
     for _ in 0..10 {
-        st = step(&st, &jump_cmd(), &world, &p);
+        st = step(&st, &jump_cmd(), &world, p);
         assert!(!st.player.ground.is_grounded(), "premise: jumped");
 
         // Release the input and wait out the flight.
         while !st.player.ground.is_grounded() {
-            st = step(&st, &still(), &world, &p);
+            st = step(&st, &still(), &world, p);
         }
-
-        // The landing that ended a jump arms a dash window.
         if st.player.timers.dash_ms > 0 {
             armings += 1;
         }
-
         assert!(
             horizontal_speed(&st) < s(1.0),
             "premise: this player never carried horizontal speed, and got {}",
             horizontal_speed(&st)
         );
     }
+    armings
+}
 
+/// **G5(a), dash — the disclosed failure and the retune that answers it, both
+/// executed.**
+///
+/// §1.3 G5(a): run a player who never exceeds `max_speed`, on flat open ground,
+/// and count how many times the mechanic becomes available. *Fails if the count
+/// on flat ground is not zero.*
+///
+/// Both halves are asserted here on purpose. The retune fixes the exposure, so
+/// a test that only checked the fixed profile would quietly delete the evidence
+/// that the gate ever bit — and canon Part 2's verdict for the dash rests on
+/// that evidence. `dash_entry_speed` 0 imposes no floor and is exactly the
+/// pre-retune arming condition, so the failure stays reproducible from the
+/// shipped tree rather than surviving only as a claim in a document.
+#[test]
+fn the_dash_failed_g5a_before_the_retune_and_passes_after_it() {
+    let retuned = PhysicsProfile::experimental();
     assert_eq!(
-        armings, 10,
-        "G5(a): the dash armed {armings} times out of 10 landings at zero speed"
+        retuned.dash_entry_speed,
+        s(400.0),
+        "the retune canon §3.8 pre-registered"
     );
 
-    // The gate's own words: the count on flat ground is not zero, so the dash
-    // fails G5(a) as written. Part 1 predicted this from the code before any
-    // candidate was measured; this is that prediction executed.
+    // ── before: the exposure Part 1 disclosed from `step.rs`, executed ──
+    let before = PhysicsProfile {
+        dash_entry_speed: s(0.0),
+        ..retuned
+    };
+    assert_eq!(
+        dash_armings_at_zero_speed(&before),
+        10,
+        "G5(a): the pre-retune dash must arm on every landing at zero speed — \
+         this is the disclosed failure and the reason the retune exists"
+    );
+
+    // ── after: the same player, the same ground, the retuned constant ──
+    assert_eq!(
+        dash_armings_at_zero_speed(&retuned),
+        0,
+        "G5(a): the retuned dash still arms for a player who never exceeded \
+         max_speed on flat ground"
+    );
 }
 
 /// **G5(a), crouch slide — passes, and for the reason `profile.rs` designed in.**

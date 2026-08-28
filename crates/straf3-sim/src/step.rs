@@ -747,7 +747,18 @@ impl<'a, W: World + ?Sized> Pmove<'a, W> {
                 // player can spend the boost by jumping now, or keep the press
                 // for a dash in the air, and they cannot have both from one
                 // press. See `check_air_jump`.
-                p.timers.dash_ms = self.profile.dash_window_ms;
+                //
+                // …and, since the §1.5 retune, only if the landing was reached
+                // at `dash_entry_speed`. Horizontal speed only, for the reason
+                // `check_slide` gives: on a ramp the vertical component is a
+                // consequence of the surface rather than something the player
+                // earned. A zero `dash_entry_speed` imposes no floor, which is
+                // the pre-retune behaviour and what canon carries.
+                let v = p.velocity;
+                let speed = (v.x * v.x + v.y * v.y).sqrt();
+                if speed >= self.profile.dash_entry_speed {
+                    p.timers.dash_ms = self.profile.dash_window_ms;
+                }
             }
             p.left_ground_by_jumping = false;
         }
@@ -1974,7 +1985,14 @@ mod tests {
         // the window opens *on* the landing command and starts counting down
         // immediately, so a run of arbitrary length would be asserting about
         // how long ago it landed rather than about the arming.
-        let mut landed = step(&sprinting(320.0), &jump, &ground, &p);
+        //
+        // The entry speed is above `dash_entry_speed`, which canon §1.5's
+        // pre-registered retune added: a landing below it no longer arms a
+        // dash. 500 rather than the 320 this test used before the retune,
+        // because 320 is `max_speed` and is now on the wrong side of the
+        // floor — which is the entire point of the retune and is asserted
+        // directly below.
+        let mut landed = step(&sprinting(500.0), &jump, &ground, &p);
         assert!(!landed.player.ground.is_grounded(), "premise: jumped");
         let mut commands = 0;
         while !landed.player.ground.is_grounded() {
@@ -1991,6 +2009,33 @@ mod tests {
             "the same landing arms both windows; that is what they compete over"
         );
 
+        // And the retune itself: the *same* landing, reached slower, arms the
+        // double jump and not the dash. This is canon §1.3's G5(a) expressed as
+        // a test — the dash must not be available to a player who never
+        // exceeded `max_speed` — and it is the one thing the two windows no
+        // longer share. `left_ground_by_jumping` still holds; only the speed
+        // differs.
+        let mut slow = step(&sprinting(320.0), &jump, &ground, &p);
+        assert!(!slow.player.ground.is_grounded(), "premise: jumped");
+        let mut commands = 0;
+        while !slow.player.ground.is_grounded() {
+            slow = step(&slow, &forward, &ground, &p);
+            commands += 1;
+            assert!(commands < 200, "never came back down");
+        }
+        assert!(
+            slow.player.velocity.length() < p.dash_entry_speed,
+            "premise: this landing was below the dash entry speed"
+        );
+        assert_eq!(
+            slow.player.timers.dash_ms, 0,
+            "G5(a): a landing below `dash_entry_speed` armed a dash"
+        );
+        assert_eq!(
+            slow.player.timers.double_jump_ms, p.double_jump_window_ms,
+            "the double jump has no entry speed and must be unaffected"
+        );
+
         // Jump again out of that window, then press jump a second time in the
         // air with the input released in between.
         let airborne = run(&landed, &[jump, forward], &ground, &p);
@@ -2001,13 +2046,28 @@ mod tests {
         );
         let before = airborne.player.velocity;
 
-        let dashed = step(&airborne, &jump, &ground, &p);
+        // Dash *across* the heading, not along it. Since the retune this test
+        // arms at 500 ups, and `dash_speed` is 400, a dash aimed along the
+        // direction of travel is worth exactly nothing — `addspeed` is
+        // negative and `check_air_jump` deliberately does not spend it. That is
+        // the clamp working, not a failure, and it is why the mechanic's own
+        // doc comment says a dash is "worth almost nothing along a direction
+        // already travelled at 400 ups, and worth its full value across one".
+        // So the press is aimed at 90 degrees, where the projection of velocity
+        // onto the wish direction is ~0 and the dash has its full value.
+        let dash_press = UserCmd {
+            buttons: Buttons::JUMP,
+            forward_move: 127,
+            view: ViewAngles::from_degrees(s(0.0), s(90.0), s(0.0)),
+            ..cmd(8)
+        };
+        let dashed = step(&airborne, &dash_press, &ground, &p);
         assert_eq!(dashed.player.timers.dash_ms, 0, "the dash was not spent");
         assert!(
-            dashed.player.velocity.x > before.x,
-            "dash added nothing: {} -> {}",
-            before.x,
-            dashed.player.velocity.x
+            dashed.player.velocity.y > before.y + s(100.0),
+            "dash added nothing across the heading: {} -> {}",
+            before.y,
+            dashed.player.velocity.y
         );
         assert!(dashed.player.jump_held, "the dash did not cost the press");
     }

@@ -264,6 +264,33 @@ pub struct PhysicsProfile {
     /// the dash costs the player the input their bunnyhop rhythm is already
     /// using and needs no button of its own.
     pub dash_window_ms: u16,
+    /// Horizontal speed a landing must carry before it arms a dash.
+    ///
+    /// **This field exists because of a gate failure, and that is the whole
+    /// reason it is here rather than in the original candidate set.**
+    /// `docs/movement-canon.md` §1.3's G5(a) asks how often a mechanic becomes
+    /// available to a player who never exceeds [`Self::max_speed`] on flat open
+    /// ground, and fails the mechanic if the count is not zero. The dash armed
+    /// on *any* landing that ended a jump, so a standing player could jump on
+    /// the spot, land, and hold a dash window at zero speed indefinitely —
+    /// measured at ten armings out of ten in
+    /// `crates/straf3-sim/tests/canon_gates.rs`. Canon Part 1 disclosed this
+    /// exposure in advance, from reading `step.rs`, before any candidate was
+    /// measured.
+    ///
+    /// This is the single retune §1.5 permits the dash, pre-registered in
+    /// canon §3.8 *before* the re-measurement rather than discovered after it.
+    /// It mirrors [`Self::slide_entry_speed`] exactly, for the same reason
+    /// stated there: set above `max_speed`, ground acceleration alone cannot
+    /// reach it, so the window has to be bought with speed the player earned.
+    ///
+    /// **Zero imposes no floor**, which is the pre-retune behaviour and the
+    /// value both canon profiles carry. Zero is therefore not an "off" for the
+    /// dash — [`Self::dash_speed`] and [`Self::dash_window_ms`] are what
+    /// disable it — which makes this the one threshold constant G8's
+    /// clarification allows a candidate, alongside `wall_normal_max` for the
+    /// wall jump.
+    pub dash_entry_speed: Scalar,
     /// Velocity a wall jump adds along the wall's normal, on top of the
     /// ordinary [`Self::jump_velocity`] it sets vertically. **Zero disables the
     /// mechanic**, which is canon.
@@ -351,6 +378,7 @@ impl PhysicsProfile {
             slide_duration_ms: 0,
             dash_speed: s(0.0),
             dash_window_ms: 0,
+            dash_entry_speed: s(0.0),
             wall_jump_velocity: s(0.0),
             wall_contact_window_ms: 0,
             wall_normal_max: s(0.0),
@@ -436,6 +464,11 @@ impl PhysicsProfile {
             // same landing and compete for the same input, which is where the
             // choice between them lives.
             dash_window_ms: 400,
+            // The §1.5 retune, pre-registered in canon §3.8 before it was
+            // measured. Mirrors `slide_entry_speed` 400 exactly: above
+            // `max_speed` 320, so ground acceleration alone cannot arm a dash
+            // and G5(a)'s flat-ground count goes to zero.
+            dash_entry_speed: s(400.0),
 
             // ── wall interaction ──────────────────────────────────────────
             // Below `jump_velocity` (270): a wall jump should be a redirect,

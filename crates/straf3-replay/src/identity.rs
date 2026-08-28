@@ -296,6 +296,7 @@ pub fn physics_digest(profile: &PhysicsProfile) -> u64 {
         slide_duration_ms,
         dash_speed,
         dash_window_ms,
+        dash_entry_speed,
         wall_jump_velocity,
         wall_contact_window_ms,
         wall_normal_max,
@@ -347,6 +348,13 @@ pub fn physics_digest(profile: &PhysicsProfile) -> u64 {
     h.bytes(&slide_duration_ms.to_le_bytes());
     scalar(dash_speed, &mut h);
     h.bytes(&dash_window_ms.to_le_bytes());
+    // Added by canon §1.5's single pre-registered retune of the dash. It is
+    // folded even though both canon profiles carry zero, for the reason the
+    // comment above gives: this digest covers the profile the build simulates
+    // with, not the subset canon happens to use. If the dash is rejected, this
+    // field does not land and the digest does not carry it — which is why the
+    // field was measured on a branch before it was shipped.
+    scalar(dash_entry_speed, &mut h);
     scalar(wall_jump_velocity, &mut h);
     h.bytes(&wall_contact_window_ms.to_le_bytes());
     scalar(wall_normal_max, &mut h);
