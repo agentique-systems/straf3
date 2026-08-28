@@ -6,20 +6,23 @@ is not.
 | Part | What it is | State |
 |---|---|---|
 | 1 | The criteria a mechanic must meet to enter canon | **written; amended three times; still frozen against candidate evidence** |
-| 2 | The verdict on crouch slide, dash and wall jump | **not written** — waiting on the candidate sweep. §2.1 records the gate results that are decidable from the implementation alone |
-| 3 | The frozen `PhysicsProfile::straf3()`, constant by constant | **§3.1–§3.7 written**: every inherited constant carries a grade or a stated choice, and the jump is measured. §3.8 and the constructor wait on Part 2 |
+| 2 | The verdict on crouch slide, dash and wall jump | **written. All three rejected**, none by a G7 number, no threshold edited |
+| 3 | The frozen `PhysicsProfile::straf3()`, constant by constant | **written.** It exists, it is the default, and its physics digest `4350ccc31bec5d4c` is unchanged from `cpm`'s |
 
-**No candidate has been judged against these criteria yet.** Part 1 therefore
-still holds its pre-publication immunity, which is the most valuable thing this
-document has: every threshold in it provably predates every number it will be
-applied to. **No threshold has been edited this wave**, so §1.7 gains no fourth
-amendment and nothing needs restating under the threshold-edit rule.
+**All three candidates have now been judged, and all three are rejected.** Part 1
+kept its pre-publication immunity all the way through: every threshold it carries
+provably predates every number it was applied to, and **no threshold was edited
+this wave** — §1.7 gains no fourth amendment and nothing needs restating under
+the threshold-edit rule. The only measurement *parameter* that moved is G7's
+refinement floor, which Part 1 declares a parameter rather than a constant, which
+is disclosed in §2.2, and which **decides nothing**: no verdict rests on a G7
+number.
 
-What *has* landed this wave is the half of the work that never depended on a
-candidate number: Part 3's inherited constants, the measured jump that replaces
-Part 3's arithmetic, and §2.1's gate results — which are properties of `step.rs`
-rather than of the sweep, and two of which Part 1 pre-disclosed precisely so that
-they could not later look like gates written after the numbers.
+Three things in this document are stated against the interest of the conclusion
+they sit next to, and they are the reason to trust the rest: W7's definition
+disagrees with its own calibration and was applied as written anyway (§2.6);
+W3's levelling test, read strictly, fires on the *control* (§2.4); and the dash
+retune's pre-registered prediction was half wrong (§2.3).
 
 That order is the whole point and it is worth stating before anything else.
 
@@ -2093,16 +2096,63 @@ beside `pm_cpm_accelerate 15.0f` and switching on movement mode. **The
 relationship is better attested than any magnitude, and it is the relationship
 `profile.rs` encodes.**
 
-### 3.8 The candidate constants
+### 3.8 The freeze: `PhysicsProfile::straf3()`
 
-**Awaiting Part 2.** The eight candidate constants — `slide_entry_speed`,
+**It exists, it is the default, and its physics digest is
+`4350ccc31bec5d4c`.**
+
+**That digest is *unchanged*.** It is bit-for-bit the digest `cpm()` already
+had, because all three candidates were rejected (Part 2) and no inherited
+constant moved. The consequences are worth listing, because this is the outcome
+the whole tree was waiting on and it is the good one:
+
+- every `.s3d` recorded under `cpm` **still loads** — `ghost.rs` refuses a
+  mismatch and there is no mismatch;
+- no seeded leaderboard is orphaned;
+- the browser client needs **no rebuild** to agree with native;
+- `crates/straf3-records`' `PROFILE_LAYOUT_VERSION` stays at **1**, because the
+  struct did not gain a field.
+
+`crates/straf3-replay/src/identity.rs`'s
+`the_freeze_did_not_move_the_physics_digest` pins all of that, including the
+literal digest. It is not a tautology: that module records how commit `a604820`
+moved every profile's digest by adding eight *gated-off* fields and silently
+invalidated a committed personal best the same day. This wave came within one
+accepted mechanic of repeating it — `dash_entry_speed` was added, moved the
+digest, and was **reverted whole** when the dash was rejected.
+
+**Why `straf3()` is spelled out rather than written `Self::cpm()`.** The
+equality is a *finding*, not a *link*. `cpm()` is a reconstruction of somebody
+else's game and should be corrected the day someone verifies it against a CPMA
+demo; `straf3()` is Straf3's own frozen ruleset and must **not** move because a
+reconstruction was corrected. Delegating would make every future correction to
+`cpm` a silent change to canon.
+`straf3_and_cpm_agree_today_but_are_not_linked` pins the equality and says in
+one line what to do when it breaks.
+
+**What the client must do, since r1's "plays by default" clause reaches past this
+crate.** `straf3-sim`'s `Default` is now `straf3()` and
+`default_profile_is_canonical_straf3` asserts it. But
+`crates/straf3-game/src/profile.rs` — not this crate — still advertises
+`NAMES = "cpm|vq3|experimental"` with no `straf3` arm in `by_name`, which returns
+`None` for an unknown name and is refused by the caller, so `--profile straf3` is
+refused outright; and `is_canon` matches exactly `b"cpm" | b"vq3"` under a test
+named `the_canonical_profiles_are_exactly_the_two_that_predate_this_wave`. That
+test's name is now the thing it asserts against: **`straf3` is a third canonical
+profile and the first that does not predate this wave.** Adding it is the
+client's change, not canon's.
+
+### 3.9 The candidate constants
+
+**All eight stay at their disabling values, because Part 2 rejected all three
+candidates.** The eight candidate constants — `slide_entry_speed`,
 `slide_friction`, `slide_duration_ms`, `dash_speed`, `dash_window_ms`,
 `wall_jump_velocity`, `wall_contact_window_ms`, `wall_normal_max` — all exist on
 `PhysicsProfile` already, so an admission is a value change and a rejection or an
 unjudgeable verdict leaves them at the disabling values `vq3()` and `cpm()`
-carry. This section is written when the verdicts are.
+carry — which is where a rejection and an unjudgeable verdict both put them.
 
-#### The dash's single retune, pre-registered
+#### The dash's single retune, pre-registered — and reverted
 
 Recorded here because a retune registered *after* its measurement is not
 evidence but a search for a number that passes — §1.5's words, and the reason
@@ -2121,8 +2171,11 @@ This is the one route to a new field that Part 3's earlier draft identified, and
 it is **the one retune the dash gets**. If the retuned dash fails a required
 criterion it is rejected, and there is no second attempt.
 
-*Status:* implemented and measured on branch commit `cd64b05`, which the lab
-cherry-picks for the retuned-dash cells and publishes beside the unretuned ones.
+*Status: measured, then reverted whole.* Implemented on commit `cd64b05`, from
+which the retuned-dash cells were derived and published beside the unretuned
+ones. **The dash was rejected, so the field did not land** — `cd64b05` is
+reverted in `e37c21a` and `PhysicsProfile` never gained a ninth candidate
+constant. That is the promise below, kept.
 `crates/straf3-sim/tests/canon_gates.rs` asserts **both** states from the shipped
 tree — ten armings out of ten at zero speed before the retune, zero after — so
 the gate failure that justifies the retune stays reproducible rather than
