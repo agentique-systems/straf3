@@ -65,7 +65,20 @@ env_logger.workspace = true
 wasm-bindgen.workspace = true
 console_error_panic_hook.workspace = true
 console_log.workspace = true
-web-sys = { workspace = true, features = ["Document", "Element", "Window"] }
+# The web entry point fetches the map (and a ghost, and a recording) before it
+# can start, so it is async, and `spawn_local` is how an async fn is reachable
+# from a synchronous `#[wasm_bindgen]` export.
+wasm-bindgen-futures.workspace = true
+# The config arrives as a JSON string and the callbacks live on a JS object, so
+# this crate reads and builds JS values directly (`JSON`, `Reflect`, `Object`,
+# `Uint8Array`) rather than pulling in serde. Measured motivation: the whole
+# browser bundle is ~131 KiB gzipped and a serde derive stack is a large
+# fraction of that for six fields.
+js-sys.workspace = true
+# `Response` for the fetches; `Document`/`Element` for the on-page status line
+# and for reading `document.pointerLockElement`, which is the only source of
+# truth about whether the browser still holds the pointer (r4).
+web-sys = { workspace = true, features = ["Document", "Element", "Window", "Response"] }
 
 [features]
 default = ["render"]

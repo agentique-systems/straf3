@@ -63,6 +63,29 @@ pub struct Playback {
     pub source: String,
 }
 
+/// Somewhere to hand a run that has just crossed the finish line.
+///
+/// # Why this exists rather than the session writing the file itself
+///
+/// Natively a finished run goes to `runs/<map>.<profile>.s3d` and that is the
+/// end of it. In the browser there is no filesystem and the page — not this
+/// crate — decides what happens to the bytes: submit them, offer them as a
+/// download, or both. The wave contract is explicit that the client never
+/// talks to `/v1` and never sees a token, so the run leaves through here and
+/// the decision is made above.
+///
+/// The [`straf3_replay::Recording`] is handed over rather than raw bytes
+/// because the two callers want different serialisations of it: a personal
+/// best is stored without the per-command checksum trace (a ghost does not
+/// need one), and a run used as *evidence* is stored with it, so that a
+/// disagreement names the first diverging command instead of merely reporting
+/// that two machines disagree.
+pub trait RunSink: core::fmt::Debug {
+    /// A run has finished. Called once per run, on the frame the finish line
+    /// was crossed, before the personal best is considered.
+    fn finished(&self, recording: &straf3_replay::Recording);
+}
+
 /// How a session should be set up.
 #[derive(Debug, Clone)]
 pub struct Options {
@@ -107,6 +130,22 @@ pub struct Options {
     /// uses without this flag — a measurement that changed what it measures
     /// would be worthless (coordinator decision D-B7).
     pub pacing_log: Option<String>,
+    /// A run to race as a ghost, supplied by the caller rather than read from
+    /// [`Self::pb_dir`].
+    ///
+    /// This is how `?ghost=<run>` reaches the session: the browser has no
+    /// filesystem to keep personal bests in, so the recording arrives over the
+    /// network and is handed straight in. It takes precedence over the saved
+    /// personal best when both are present — a URL that names a ghost is asking
+    /// to race *that* one.
+    ///
+    /// A recording that cannot be raced here (recompiled geometry, different
+    /// physics) is reported and dropped, and the session plays on without a
+    /// ghost. URLS.md §4 behaviour 4: a missing ghost is not a reason to refuse
+    /// the map.
+    pub ghost: Option<straf3_replay::Recording>,
+    /// Where a finished run goes, in addition to the personal-best file.
+    pub run_sink: Option<Arc<dyn RunSink>>,
     /// The window (or canvas) to open.
     pub window: WindowConfig,
 }
@@ -277,6 +316,8 @@ impl Default for Options {
             exit_after_ms: None,
             playback: None,
             pacing_log: None,
+            ghost: None,
+            run_sink: None,
             window: WindowConfig::straf3(),
         }
     }
@@ -428,11 +469,21 @@ impl App {
             game.play(playback.cmds.clone());
         }
 
-        let (personal_best, ghost) = match &pb_path {
-            Some(path) => {
+        // A ghost handed in by the caller wins over the saved personal best:
+        // `?ghost=<run>` is a request to race *that* run, and quietly racing a
+        // local file instead would put a different opponent on screen from the
+        // one the link named. It is not a personal best either — it is somebody
+        // else's run as often as not — so it is raced without becoming the time
+        // this session is measured against.
+        let (personal_best, ghost) = match (&options.ghost, &pb_path) {
+            (Some(recording), _) => (
+                None,
+                Self::race(recording, world, &options.profile, &options.profile_name),
+            ),
+            (None, Some(path)) => {
                 Self::load_personal_best(path, world, &options.profile, &options.profile_name)
             }
-            None => (None, None),
+            (None, None) => (None, None),
         };
 
         // Reserved here rather than on the first frame: an 8 MiB allocation is
@@ -519,12 +570,35 @@ impl App {
             }
         };
 
+        // A recording that cannot be raced is still the time to beat — hence
+        // `Some(recording)` on both arms below. Only the *ghost* is optional.
+        let ghost = Self::race(&recording, world, profile, profile_name);
+        if ghost.is_none() {
+            log::warn!("the personal best at {path} is not being raced this session");
+        }
+        (Some(recording), ghost)
+    }
+
+    /// Re-simulate `recording` into a ghost that can be raced here, or say why
+    /// it cannot be.
+    ///
+    /// Every refusal is a log line and a session that plays on. This is the one
+    /// place a recording becomes an on-screen opponent, whether it arrived from
+    /// `runs/` or from `?ghost=<run>`, so the checks cannot be different for
+    /// the two.
+    fn race(
+        recording: &straf3_replay::Recording,
+        world: WorldChoice,
+        profile: &PhysicsProfile,
+        profile_name: &str,
+    ) -> Option<crate::ghost::Ghost> {
         // The second half of spec D2's rule, and the half the file name cannot
         // enforce: `runs/<map>.<profile>.s3d` means a session never *opens*
         // another profile's record, but a file copied or renamed into this
-        // namespace would be raced and ranked as if it belonged here. An
-        // experimental time is not a CPM time, so this is refused by the name
-        // the recording carries rather than trusted to the path it was found at.
+        // namespace — or named by a URL — would be raced and ranked as if it
+        // belonged here. An experimental time is not a CPM time, so this is
+        // refused by the name the recording carries rather than trusted to the
+        // path it was found at.
         //
         // The physics digest below would catch it once the profiles' constants
         // actually differ. It does not while `experimental` is still CPM's
@@ -532,53 +606,64 @@ impl App {
         // check does not depend on it.
         if recording.physics().name != profile_name {
             log::warn!(
-                "ignoring {path}: it was set under the `{}` profile and this session is \
-                 `{profile_name}`. Times under different profiles are different games and \
-                 are never ranked against each other.",
+                "not racing a run set under the `{}` profile in a `{profile_name}` session. \
+                 Times under different profiles are different games and are never ranked \
+                 against each other.",
                 recording.physics().name,
             );
-            return (None, None);
+            return None;
         }
 
-        let Some(world_id) = world.world_id() else {
-            log::warn!("no world identity for {world:?}, so {path} cannot be raced");
-            return (Some(recording), None);
-        };
+        let world_id = world.world_id().or_else(|| {
+            log::warn!("no world identity for {world:?}, so nothing can be raced in it");
+            None
+        })?;
 
         // `&world.world()` and not `world.world()`: the recording is checked
         // against the identity of exactly these hulls, which is the C6 promise
         // the ghost depends on.
-        match crate::ghost::Ghost::from_recording(&recording, &world.world(), &world_id, profile) {
+        match crate::ghost::Ghost::from_recording(recording, &world.world(), &world_id, profile) {
             Ok(ghost) => {
                 log::info!(
-                    "personal best {} — racing it as a ghost over {} re-simulated states",
+                    "racing {} as a ghost over {} re-simulated states",
                     clock_ms(ghost.run_time_ms()),
                     ghost.sample_count(),
                 );
-                (Some(recording), Some(ghost))
+                Some(ghost)
             }
             Err(e) => {
                 // The case worth being loud about: the map was recompiled, so
-                // the saved run is a time on geometry that no longer exists.
-                log::warn!("the personal best at {path} cannot be raced here: {e}");
-                (Some(recording), None)
+                // the run is a time on geometry that no longer exists.
+                log::warn!("that run cannot be raced here: {e}");
+                None
             }
         }
     }
 
-    /// Save the run that has just finished, if it beat the one on disk.
+    /// Hand the run that has just finished to everyone who wants it.
     ///
-    /// The recording is *made* here rather than accumulated as the run went:
+    /// The recording is built **once**, here, and offered to both consumers.
+    /// Building it twice would re-simulate 7 500 commands for nothing, and —
+    /// worse — would invite the two copies to be built from different
+    /// arguments one day, so that the bytes submitted and the bytes saved
+    /// described different runs.
+    ///
+    /// The recording is *made* rather than accumulated as the run went:
     /// `straf3_replay::Recording::record` re-simulates the commands and takes
     /// the digest from that, so the file's digest belongs to the file's own
     /// command stream by construction. A recorder that folded the digest live
     /// would produce a plausible file for a stream it had dropped a command
     /// from.
-    fn save_personal_best_if_better(&mut self) {
-        let (Some(path), Some(recorder)) = (self.pb_path.clone(), self.game.recorder()) else {
+    fn report_finished_run(&mut self) {
+        // Nothing wants it: do not pay for the re-simulation. This keeps a
+        // `--record`-only native session exactly as cheap as it was before the
+        // sink existed.
+        if self.pb_path.is_none() && self.options.run_sink.is_none() {
             return;
-        };
-        let Some(world_id) = self.options.world.world_id() else {
+        }
+        let (Some(recorder), Some(world_id)) =
+            (self.game.recorder(), self.options.world.world_id())
+        else {
             return;
         };
 
@@ -586,10 +671,28 @@ impl App {
             recorder.start(),
             recorder.commands().to_vec(),
             &self.game.world(),
-            world_id.clone(),
+            world_id,
             &self.options.profile,
             self.options.profile_name.clone(),
         );
+
+        // The sink first, and unconditionally: a run that did not beat the
+        // personal best is still a run the page may want to submit, download or
+        // show. Ranking is somebody else's decision and it is made elsewhere.
+        if let Some(sink) = self.options.run_sink.clone() {
+            sink.finished(&recording);
+        }
+        self.save_personal_best_if_better(recording);
+    }
+
+    /// Save the run that has just finished, if it beat the one on disk.
+    fn save_personal_best_if_better(&mut self, recording: straf3_replay::Recording) {
+        let Some(path) = self.pb_path.clone() else {
+            return;
+        };
+        let Some(world_id) = self.options.world.world_id() else {
+            return;
+        };
 
         let candidate = recording.claimed().run_time_ms;
         let current = self
@@ -758,7 +861,7 @@ impl App {
         if !self.run_saved && matches!(self.game.state().run, straf3_sim::RunState::Finished { .. })
         {
             self.run_saved = true;
-            self.save_personal_best_if_better();
+            self.report_finished_run();
         }
 
         match self.options.exit_after_ms {
@@ -777,6 +880,11 @@ impl App {
         if let Some(pacing) = &mut self.pacing {
             pacing.frame(std::time::Instant::now());
         }
+        // Before the input is read into this frame's commands, so a frame that
+        // discovers the lock was lost does not also build a command out of keys
+        // the player can no longer see they are holding.
+        #[cfg(target_arch = "wasm32")]
+        self.sync_pointer_lock();
         if !self.primed {
             self.primed = true;
             self.clock.prime();
@@ -1063,6 +1171,50 @@ impl App {
         }
         self.game.input.release_all();
     }
+
+    /// Make [`Self::grab`] agree with what the browser actually holds.
+    ///
+    /// # Why this is polled rather than deduced from events
+    ///
+    /// Escape is the browser's own way out of pointer lock, and Chrome
+    /// **consumes** that keystroke: the page never sees a `keydown`, so the
+    /// `WindowEvent::KeyboardInput` arm that calls [`Self::release_pointer`]
+    /// natively does not run on the web. Without this, `grab` would stay
+    /// `Grabbed` while the pointer was free, and [`Self::grab_pointer`]'s
+    /// early return would then refuse to re-lock on the next click — the player
+    /// presses Escape once and can never get the mouse back.
+    ///
+    /// `document.pointerLockElement` is the only thing that actually knows, so
+    /// it is what is asked, once a frame. It also covers the lock being lost
+    /// for reasons nothing in this process can observe: the tab being hidden,
+    /// the user switching windows, the browser dropping it on a security
+    /// prompt.
+    ///
+    /// Releasing the held keys on the way out matters for the same reason
+    /// `Focused(false)` does natively — a player who leaves mid-strafe should
+    /// not come back still strafing.
+    #[cfg(target_arch = "wasm32")]
+    fn sync_pointer_lock(&mut self) {
+        let locked = web_sys::window()
+            .and_then(|w| w.document())
+            .and_then(|d| d.pointer_lock_element())
+            .is_some();
+        let was_locked = self.grab == PointerGrab::Grabbed;
+        if locked == was_locked {
+            return;
+        }
+        self.grab = if locked {
+            PointerGrab::Grabbed
+        } else {
+            self.game.input.release_all();
+            PointerGrab::Released
+        };
+        log::info!(
+            "pointer lock {}",
+            if locked { "taken" } else { "released" }
+        );
+        crate::web::pointer_lock_changed(locked);
+    }
 }
 
 impl ApplicationHandler for App {
@@ -1261,6 +1413,20 @@ pub fn run(options: Options) -> Option<String> {
     // that runs no ticks still costs almost nothing, so there is no reason to
     // sleep until an input event arrives.
     event_loop.set_control_flow(ControlFlow::Poll);
+
+    // Web only, and it is mouse-look that needs it. winit's default is
+    // `WhenFocused`, and on the web "focused" means the *canvas element* holds
+    // DOM focus — which pointer lock does not grant. A canvas that is locked
+    // but not focused therefore delivers no `DeviceEvent::MouseMotion` at all
+    // and the view simply does not turn, with nothing in the log to say why.
+    //
+    // Widening this costs nothing here because the consumer is already gated:
+    // `App::device_event` ignores motion unless the pointer is grabbed, and
+    // `sync_pointer_lock` above keeps that flag honest. Native is left on the
+    // default, because native has no such gap and r12 asks that native play not
+    // be touched by web work.
+    #[cfg(target_arch = "wasm32")]
+    event_loop.listen_device_events(winit::event_loop::DeviceEvents::Always);
 
     let app = App::new(options);
 
