@@ -248,17 +248,42 @@ fn binding(stmt: &str) -> Option<(String, &str)> {
     Some((name.to_ascii_lowercase(), stmt[eq + 1..].trim()))
 }
 
-/// Identifiers whose right-hand side names one of [`SCALES`] — `const
+/// Whether a right-hand side is a *constant expression*: one built from
+/// numeric literals, casts and other named constants, with no free operand.
+///
+/// This is the line between `s(1.0 / 1000.0)`, which is a name for the
+/// thousandth written the long way, and `mhz as f64 / 1000.0`, which is a
+/// *measured value that has been divided by* the thousandth. Only the first is
+/// an alias for the constant. Reading the second as one is how a
+/// millihertz-to-hertz conversion in a reporting xtask came to be reported as
+/// a second site for Q3's `msec * 0.001`: `refresh_hz` was bound as if it were
+/// the scale itself, and every later statement mentioning it inherited that.
+///
+/// Allowed: numeric literals (`1000`, `0f32`, and the `1e`/`3` halves that
+/// [`tokens`] splits `1e-3` into), the scalar constructor and the types a cast
+/// can name, and SCREAMING_CASE identifiers — Rust's spelling for a `const`,
+/// so an alias folded out of *another* named constant stays tracked.
+fn is_constant_expression(rhs: &str) -> bool {
+    tokens(rhs).all(|t| {
+        t.starts_with(|c: char| c.is_ascii_digit())
+            || matches!(t, "s" | "as" | "f32" | "f64" | "Scalar")
+            || t.chars()
+                .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+    })
+}
+
+/// Identifiers whose right-hand side *is* one of [`SCALES`] — `const
 /// MS_TO_SEC: Scalar = s(0.001);` or `const INV_THOUSAND: Scalar = s(1.0 /
 /// 1000.0);` — so the scan can treat a later `* MS_TO_SEC` the same as it
-/// would treat `* 0.001` written out. The RHS only has to *contain* a scale
-/// literal, not be one bare, because a reciprocal or any other expression
-/// built from the same literal is still the same constant in disguise.
+/// would treat `* 0.001` written out. The RHS does not have to be one bare
+/// literal, because a reciprocal or any other constant expression over the
+/// same literal is still the same constant in disguise; but it does have to be
+/// constant, which is what [`is_constant_expression`] decides.
 fn scale_aliases(statements: &[String]) -> Vec<String> {
     statements
         .iter()
         .filter_map(|stmt| binding(stmt))
-        .filter(|(_, rhs)| SCALES.iter().any(|c| rhs.contains(c)))
+        .filter(|(_, rhs)| SCALES.iter().any(|c| rhs.contains(c)) && is_constant_expression(rhs))
         .map(|(name, _)| name)
         .collect()
 }
@@ -304,6 +329,30 @@ fn duration_aliases(statements: &[String]) -> Vec<String> {
     out
 }
 
+/// The matcher itself: the statements in one source that carry both a scale
+/// and a duration.
+///
+/// Written once and used by both the scan over the workspace and the
+/// self-tests below, so the thing the self-tests certify cannot drift away
+/// from the thing that actually guards the tree.
+fn offending_statements(source: &str) -> Vec<String> {
+    let stmts = statements(source);
+    let scale_al = scale_aliases(&stmts);
+    let duration_al = duration_aliases(&stmts);
+    stmts
+        .iter()
+        .filter(|stmt| {
+            let lower = stmt.to_ascii_lowercase();
+            let has_scale = SCALES.iter().any(|c| stmt.contains(c))
+                || tokens(&lower).any(|t| scale_al.iter().any(|a| a == t));
+            let has_duration =
+                tokens(&lower).any(|t| is_duration_token(t) || duration_al.iter().any(|a| a == t));
+            has_scale && has_duration
+        })
+        .cloned()
+        .collect()
+}
+
 /// The other half of "and nowhere else": a second site could be written without
 /// naming `seconds_from_millis` at all, by open-coding Q3's `msec * 0.001` —
 /// directly, through a line split, or through a renamed alias of the constant.
@@ -321,19 +370,11 @@ fn no_module_open_codes_the_millisecond_conversion() {
         if is_permitted_home(&name) {
             continue; // the one permitted home for the conversion
         }
-        let stmts = statements(&source);
-        let scale_al = scale_aliases(&stmts);
-        let duration_al = duration_aliases(&stmts);
-        for stmt in &stmts {
-            let lower = stmt.to_ascii_lowercase();
-            let has_scale = SCALES.iter().any(|c| stmt.contains(c))
-                || tokens(&lower).any(|t| scale_al.iter().any(|a| a == t));
-            let has_duration =
-                tokens(&lower).any(|t| is_duration_token(t) || duration_al.iter().any(|a| a == t));
-            if has_scale && has_duration {
-                offenders.push(format!("  {name}: {stmt}"));
-            }
-        }
+        offenders.extend(
+            offending_statements(&source)
+                .into_iter()
+                .map(|stmt| format!("  {name}: {stmt}")),
+        );
     }
     assert!(
         offenders.is_empty(),
@@ -344,9 +385,18 @@ fn no_module_open_codes_the_millisecond_conversion() {
     // The scan has to be able to fail, or it is decorative. These are the
     // shapes a second conversion site could take — direct, line-split,
     // aliased by a bare-equal constant, aliased by an expression that only
-    // *contains* the scale (a folded reciprocal), and aliased by renaming the
-    // duration itself through an intermediate local — and the matcher must
-    // catch all of them.
+    // *contains* the scale (a folded reciprocal), aliased by renaming the
+    // duration itself through an intermediate local, aliased one step further
+    // out through another named constant, and written in the same statement as
+    // the prose that describes it — and the matcher must catch all of them.
+    //
+    // The last two are the ones that pin the alias rule's tightening
+    // ([`is_constant_expression`]). A `const` folded out of another `const` is
+    // still a constant and must stay tracked; and a real conversion sitting
+    // beside a string literal must stay caught, because the tempting way to
+    // silence a false positive in a *reporting* module is to exempt formatting
+    // statements or strip string literals wholesale, and that would open a
+    // hole a conversion could be written through.
     for planted in [
         "let dt = ms as f32 * 0.001;",
         "let dt = ms as f32\n    * 0.001;",
@@ -354,19 +404,31 @@ fn no_module_open_codes_the_millisecond_conversion() {
         "const INV_THOUSAND: Scalar = s(1.0 / 1000.0);\nlet dt = s(f32::from(ms)) * INV_THOUSAND;",
         "let raw = f32::from(ms);\nlet dt = s(raw * 0.001);",
         "let raw = f32::from(ms);\nlet hop = raw;\nlet dt = s(hop * 0.001);",
+        "const ONE_UNIT: Scalar = s(1.0);\nconst TO_SECONDS: Scalar = ONE_UNIT * 0.001;\n\
+         let dt = s(f32::from(ms)) * TO_SECONDS;",
+        "let _ = writeln!(out, \"a frame takes {} ms to scan out\", ms as f32 * 0.001);",
     ] {
-        let stmts = statements(planted);
-        let scale_al = scale_aliases(&stmts);
-        let duration_al = duration_aliases(&stmts);
-        let caught = stmts.iter().any(|stmt| {
-            let lower = stmt.to_ascii_lowercase();
-            let has_scale = SCALES.iter().any(|c| stmt.contains(c))
-                || tokens(&lower).any(|t| scale_al.iter().any(|a| a == t));
-            has_scale
-                && tokens(&lower)
-                    .any(|t| is_duration_token(t) || duration_al.iter().any(|a| a == t))
-        });
-        assert!(caught, "the scan would not notice: {planted}");
+        assert!(
+            !offending_statements(planted).is_empty(),
+            "the scan would not notice: {planted}"
+        );
+    }
+
+    // And the shape that must NOT be reported, pinned so a later widening
+    // cannot quietly reintroduce it. `refresh_hz` is millihertz divided down
+    // to hertz — a frequency read back from the monitor handle, not a
+    // float-seconds duration — and `ms(..)` here is a formatting helper. Two
+    // real code tokens, neither of them a conversion. Criterion 3 is about
+    // durations crossing the API, and nothing here is one.
+    for benign in [
+        "let refresh_hz = measured_refresh_mhz(log).map(|mhz| mhz as f64 / 1000.0);\n\
+         let _ = writeln!(out, \"a whole frame takes {} ms to scan out\", ms(interval));",
+        "let per_second = samples as f64 / 1000.0;\nlet _ = writeln!(out, \"{per_second} k/ms\");",
+    ] {
+        assert!(
+            offending_statements(benign).is_empty(),
+            "the scan reports a false positive on: {benign}"
+        );
     }
 }
 
