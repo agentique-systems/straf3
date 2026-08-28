@@ -1,0 +1,65 @@
+=== r12 BASELINE — untouched tree ===
+captured: 2026-08-28T19:33:10+02:00
+HEAD: a0e62d4c225dffd872e5a0813ddb4dd0c38a4d94
+git status: 0 modified files
+
+=== cargo xtask check-seam ===
+checking the straf3 dependency seam (spec section 4)...
+
+  straf3-sim: 2 package(s) in the resolved tree (all targets, all features)
+  straf3-collision: 4 package(s) in the resolved tree (all targets, all features)
+  straf3-map: 8 package(s) in the resolved tree (all targets, all features)
+  straf3-replay: 3 package(s) in the resolved tree (all targets, all features)
+  straf3-sim: scanned 7 source file(s) for std escapes and transcendental calls outside num.rs
+  workspace: `fast-math` not enabled (default features)
+  workspace: `scalar-math` not enabled (default features)
+  workspace: glam libm-family features not enabled (default features)
+  workspace: `fast-math` not enabled (--all-features)
+  workspace: `scalar-math` not enabled (--all-features)
+  workspace: glam libm-family features not enabled (--all-features)
+
+  seam holds: no crate below the line reaches above it.
+SEAM EXIT=0
+
+=== cargo xtask determinism ===
+every command rather than by the final state.
+
+  building x86_64-unknown-linux-gnu ...
+   Compiling glam v0.33.3
+   Compiling straf3-sim v0.1.0 (/home/cairon/agentique-runs/straf3/crates/straf3-sim)
+   Compiling straf3-det-runner v0.1.0 (/home/cairon/agentique-runs/straf3/tools/det-runner)
+    Finished `release` profile [optimized] target(s) in 6.80s
+  running  x86_64-unknown-linux-gnu ...
+    x86_64-unknown-linux-gnu (native-x86_64-linux), grand digest 52345ff21f602c27
+  building x86_64-unknown-linux-musl ...
+   Compiling glam v0.33.3
+   Compiling straf3-sim v0.1.0 (/home/cairon/agentique-runs/straf3/crates/straf3-sim)
+   Compiling straf3-det-runner v0.1.0 (/home/cairon/agentique-runs/straf3/tools/det-runner)
+warning: dropping unsupported crate type `cdylib` for target `x86_64-unknown-linux-musl`
+
+warning: `straf3-det-runner` (lib) generated 1 warning
+    Finished `release` profile [optimized] target(s) in 7.44s
+  running  x86_64-unknown-linux-musl ...
+    x86_64-unknown-linux-musl (native-x86_64-linux), grand digest 52345ff21f602c27
+  building x86_64-pc-windows-gnu ...
+   Compiling glam v0.33.3
+   Compiling straf3-sim v0.1.0 (/home/cairon/agentique-runs/straf3/crates/straf3-sim)
+   Compiling straf3-det-runner v0.1.0 (/home/cairon/agentique-runs/straf3/tools/det-runner)
+    Finished `release` profile [optimized] target(s) in 6.78s
+  running  x86_64-pc-windows-gnu ...
+    x86_64-pc-windows-gnu (native-x86_64-windows), grand digest 52345ff21f602c27
+  building wasm32-unknown-unknown ...
+   Compiling glam v0.33.3
+   Compiling straf3-sim v0.1.0 (/home/cairon/agentique-runs/straf3/crates/straf3-sim)
+   Compiling straf3-det-runner v0.1.0 (/home/cairon/agentique-runs/straf3/tools/det-runner)
+    Finished `release` profile [optimized] target(s) in 4.67s
+  running  wasm32-unknown-unknown ...
+    [wasm32-unknown-unknown] run-node.mjs: node v22.22.1, V8 12.4.254.21-node.35, report v1
+    wasm32-unknown-unknown (wasm32-unknown-unknown), grand digest 52345ff21f602c27
+
+  4 targets agree, bit for bit, over 9 cases x 1200 commands:
+    x86_64-unknown-linux-gnu
+    x86_64-unknown-linux-musl
+    x86_64-pc-windows-gnu
+    wasm32-unknown-unknown
+DET EXIT=0

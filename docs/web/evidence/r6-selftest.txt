@@ -1,0 +1,29 @@
+$ tools/straf3-webcheck/selftest.sh
+
+building the harness
+
+running 6 tests
+......
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+
+preparing a native subject from a committed run of coil
+wrote /tmp/tmp.vYvxnwJRgF/coil-native.s3d (18241 bytes)
+  map                coil
+  collision digest   0x47263b8845d8bb4b
+  physics            cpm
+  commands           864
+  sim time           6912 ms
+  run time           5096 ms
+  rolling digest     0x79f08409c1bd3ccf
+
+the harness must accept a run that reproduces
+  ok    a native .s3d re-simulates to its own digest   (exit 0)
+
+the harness must refuse each of these
+  ok    a digest the recording does not claim          (exit 1)
+  ok    one flipped byte                               (exit 1)
+  ok    a map recompiled to different hulls            (exit 1)
+  ok    a harness out of lockstep with the workspace   (exit 1)
+
+5 passed, 0 failed

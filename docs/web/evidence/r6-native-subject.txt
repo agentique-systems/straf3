@@ -1,0 +1,59 @@
+$ tools/straf3-webcheck/target/debug/webcheck from-text probes/coil-course/results/coil-run.txt \
+      --map assets/maps/coil.map --out target/webcheck/coil-native.s3d
+wrote target/webcheck/coil-native.s3d (18241 bytes)
+  map                coil
+  collision digest   0x47263b8845d8bb4b
+  physics            cpm
+  commands           864
+  sim time           6912 ms
+  run time           5096 ms
+  rolling digest     0x79f08409c1bd3ccf
+
+$ tools/straf3-webcheck/target/debug/webcheck resim target/webcheck/coil-native.s3d
+straf3-webcheck — native re-simulation of a recorded run
+==========================================================
+
+[harness]
+  tool                          tools/straf3-webcheck (standalone crate)
+  shared packages               6 resolved in both lock files
+  lockstep                      every shared package is at the same version
+
+[the recording, as it claims to be]
+  file                          target/webcheck/coil-native.s3d
+  bytes                         18241
+  content digest                verified at load
+  checksum trace                present, 864 entries
+  command rate                  125 Hz
+  commands                      864
+  map                           coil
+  recorded collision digest     0x47263b8845d8bb4b
+  physics                       cpm
+  recorded physics digest       0x4350ccc31bec5d4c
+  claimed sim time              6912 ms
+  claimed run time              5096 ms
+  claimed rolling digest        0x79f08409c1bd3ccf
+
+[the native world this host compiled]
+  source                        assets/maps/coil.map
+  source bytes                  22723
+  compiled collision digest     0x47263b8845d8bb4b
+  same geometry                 the browser and this host compiled the same hulls and triggers
+  native physics digest         0x4350ccc31bec5d4c
+  same physics                  the same movement constants, field for field
+
+[re-simulation, natively, on this host]
+  commands stepped              864
+  native rolling digest         0x79f08409c1bd3ccf
+  native sim time               6912 ms
+  native run time               5096 ms
+
+[the comparison r6 is about]
+  rolling digest                AGREE — folded over every command, in order
+  intermediate checksums        864 compared, 0 disagree
+  first divergence              none
+  end-state checksum only       agrees — insufficient on its own (ARCHITECTURE §0 item 4)
+
+[verdict]
+  result                        AGREE — the recorded run re-simulates natively to the same rolling digest
+  digest                        0x79f08409c1bd3ccf
+  over                          864 commands, 6912 ms of simulation
