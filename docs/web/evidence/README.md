@@ -127,6 +127,26 @@ should be treated as a bug rather than shipped.
 
 ---
 
+## `r8-map-compiler-crosstarget.txt` — the map compiler agrees across targets
+
+| file | what it is |
+|---|---|
+| `r8-map-compiler-crosstarget.txt` | `assets/maps/coil.map` compiled twice — once by a native `x86_64-pc-windows-msvc` build, once by a `wasm32-unknown-unknown` build inside Chrome — producing the same collision digest `0x47263b8845d8bb4b`, 26 hulls, 4 triggers. |
+
+Worth its own entry because it is **not** what r19 asks for and does not need a
+recorded run to exist. `cargo xtask determinism` builds `straf3-det-runner` and
+never compiles a `.map`, so the Valve 220 pipeline had no cross-target evidence
+on any host — while being load-bearing for every run, since a `.s3d` binds a
+`collision_digest` and `commands_for` refuses geometry that compiled
+differently. `crates/straf3-game/src/web.rs` names exactly this gap on
+`install_map`. This is the first host whose browser would start, so it is the
+first time the browser's answer could be read next to a native one.
+
+r19 remains the rolling digest of a recorded run, and still requires a run
+recorded in a browser.
+
+---
+
 ## `r12-*` — native play is not weakened by any of this
 
 | file | what it is |
