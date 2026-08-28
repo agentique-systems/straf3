@@ -49,26 +49,27 @@ static SEQ: AtomicU32 = AtomicU32::new(0);
 ///
 /// # Why this is not `DATABASE_URL` verbatim
 ///
-/// `DATABASE_URL` names Neon's **pooled** endpoint, which is PgBouncer in
-/// transaction-pooling mode. That is the right endpoint for the service: it
-/// runs one statement at a time and holds no session state.
+/// `DATABASE_URL` names Neon's **pooled** endpoint — PgBouncer in
+/// transaction-pooling mode. That is the right endpoint for the service, which
+/// runs one statement at a time and holds no session state. These tests hold
+/// session state on purpose: each one lives in its own schema, reached by `set
+/// search_path`, and a transaction-mode pooler is free to hand the next
+/// transaction a backend that never received it. So they use the direct
+/// endpoint, which is the same host with `-pooler` removed.
 ///
-/// It is the wrong endpoint for these tests, and measurably so — the first run
-/// of this suite against it hung with no output and no CPU. Two things here
-/// need a *session* rather than a transaction:
+/// **It is worth being precise about what that does and does not fix, because
+/// the first run of this suite hung and it was tempting to blame the pooler.**
+/// It was not the pooler. `main` held `pg_advisory_lock(999)` on one pooled
+/// session and had a second pooled session's `pg_try_advisory_lock(999)`
+/// correctly return false — advisory locks work through `-pooler`. The hang was
+/// this suite's own concurrency: under `--test-threads=4`, a test held the
+/// migrator's advisory lock while waiting for a second connection from a pool
+/// every other parallel test had already drained. [`Harness::with_jwks`]
+/// migrates on a dedicated connection now, so the lock never spans a pool
+/// acquisition, which is the actual fix.
 ///
-/// - `set search_path to <schema>`, which is how each test gets an isolated
-///   schema. A transaction-mode pooler may hand the next transaction a
-///   different backend, where that setting was never made.
-/// - `sqlx`'s migrator, which takes a **session-scoped** `pg_advisory_lock`.
-///   Through a transaction pooler the unlock can land on a different backend
-///   than the lock, and the next migration waits forever on a lock nobody
-///   holds.
-///
-/// So the tests use Neon's direct endpoint, which is the pooled host with
-/// `-pooler` removed — Neon's own convention, and the transformation is done
-/// here rather than by adding a second credential to `.env`. Override with
-/// `STRAF3_TEST_DATABASE_URL` if a deployment spells it differently.
+/// Override with `STRAF3_TEST_DATABASE_URL` if a deployment spells the direct
+/// endpoint differently.
 pub fn database_url() -> Option<String> {
     if let Some(explicit) = std::env::var("STRAF3_TEST_DATABASE_URL")
         .ok()
@@ -126,14 +127,31 @@ impl Harness {
             .expect("create schema");
         admin.close().await;
 
+        // Migrate on a connection of its own, outside the pool. `sqlx`'s
+        // migrator takes a session-scoped `pg_advisory_lock` and holds it for
+        // the whole run; doing that from inside a pool means a test can be
+        // holding the lock while waiting for a connection that a *different*
+        // test — also waiting on the lock — is holding. That is a deadlock, and
+        // it is what wedged the first run of this suite for ten minutes at zero
+        // CPU. Off the pool, the lock cannot span a pool acquisition.
+        {
+            use sqlx::Connection as _;
+            let mut conn = sqlx::PgConnection::connect(&url).await.expect("migrator conn");
+            conn.execute(format!("set search_path to {schema}").as_str())
+                .await
+                .expect("search_path");
+            db::MIGRATIONS.run(&mut conn).await.expect("migrate");
+            conn.close().await.expect("close migrator conn");
+        }
+
         let owned = schema.clone();
         let pool = PgPoolOptions::new()
             .max_connections(4)
             .after_connect(move |conn, _| {
                 let schema = owned.clone();
                 Box::pin(async move {
-                    // Isolation is `search_path`, so the migration runs
-                    // verbatim rather than through a rewriter.
+                    // Isolation is `search_path`, so the migration ran verbatim
+                    // rather than through a rewriter.
                     conn.execute(format!("set search_path to {schema}").as_str())
                         .await?;
                     Ok(())
@@ -142,8 +160,6 @@ impl Harness {
             .connect(&url)
             .await
             .expect("pool");
-
-        db::migrate(&pool).await.expect("migrate");
 
         let app = Self::router_for(pool.clone(), jwks);
         Self { pool, app, schema }

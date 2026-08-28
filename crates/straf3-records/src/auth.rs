@@ -131,7 +131,7 @@ impl Jwks {
     /// token is refused rather than accepted.
     #[must_use]
     pub fn with_keys(keys: JwkSet, issuer: Option<String>) -> Self {
-        let jwks = Self::new(Some(String::from("preloaded")), issuer);
+        let jwks = Self::new(None, issuer);
         {
             // `try_write` on a freshly constructed lock cannot fail.
             let mut cache = jwks.cache.try_write().expect("a new lock is uncontended");
@@ -193,6 +193,15 @@ impl Jwks {
     async fn key_for(&self, kid: &str) -> ApiResult<DecodingKey> {
         if let Some(key) = self.cached_key(kid).await? {
             return Ok(key);
+        }
+
+        // Nowhere to re-fetch from. Say what is actually wrong — the key id is
+        // not one the service holds — rather than reporting a network failure
+        // for a request it was never going to make.
+        if self.url.is_none() {
+            return Err(ApiError::not_authenticated(format!(
+                "the token names signing key `{kid}`, which is not one this service holds."
+            )));
         }
 
         // Unknown `kid`, or a stale cache. Re-fetch, but not more often than
@@ -259,7 +268,10 @@ impl Jwks {
     /// [`ApiError::not_authenticated`], with a `detail` that names which of
     /// signature, `alg`, `exp` or `iss` was the problem.
     pub async fn verify(&self, token: &str) -> ApiResult<Claims> {
-        if !self.is_configured() {
+        // No endpoint *and* no keys means nothing here can verify anything.
+        // Refusing is the honest answer; accepting an unverified token because
+        // the service cannot check it is not.
+        if self.url.is_none() && self.cache.read().await.keys.is_none() {
             return Err(ApiError::not_authenticated(
                 "this service has no auth endpoint configured, so it cannot verify a token. \
                  Set NEON_AUTH_JWKS_URL."

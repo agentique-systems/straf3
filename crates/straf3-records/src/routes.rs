@@ -163,7 +163,7 @@ async fn list_maps(State(state): State<AppState>) -> ApiResult<Json<Value>> {
         // a map with an empty `categories` list of records — not an absence.
         let rows = sqlx::query(
             "select pp.kind, pp.digest, pp.label, pp.id as profile_id, \
-                    e.time_ms, e.run_id, r.run_digest, pl.display_name, \
+                    e.time_ms, e.run_id, r.verified_digest, pl.display_name, \
                     (select count(*) from leaderboard_entries le \
                        join players lp on lp.id = le.player_id \
                       where le.map_id = $1 and le.profile_id = pp.id and lp.banned_at is null) as entries \
@@ -190,7 +190,7 @@ async fn list_maps(State(state): State<AppState>) -> ApiResult<Json<Value>> {
                 let digest = digest16::from_sql(row.try_get("digest")?);
                 let time_ms: Option<i32> = row.try_get("time_ms")?;
                 let run_id: Option<Uuid> = row.try_get("run_id")?;
-                let run_digest: Option<i64> = row.try_get("run_digest")?;
+                let run_digest: Option<i64> = row.try_get("verified_digest")?;
                 let display_name: Option<String> = row.try_get("display_name")?;
                 let entries: i64 = row.try_get("entries")?;
                 Ok(json!({
@@ -300,7 +300,7 @@ async fn leaderboard(
     // cannot be gamed.
     let rows = sqlx::query(
         "select rank() over (order by e.time_ms asc, e.set_at asc) as rank, \
-                p.display_name, e.time_ms, e.set_at, e.run_id, r.run_digest \
+                p.display_name, e.time_ms, e.set_at, e.run_id, r.verified_digest \
            from leaderboard_entries e \
            join players p on p.id = e.player_id \
            join runs r on r.id = e.run_id \
@@ -352,9 +352,9 @@ async fn leaderboard_me(
         catalog::resolve_category(state.pool(), &slug, query.profile.as_deref()).await?;
 
     let row = sqlx::query(
-        "select rank, display_name, time_ms, set_at, run_id, run_digest from ( \
+        "select rank, display_name, time_ms, set_at, run_id, verified_digest from ( \
              select rank() over (order by e.time_ms asc, e.set_at asc) as rank, \
-                    p.display_name, e.time_ms, e.set_at, e.run_id, r.run_digest, e.player_id \
+                    p.display_name, e.time_ms, e.set_at, e.run_id, r.verified_digest, e.player_id \
                from leaderboard_entries e \
                join players p on p.id = e.player_id \
                join runs r on r.id = e.run_id \
@@ -377,7 +377,7 @@ async fn leaderboard_me(
 }
 
 fn entry_json(row: &sqlx::postgres::PgRow) -> Result<Value, sqlx::Error> {
-    let run_digest = digest16::from_sql(row.try_get("run_digest")?);
+    let run_digest = digest16::from_sql(row.try_get("verified_digest")?);
     Ok(json!({
         "rank": row.try_get::<i64, _>("rank")?,
         "player": row.try_get::<String, _>("display_name")?,
@@ -567,66 +567,78 @@ async fn submit_run(
         ));
     }
 
-    let run_digest = digest16::to_sql(submission.run_digest());
+    let claimed_digest = digest16::to_sql(submission.run_digest());
     let run_id = Uuid::new_v4();
 
     let mut tx = state.pool().begin().await?;
 
-    // §7.2 step 3. The GLOBAL unique index decides, not a check-then-insert:
-    // two simultaneous submissions of the same run must not both succeed.
-    let inserted = sqlx::query(
-        "insert into runs (id, player_id, map_id, profile_id, sim_build_id, tick_rate_hz, \
-                           commands, demo_sha256, run_digest, demo_bytes_blob, demo_bytes, \
-                           attempt_id, client_time_ms, client_rolling_digest) \
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) \
-         on conflict (run_digest) do nothing returning id",
+    // §7.2 step 3, in the shape the second migration's header argues for.
+    // Ownership and idempotency were one index in §5.1 and are two questions
+    // here, because the digest in the header is the *submitter's* claim: only
+    // re-simulation derives the real one, and intake does not simulate.
+    //
+    // Idempotency, first: this player has uploaded this run before — a retry,
+    // or the same run re-encoded from the compact form into the traced one.
+    // Return the original rather than queueing the work again.
+    let mine = sqlx::query(
+        "select id from runs where player_id = $1 and claimed_digest = $2 \
+          order by submitted_at asc limit 1",
     )
-    .bind(run_id)
     .bind(player.id)
-    .bind(map_id)
-    .bind(profile_id)
-    .bind(state.sim_build_id())
-    .bind(submission.tick_rate_hz())
-    .bind(submission.commands())
-    .bind(&submission.sha256)
-    .bind(run_digest)
-    .bind(&submission.bytes)
-    .bind(i32::try_from(submission.bytes.len()).unwrap_or(i32::MAX))
-    .bind(ticket)
-    .bind(
-        submission
-            .recording
-            .claimed()
-            .run_time_ms
-            .and_then(|t| i32::try_from(t).ok()),
-    )
-    .bind(digest16::to_sql(submission.recording.claimed().digest))
+    .bind(claimed_digest)
     .fetch_optional(&mut *tx)
     .await?;
 
-    let (status_code, run_id, owner) = match inserted {
-        Some(_) => (StatusCode::ACCEPTED, run_id, player.id),
-        None => {
-            // Somebody already owns this digest. Who decides the answer.
-            let existing = sqlx::query("select id, player_id from runs where run_digest = $1")
-                .bind(run_digest)
-                .fetch_one(&mut *tx)
-                .await?;
-            let owner: Uuid = existing.try_get("player_id")?;
-            let existing_id: Uuid = existing.try_get("id")?;
-            if owner == player.id {
-                // Idempotency: a retried upload, or the same run re-encoded,
-                // returns the original rather than queueing more work.
-                (StatusCode::OK, existing_id, owner)
-            } else {
-                tx.rollback().await?;
-                return Err(ApiError::run_already_submitted(&digest16::format(
-                    submission.run_digest(),
-                )));
-            }
+    // Ownership, second, and against the *verified* digest — the one this
+    // service folded for itself. Checking the claimed digest here is what would
+    // let anyone squat a record they never set (see the migration header).
+    let already_ranked: Option<Uuid> =
+        sqlx::query_scalar("select player_id from runs where verified_digest = $1")
+            .bind(claimed_digest)
+            .fetch_optional(&mut *tx)
+            .await?;
+
+    let (status_code, run_id) = match (mine, already_ranked) {
+        (Some(row), _) => (StatusCode::OK, row.try_get::<Uuid, _>("id")?),
+        (None, Some(owner)) if owner != player.id => {
+            tx.rollback().await?;
+            return Err(ApiError::run_already_submitted(&digest16::format(
+                submission.run_digest(),
+            )));
+        }
+        (None, _) => {
+            sqlx::query(
+                "insert into runs (id, player_id, map_id, profile_id, sim_build_id, \
+                                   tick_rate_hz, commands, demo_sha256, claimed_digest, \
+                                   demo_bytes_blob, demo_bytes, attempt_id, client_time_ms, \
+                                   client_rolling_digest) \
+                 values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
+            )
+            .bind(run_id)
+            .bind(player.id)
+            .bind(map_id)
+            .bind(profile_id)
+            .bind(state.sim_build_id())
+            .bind(submission.tick_rate_hz())
+            .bind(submission.commands())
+            .bind(&submission.sha256)
+            .bind(claimed_digest)
+            .bind(&submission.bytes)
+            .bind(i32::try_from(submission.bytes.len()).unwrap_or(i32::MAX))
+            .bind(ticket)
+            .bind(
+                submission
+                    .recording
+                    .claimed()
+                    .run_time_ms
+                    .and_then(|t| i32::try_from(t).ok()),
+            )
+            .bind(claimed_digest)
+            .execute(&mut *tx)
+            .await?;
+            (StatusCode::ACCEPTED, run_id)
         }
     };
-    let _ = owner;
 
     // §7.2 step 4: the ticket is consumed whichever of those happened.
     sqlx::query(
@@ -642,11 +654,13 @@ async fn submit_run(
 
     let body = json!({
         "run_id": run_id,
-        "run_digest": digest16::format(submission.run_digest()),
-        // Never "verified" from here. Nothing has re-simulated it yet.
+        // Null on purpose. A run's durable name is the digest this service
+        // folded from the commands, and nothing has re-simulated it yet.
+        "run_digest": Value::Null,
+        "claimed_digest": digest16::format(submission.run_digest()),
+        // Never "verified" from here, for the same reason.
         "status": "pending",
         "poll": format!("/v1/runs/{run_id}"),
-        "watch": format!("/watch/{}", digest16::format(submission.run_digest())),
     });
     Ok((status_code, Json(body)).into_response())
 }
@@ -680,7 +694,8 @@ async fn enforce_submission_rate(pool: &PgPool, player: &AuthedPlayer) -> ApiRes
 // ── runs ────────────────────────────────────────────────────────────────────
 
 const RUN_COLUMNS: &str = "r.id, r.status::text as status, r.time_ms, r.client_time_ms, \
-                           r.commands, r.tick_rate_hz, r.run_digest, r.client_rolling_digest, \
+                           r.commands, r.tick_rate_hz, r.claimed_digest, r.verified_digest, \
+                           r.client_rolling_digest, \
                            r.server_rolling_digest, r.divergence_at, r.submitted_at, \
                            r.verified_at, r.reject_reason, r.demo_bytes, \
                            m.slug as map_slug, m.name as map_name, m.collision_digest, \
@@ -715,7 +730,7 @@ async fn run_by_digest(
 ) -> ApiResult<Json<Value>> {
     let parsed = digest16::parse(&digest).ok_or_else(|| ApiError::unknown_run(&digest))?;
     let row = sqlx::query(&format!(
-        "select {RUN_COLUMNS} {RUN_JOINS} where r.run_digest = $1"
+        "select {RUN_COLUMNS} {RUN_JOINS} where r.verified_digest = $1"
     ))
     .bind(digest16::to_sql(parsed))
     .fetch_optional(state.pool())
@@ -726,13 +741,19 @@ async fn run_by_digest(
 
 fn run_json(row: &sqlx::postgres::PgRow) -> Result<Value, sqlx::Error> {
     let id: Uuid = row.try_get("id")?;
-    let run_digest = digest16::from_sql(row.try_get("run_digest")?);
+    // The run's durable name is the digest this service folded for itself, so
+    // it is null until this service has folded one. What the file claimed is
+    // kept alongside it, under `diagnostics`, where it cannot be mistaken for
+    // the same thing.
+    let verified_digest = row
+        .try_get::<Option<i64>, _>("verified_digest")?
+        .map(|d| digest16::format(digest16::from_sql(d)));
     let status: String = row.try_get("status")?;
     let verified = status == "verified";
 
     Ok(json!({
         "run_id": id,
-        "run_digest": digest16::format(run_digest),
+        "run_digest": verified_digest,
         "status": status,
         // SERVER-COMPUTED, and null unless this service re-simulated the run
         // and agreed with it.
@@ -763,12 +784,13 @@ fn run_json(row: &sqlx::postgres::PgRow) -> Result<Value, sqlx::Error> {
         // Available only once the run is verified and ranked (§8.3), so the
         // link is null until then rather than 404ing after a click.
         "demo": verified.then(|| format!("/v1/runs/{id}/demo")),
-        "watch": format!("/watch/{}", digest16::format(run_digest)),
+        "watch": verified_digest.as_ref().map(|d| format!("/watch/{d}")),
         // The diagnostics §5.1 keeps, grouped so nothing here can be mistaken
         // for the ranked result. `client_time_ms` is what the recording
         // claimed; it is never the time on a board.
         "diagnostics": {
             "client_time_ms": row.try_get::<Option<i32>, _>("client_time_ms")?,
+            "claimed_digest": digest16::format(digest16::from_sql(row.try_get("claimed_digest")?)),
             "client_rolling_digest": row.try_get::<Option<i64>, _>("client_rolling_digest")?
                 .map(|d| digest16::format(digest16::from_sql(d))),
             "server_rolling_digest": row.try_get::<Option<i64>, _>("server_rolling_digest")?
@@ -788,7 +810,7 @@ fn run_json(row: &sqlx::postgres::PgRow) -> Result<Value, sqlx::Error> {
 async fn run_demo(State(state): State<AppState>, Path(id): Path<String>) -> ApiResult<Response> {
     let uuid: Uuid = id.parse().map_err(|_| ApiError::unknown_run(&id))?;
     let row = sqlx::query(
-        "select status::text as status, run_digest, demo_bytes_blob from runs where id = $1",
+        "select status::text as status, verified_digest, demo_bytes_blob from runs where id = $1",
     )
     .bind(uuid)
     .fetch_optional(state.pool())
@@ -808,7 +830,7 @@ async fn run_demo(State(state): State<AppState>, Path(id): Path<String>) -> ApiR
     }
 
     let bytes: Vec<u8> = row.try_get("demo_bytes_blob")?;
-    let digest = digest16::from_sql(row.try_get("run_digest")?);
+    let digest = digest16::from_sql(row.try_get::<Option<i64>, _>("verified_digest")?.unwrap_or(0));
     Ok((
         [
             (header::CONTENT_TYPE, "application/vnd.straf3.demo".to_string()),
@@ -846,7 +868,7 @@ async fn player_profile(
 
     let bests = sqlx::query(
         "select m.slug, pp.kind as family, pp.digest as physics_digest, pp.label, \
-                e.time_ms, e.set_at, e.run_id, r.run_digest, \
+                e.time_ms, e.set_at, e.run_id, r.verified_digest, \
                 (select count(*) from leaderboard_entries o \
                    join players op on op.id = o.player_id \
                   where o.map_id = e.map_id and o.profile_id = e.profile_id \
@@ -867,7 +889,7 @@ async fn player_profile(
     let personal_bests: Vec<Value> = bests
         .iter()
         .map(|row| -> Result<Value, sqlx::Error> {
-            let run_digest = digest16::from_sql(row.try_get("run_digest")?);
+            let run_digest = digest16::from_sql(row.try_get("verified_digest")?);
             let family: String = row.try_get("family")?;
             let physics = digest16::format(digest16::from_sql(row.try_get("physics_digest")?));
             Ok(json!({

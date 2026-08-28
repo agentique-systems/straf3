@@ -326,8 +326,12 @@ async fn a_run_is_pending_until_the_verifier_agrees_and_only_then_is_it_ranked()
         submitted["status"], "pending",
         "intake never says verified: nothing has re-simulated it yet"
     );
+    assert!(
+        submitted["run_digest"].is_null(),
+        "and it has no durable name yet: that digest is the one the service folds for itself"
+    );
     let run_id = submitted["run_id"].as_str().unwrap().to_string();
-    let run_digest = submitted["run_digest"].as_str().unwrap().to_string();
+    let run_digest = submitted["claimed_digest"].as_str().unwrap().to_string();
 
     // Before verification: no time, and the board is still empty.
     let (_, run) = harness.get(&format!("/v1/runs/{run_id}")).await;
@@ -348,6 +352,10 @@ async fn a_run_is_pending_until_the_verifier_agrees_and_only_then_is_it_ranked()
         run["time_ms"].as_i64().unwrap() as u32,
         honest_time,
         "the ranked time is the one this machine computed"
+    );
+    assert_eq!(
+        run["run_digest"], run_digest,
+        "an honest run's durable name is the digest it claimed, because the two agree"
     );
     assert_eq!(
         run["diagnostics"]["client_rolling_digest"], run_digest,
@@ -467,7 +475,7 @@ async fn a_forged_header_digest_can_make_a_row_but_can_never_make_a_ranked_time(
     assert_ne!(
         reread.claimed().digest,
         honest.claimed().digest,
-        "so the global unique index sees a different run and lets the row through"
+        "the claim is a different number, so nothing at intake rejects it"
     );
 
     let (_, ticket) = harness
@@ -486,6 +494,10 @@ async fn a_forged_header_digest_can_make_a_row_but_can_never_make_a_ranked_time(
         "the rolling digest is recomputed from the commands, so the forgery is caught"
     );
     assert!(run["time_ms"].is_null(), "and it never gets a time");
+    assert!(
+        run["run_digest"].is_null(),
+        "and it owns no digest, so it cannot squat the record it was aimed at"
+    );
     assert!(run["demo"].is_null(), "nor are its bytes published");
     assert_ne!(
         run["diagnostics"]["client_rolling_digest"],
@@ -497,17 +509,49 @@ async fn a_forged_header_digest_can_make_a_row_but_can_never_make_a_ranked_time(
         .await;
     assert_eq!(board["total"], 0, "and it never reaches a board");
 
+    // The point of the partial index: the honest run this forgery was aimed at
+    // must still be rankable afterwards. Under a plain global unique index on a
+    // client-supplied digest it would collide forever.
+    let (honest_token, _) = fixture::sign_in_as(&harness, "honest-subject", "Honest").await;
+    let (_, ticket) = harness
+        .post_json("/v1/attempts", &honest_token, json!({"map": "fixture-course"}))
+        .await;
+    let ticket_id: Uuid = ticket["ticket"].as_str().unwrap().parse().unwrap();
+    let (status, submitted) = harness
+        .post_demo(&honest_token, ticket_id, honest.to_bytes())
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "the squat did not block it: {submitted}");
+
+    fixture::run_verifier(&harness.pool, &course, map_id, profile_id).await;
+
+    let (_, board) = harness
+        .get("/v1/maps/fixture-course/leaderboard?profile=cpm")
+        .await;
+    assert_eq!(board["total"], 1, "and it ranks");
+    assert_eq!(board["entries"][0]["player"], "Honest");
+
     harness.cleanup().await;
 }
 
-/// §7.2 step 3: idempotency for the owner, `409` for anyone else.
+/// §7.2 step 3 and §8.3: idempotency for the owner, refusal for anyone else.
+///
+/// Ownership is settled at **verification**, not at intake, and that is the
+/// change the second migration makes. Intake only ever sees the digest the
+/// submitter wrote in the header, so refusing there would refuse on a number
+/// the submitter chose — which is a squat, not a protection. Refusing on the
+/// digest this service folded is a protection.
 #[tokio::test]
-async fn a_run_belongs_to_whoever_submitted_it_first() {
+async fn a_run_belongs_to_whoever_was_verified_with_it_first() {
     let _url = require_database!();
     let course = TestCourse::new();
     let (harness, token, _player) = fixture::signed_in("ownership").await;
     harness.seed().await;
-    course.insert(&harness.pool).await;
+    let map_id = course.insert(&harness.pool).await;
+    let profile_id: i32 =
+        sqlx::query_scalar("select id from physics_profiles where kind = 'cpm'")
+            .fetch_one(&harness.pool)
+            .await
+            .unwrap();
 
     let bytes = course.a_finishing_run().to_bytes_with_checksums().unwrap();
 
@@ -522,19 +566,90 @@ async fn a_run_belongs_to_whoever_submitted_it_first() {
     let (status, a) = harness.post_demo(&token, first, bytes.clone()).await;
     assert_eq!(status, StatusCode::ACCEPTED);
 
-    // The same player, the same run: idempotent, and it returns the original.
+    // The same player, the same run: idempotent, and it returns the original
+    // rather than queueing the work twice.
     let second = ticket_for(&token).await;
     let (status, b) = harness.post_demo(&token, second, bytes.clone()).await;
     assert_eq!(status, StatusCode::OK, "a retried upload is not a new run");
     assert_eq!(a["run_id"], b["run_id"]);
 
-    // A different player posting the same bytes — the case §8.3 is about:
-    // downloading a ranked demo and re-posting it as your own.
+    fixture::run_verifier(&harness.pool, &course, map_id, profile_id).await;
+
+    // Now the digest is owned, by a number the server folded. This is §8.3's
+    // case: downloading a ranked demo and re-posting it as your own.
     let (thief_token, _) = fixture::sign_in_as(&harness, "thief-subject", "Thief").await;
     let stolen = ticket_for(&thief_token).await;
-    let (status, body) = harness.post_demo(&thief_token, stolen, bytes).await;
-    assert_eq!(status, StatusCode::CONFLICT);
+    let (status, body) = harness.post_demo(&thief_token, stolen, bytes.clone()).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
     assert_eq!(body["error"], "run_already_submitted");
+
+    // ...and the board still shows exactly one entry, the original player's.
+    let (_, board) = harness
+        .get("/v1/maps/fixture-course/leaderboard?profile=cpm")
+        .await;
+    assert_eq!(board["total"], 1);
+    assert_eq!(board["entries"][0]["player"], "Nova Tester");
+
+    harness.cleanup().await;
+}
+
+/// Two players race the same run past intake before either is verified. Both
+/// rows exist; the partial unique index decides at verification, and the loser
+/// is refused rather than crashing the verifier.
+#[tokio::test]
+async fn two_pending_copies_of_one_run_are_resolved_by_verification_not_by_intake() {
+    let _url = require_database!();
+    let course = TestCourse::new();
+    let (harness, token, _player) = fixture::signed_in("racecopies").await;
+    harness.seed().await;
+    let map_id = course.insert(&harness.pool).await;
+    let profile_id: i32 =
+        sqlx::query_scalar("select id from physics_profiles where kind = 'cpm'")
+            .fetch_one(&harness.pool)
+            .await
+            .unwrap();
+    let bytes = course.a_finishing_run().to_bytes_with_checksums().unwrap();
+
+    let ticket_for = async |token: &str| -> Uuid {
+        let (_, t) = harness
+            .post_json("/v1/attempts", token, json!({"map": "fixture-course"}))
+            .await;
+        t["ticket"].as_str().unwrap().parse().unwrap()
+    };
+
+    let (other_token, _) = fixture::sign_in_as(&harness, "rival-subject", "Rival").await;
+    let mine = ticket_for(&token).await;
+    let theirs = ticket_for(&other_token).await;
+
+    // Neither is verified yet, so intake has nothing to refuse on.
+    let (status, _) = harness.post_demo(&token, mine, bytes.clone()).await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    let (status, second) = harness.post_demo(&other_token, theirs, bytes).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{second}");
+    let loser = second["run_id"].as_str().unwrap().to_string();
+
+    fixture::run_verifier(&harness.pool, &course, map_id, profile_id).await;
+
+    let (_, run) = harness.get(&format!("/v1/runs/{loser}")).await;
+    assert_eq!(
+        run["status"], "rejected",
+        "the second one through the verifier loses on the partial unique index"
+    );
+    assert!(
+        run["reject_reason"]
+            .as_str()
+            .unwrap()
+            .contains("verified with it first"),
+        "and is told why: {}",
+        run["reject_reason"]
+    );
+    assert!(run["run_digest"].is_null(), "the loser owns no digest");
+
+    let (_, board) = harness
+        .get("/v1/maps/fixture-course/leaderboard?profile=cpm")
+        .await;
+    assert_eq!(board["total"], 1, "one run, one board row");
+    assert_eq!(board["entries"][0]["player"], "Nova Tester");
 
     harness.cleanup().await;
 }
@@ -595,7 +710,7 @@ async fn a_run_answers_to_its_uuid_and_to_its_digest_with_the_same_body() {
     let course = TestCourse::new();
     let (harness, token, _player) = fixture::signed_in("bydigest").await;
     harness.seed().await;
-    course.insert(&harness.pool).await;
+    let map_id = course.insert(&harness.pool).await;
 
     let (_, ticket) = harness
         .post_json("/v1/attempts", &token, json!({"map": "fixture-course"}))
@@ -609,7 +724,23 @@ async fn a_run_answers_to_its_uuid_and_to_its_digest_with_the_same_body() {
         )
         .await;
     let run_id = submitted["run_id"].as_str().unwrap().to_string();
-    let digest = submitted["run_digest"].as_str().unwrap().to_string();
+
+    // `by-digest` resolves against the digest this service folded, so it finds
+    // nothing until the run has been verified — a squatted claim resolves to
+    // nothing rather than to somebody else's garbage.
+    let claimed = submitted["claimed_digest"].as_str().unwrap().to_string();
+    let (status, body) = harness.get(&format!("/v1/runs/by-digest/{claimed}")).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+
+    let profile_id: i32 =
+        sqlx::query_scalar("select id from physics_profiles where kind = 'cpm'")
+            .fetch_one(&harness.pool)
+            .await
+            .unwrap();
+    fixture::run_verifier(&harness.pool, &course, map_id, profile_id).await;
+
+    let (_, run) = harness.get(&format!("/v1/runs/{run_id}")).await;
+    let digest = run["run_digest"].as_str().unwrap().to_string();
     assert_eq!(digest.len(), 16);
 
     let (status_a, by_id) = harness.get(&format!("/v1/runs/{run_id}")).await;

@@ -51,6 +51,7 @@ pub mod seed;
 pub mod simbuild;
 pub mod state;
 pub mod verify;
+pub mod worker;
 
 pub use error::{ApiError, ApiResult};
 pub use state::AppState;

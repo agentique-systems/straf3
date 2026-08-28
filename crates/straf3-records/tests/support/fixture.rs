@@ -34,11 +34,9 @@ use serde_json::json;
 use sqlx::PgPool;
 use straf3_map::CompiledMap;
 use straf3_records::auth::Jwks;
-use straf3_records::verify::{RunStatus, verify_against};
 use straf3_records::{digest16, simbuild};
 use straf3_replay::{Recording, RunStart, WorldId};
 use straf3_sim::{PhysicsProfile, TickRate, UserCmd, angle_to_short};
-use uuid::Uuid;
 
 use super::Harness;
 
@@ -217,80 +215,31 @@ fn brush(x0: f32, y0: f32, z0: f32, x1: f32, y1: f32, z1: f32, tex: &str) -> Str
 
 // ── driving the verifier ────────────────────────────────────────────────────
 
-/// Do what `straf3-records-verifier` does, against the fixture course.
+/// Drain the pending queue exactly as `straf3-records-verifier` does.
 ///
-/// The same `verify_against` and the same SQL the binary runs — this exists so
-/// a test does not have to spawn a second process, not so it can take a
-/// shortcut through the decision.
-pub async fn run_verifier(pool: &PgPool, course: &TestCourse, map_id: i32, profile_id: i32) {
-    let world_id = course.world_id();
+/// This calls `straf3_records::worker::claim_and_verify` — the same function
+/// the binary's `main` loops over. It is not a re-implementation: a test that
+/// wrote its own "claim, re-simulate, write the verdict" would be asserting
+/// about a second copy of the decision, and the two could drift precisely where
+/// it matters.
+///
+/// The fixture course is not in `assets/maps`, so the worker's map cache is
+/// pointed at a directory this call writes it into first.
+pub async fn run_verifier(pool: &PgPool, course: &TestCourse, _map_id: i32, _profile_id: i32) {
+    let dir = std::env::temp_dir().join(format!("straf3-fixture-maps-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("fixture maps dir");
+    std::fs::write(
+        dir.join(format!("{}.map", TestCourse::SLUG)),
+        &course.source,
+    )
+    .expect("write fixture map");
 
-    loop {
-        let mut tx = pool.begin().await.expect("begin");
-        let claimed = sqlx::query(
-            "select id, demo_bytes_blob from runs where status = 'pending' \
-              order by submitted_at asc for update skip locked limit 1",
-        )
-        .fetch_optional(&mut *tx)
+    let mut maps = straf3_records::worker::MapCache::new(&dir);
+    while straf3_records::worker::claim_and_verify(pool, &mut maps)
         .await
-        .expect("claim");
-
-        let Some(row) = claimed else {
-            tx.rollback().await.ok();
-            return;
-        };
-
-        use sqlx::Row as _;
-        let id: Uuid = row.try_get("id").unwrap();
-        let bytes: Vec<u8> = row.try_get("demo_bytes_blob").unwrap();
-
-        let recording = Recording::from_bytes(&bytes).expect("stored bytes decode");
-        let verdict = verify_against(&recording, &course.compiled, &world_id);
-
-        sqlx::query(
-            "update runs set status = $2::run_status, time_ms = $3, client_time_ms = $4, \
-                    client_rolling_digest = $5, server_rolling_digest = $6, \
-                    divergence_at = $7, reject_reason = $8, verified_at = now() where id = $1",
-        )
-        .bind(id)
-        .bind(verdict.status.as_str())
-        .bind(verdict.time_ms)
-        .bind(verdict.client_time_ms)
-        .bind(digest16::to_sql(verdict.client_rolling_digest))
-        .bind(verdict.server_rolling_digest.map(digest16::to_sql))
-        .bind(verdict.divergence_at)
-        .bind(verdict.reject_reason.as_deref())
-        .execute(&mut *tx)
-        .await
-        .expect("write verdict");
-
-        if let (RunStatus::Verified, Some(time_ms)) = (verdict.status, verdict.time_ms) {
-            let player_id: Uuid = sqlx::query_scalar("select player_id from runs where id = $1")
-                .bind(id)
-                .fetch_one(&mut *tx)
-                .await
-                .unwrap();
-            sqlx::query(
-                "insert into leaderboard_entries \
-                     (map_id, profile_id, player_id, run_id, time_ms, set_at) \
-                 values ($1, $2, $3, $4, $5, now()) \
-                 on conflict (map_id, profile_id, player_id) do update set \
-                     run_id = excluded.run_id, time_ms = excluded.time_ms, \
-                     set_at = excluded.set_at \
-                 where excluded.time_ms < leaderboard_entries.time_ms",
-            )
-            .bind(map_id)
-            .bind(profile_id)
-            .bind(player_id)
-            .bind(id)
-            .bind(time_ms)
-            .execute(&mut *tx)
-            .await
-            .expect("upsert board");
-        }
-
-        tx.commit().await.expect("commit");
-    }
+        .expect("a verification pass")
+        .is_some()
+    {}
 }
 
 // ── editing a `.s3d` header, the way a forger would ─────────────────────────
