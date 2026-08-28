@@ -34,6 +34,8 @@
  * not answer": 503 `no_records_service`.
  */
 
+import { encodeDemo } from './demo.mjs';
+
 /** Fabricated. Not a `PhysicsProfile::digest()` of anything. */
 const CPM_DIGEST = 'c0ffee11c0ffee11';
 const VQ3_DIGEST = 'decafbad0decafba';
@@ -74,15 +76,53 @@ const COIL = {
 /** @param {string} error @param {string} detail */
 const err = (error, detail) => ({ error, detail });
 
+/** @type {Buffer|null} */
+let demoCache = null;
+
+/**
+ * The bytes `/v1/runs/:id/demo` serves: a structurally valid, transparently
+ * empty `.s3d`. Real enough for the site's decoder and for `/watch/` to have
+ * something to fetch; empty enough that nobody mistakes it for a run.
+ */
+function demoBytes() {
+  if (!demoCache) {
+    demoCache = encodeDemo({
+      runDigest: RUN_DIGEST,
+      physicsDigest: CPM_DIGEST,
+      physicsName: 'cpm',
+      mapName: 'coil',
+      collisionDigest: COLLISION_DIGEST,
+      runTimeMs: ENTRIES[0].time_ms,
+    });
+  }
+  return demoCache;
+}
+
 /**
  * Answer one `/v1` request.
  *
+ * Returns either a JSON `body` or raw `bytes` with a content type — the demo
+ * route is the only one that is not JSON, and it has to be bytes because the
+ * client fetches it and decodes it as a file.
+ *
  * @param {URL} url
- * @returns {{status: number, body: unknown}}
+ * @returns {{status: number, body?: unknown, bytes?: Buffer, contentType?: string}}
  */
 export function answer(url) {
   const path = url.pathname;
   const q = url.searchParams;
+
+  // `GET /v1/runs/:id/demo` — the raw `.s3d`. 409 `run_not_verified` before a
+  // run is verified is the real service's rule; this fixture's one run is
+  // verified, so it serves.
+  const demo = path.match(/^\/v1\/runs\/(?:by-digest\/)?([0-9a-f-]{16,36})\/demo$/);
+  if (demo) {
+    const ref = demo[1];
+    if (ref !== RUN_DIGEST && ref !== ENTRIES[0].run_id) {
+      return { status: 404, body: err('unknown_run', `No run ${ref}.`) };
+    }
+    return { status: 200, bytes: demoBytes(), contentType: 'application/vnd.straf3.demo' };
+  }
 
   if (path === '/v1/health') {
     return { status: 200, body: { status: 'ok', database: 'fixtures', sim_build: null, native_verifier_ok: false } };
@@ -191,10 +231,17 @@ export function answer(url) {
     };
   }
 
+  // Both spellings of `<run>`, with identical bodies — which is the whole
+  // point of the pair: the site can canonicalise a UUID to the digest form
+  // only because asking either way returns the same run (URLS.md §5).
   const byDigest = path.match(/^\/v1\/runs\/by-digest\/([0-9a-f]{16})$/);
-  if (byDigest) {
-    if (byDigest[1] !== RUN_DIGEST) {
+  const byId = path.match(/^\/v1\/runs\/([0-9a-f-]{36})$/);
+  if (byDigest || byId) {
+    if (byDigest && byDigest[1] !== RUN_DIGEST) {
       return { status: 404, body: err('unknown_run', `No run with digest ${byDigest[1]}.`) };
+    }
+    if (byId && byId[1] !== ENTRIES[0].run_id) {
+      return { status: 404, body: err('unknown_run', `No run with id ${byId[1]}.`) };
     }
     return {
       status: 200,
@@ -211,10 +258,8 @@ export function answer(url) {
         submitted_at: ENTRIES[0].set_at,
         verified_at: ENTRIES[0].set_at,
         reject_reason: null,
-        demo_bytes: 17_408,
-        // Null: this fixture has no bytes, and inventing a URL that 404s would
-        // turn "there is no recording here" into a wasm error three layers away.
-        demo: null,
+        demo_bytes: demoBytes().length,
+        demo: `/v1/runs/${ENTRIES[0].run_id}/demo`,
         watch: `/watch/${RUN_DIGEST}`,
         diagnostics: {
           client_time_ms: ENTRIES[0].time_ms,

@@ -169,7 +169,13 @@ export const href = {
     const q = new URLSearchParams();
     if (o.category) q.set('p', categoryText(o.category));
     if (o.ghost) q.set('ghost', o.ghost);
-    const s = q.toString();
+    // `URLSearchParams` percent-encodes `@` to `%40`. It is a legal query
+    // character that needs no escaping (§2), and every example in §8 spells it
+    // bare, so the escaped form is put back — a share button that produces
+    // `?p=cpm%40…` for a URL documented as `?p=cpm@…` is two spellings of one
+    // link, which is the thing §2 exists to prevent. `%40` parses identically,
+    // so this is cosmetic in effect and not in consequence.
+    const s = q.toString().replace(/%40/g, '@');
     return s ? `/play/${map}?${s}` : `/play/${map}`;
   },
   /** @param {string} run @param {number|null} [seekMs] */

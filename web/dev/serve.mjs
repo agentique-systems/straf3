@@ -109,6 +109,11 @@ function parseArgs(argv) {
     coi: true,
     allowLocalRuns: false,
     fixtures: false,
+    // Both mounts are overridable so the origin can be pointed at a bundle or
+    // a recordings directory built elsewhere — a stub client while the real one
+    // is still being written, or runs produced by a harness in a temp dir.
+    clientDir: process.env.STRAF3_CLIENT_DIR ? resolve(process.env.STRAF3_CLIENT_DIR) : CLIENT_DIR,
+    runsDir: process.env.STRAF3_RUNS_DIR ? resolve(process.env.STRAF3_RUNS_DIR) : RUNS_DIR,
   };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
@@ -119,6 +124,8 @@ function parseArgs(argv) {
     else if (a === '--no-coi') opts.coi = false;
     else if (a === '--allow-local-runs') opts.allowLocalRuns = true;
     else if (a === '--fixtures') opts.fixtures = true;
+    else if (a === '--client-dir') opts.clientDir = resolve(String(argv[++i]));
+    else if (a === '--runs-dir') opts.runsDir = resolve(String(argv[++i]));
     else if (a === '--help' || a === '-h') {
       process.stdout.write(
         [
@@ -131,6 +138,8 @@ function parseArgs(argv) {
           '  --no-coi              do not send COOP/COEP',
           '  --allow-local-runs    expose runs/*.s3d under /dev/runs (dev only)',
           '  --fixtures            answer /v1/* from canned shapes — see FIXTURES below',
+          '  --client-dir DIR      serve /client/* from DIR instead of the built bundle',
+          '  --runs-dir DIR        read /dev/runs from DIR instead of runs/',
           '',
         ].join('\n'),
       );
@@ -284,7 +293,7 @@ async function handle(req, res) {
       server: 'straf3-site-dev',
       origin: `http://${req.headers.host ?? `${opts.host}:${opts.port}`}`,
       records_service: opts.fixtures ? 'fixtures' : (opts.api || null),
-      mounts: { '/client': CLIENT_DIR, '/assets': ASSETS_DIR, '/': SITE_ROOT },
+      mounts: { '/client': opts.clientDir, '/assets': ASSETS_DIR, '/': SITE_ROOT },
     });
   }
 
@@ -300,7 +309,7 @@ async function handle(req, res) {
   // The browser client's built bundle, and the game's static assets. Both
   // read-only mounts of directories other seats own.
   if (path === '/client' || path.startsWith('/client/')) {
-    return serveMount(res, '/client', CLIENT_DIR, path,
+    return serveMount(res, '/client', opts.clientDir, path,
       'Run crates/straf3-game/web/build.sh to produce the wasm-bindgen bundle.');
   }
   if (path === '/assets' || path.startsWith('/assets/')) {
@@ -351,13 +360,25 @@ async function handle(req, res) {
  * looked at without a database that contains failures. See `fixtures.mjs` —
  * this is not the records service and the banner says so.
  *
+ * Imported lazily so that a syntax error in the fixture set cannot stop the
+ * real server from starting. The consequence is the usual one: ES modules are
+ * cached, so an edit to `fixtures.mjs` needs a restart, not a reload.
+ *
  * @param {import('node:http').ServerResponse} res
  * @param {URL} url
  */
 async function fixtureApi(res, url) {
   const { answer } = await import('./fixtures.mjs');
-  const { status, body } = answer(url);
-  return sendJson(res, status, body);
+  const result = answer(url);
+  if (result.bytes) {
+    baseHeaders(res);
+    res.writeHead(result.status, {
+      'Content-Type': result.contentType ?? 'application/octet-stream',
+      'Content-Length': String(result.bytes.length),
+    });
+    return res.end(result.bytes);
+  }
+  return sendJson(res, result.status, result.body);
 }
 
 /**
@@ -436,18 +457,18 @@ async function localRuns(res, path) {
     /** @type {{name: string, bytes: number}[]} */
     const files = [];
     try {
-      for (const name of (await readdir(RUNS_DIR)).sort()) {
+      for (const name of (await readdir(opts.runsDir)).sort()) {
         if (!name.endsWith('.s3d')) continue;
-        files.push({ name, bytes: (await stat(join(RUNS_DIR, name))).size });
+        files.push({ name, bytes: (await stat(join(opts.runsDir, name))).size });
       }
     } catch (err) {
-      return sendJson(res, 200, { source: 'local-file', dir: RUNS_DIR, files: [], error: String(err) });
+      return sendJson(res, 200, { source: 'local-file', dir: opts.runsDir, files: [], error: String(err) });
     }
-    return sendJson(res, 200, { source: 'local-file', dir: RUNS_DIR, files });
+    return sendJson(res, 200, { source: 'local-file', dir: opts.runsDir, files });
   }
   const name = path.slice('/dev/runs/'.length);
   if (!/^[A-Za-z0-9._-]+\.s3d$/.test(name)) return send(res, 400, 'bad recording name\n');
-  const file = safeJoin(RUNS_DIR, '/' + name);
+  const file = safeJoin(opts.runsDir, '/' + name);
   if (file === null) return send(res, 400, 'bad path\n');
   try {
     return await sendFile(res, file);
@@ -466,11 +487,11 @@ server.listen(opts.port, opts.host, () => {
     [
       `straf3 — one origin  →  ${origin}`,
       `  /               ${SITE_ROOT}`,
-      `  /client/*       ${CLIENT_DIR}`,
+      `  /client/*       ${opts.clientDir}`,
       `  /assets/*       ${ASSETS_DIR}`,
       `  /v1/*           ${api}`,
       `  cross-origin    ${opts.coi ? 'isolated (COOP/COEP on)' : 'OFF (--no-coi)'}`,
-      `  local runs      ${opts.allowLocalRuns ? `${RUNS_DIR} at /dev/runs` : 'disabled'}`,
+      `  local runs      ${opts.allowLocalRuns ? `${opts.runsDir} at /dev/runs` : 'disabled'}`,
       '',
       `  ${origin}/                            the map index`,
       `  ${origin}/m/coil/cpm                  the current cpm board`,

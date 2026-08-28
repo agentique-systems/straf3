@@ -215,11 +215,15 @@ export function installHooks(hooks) {
  * @returns {Promise<{ok: true} | {ok: false, why: string, kind: 'no-webgpu'|'no-bundle'|'threw'}>}
  */
 export async function launch(config) {
-  const backend = await pickBackend();
-  if (!backend.ok) return { ok: false, why: backend.why, kind: 'no-webgpu' };
-
+  // The bundle is checked first, and the order is not arbitrary: if there is no
+  // client to run, whether this browser would have given it a GPU is not a
+  // question anyone needs answered. Reporting "no WebGPU adapter" to someone
+  // who has simply not built the client yet sends them to the wrong problem.
   const bundle = await probeBundle();
   if (!bundle.ok) return { ok: false, why: bundle.why, kind: 'no-bundle' };
+
+  const backend = await pickBackend();
+  if (!backend.ok) return { ok: false, why: backend.why, kind: 'no-webgpu' };
 
   const full = { backend: backend.backend, ...config };
   console.log(`[straf3] start_web ${JSON.stringify(full)}`);
