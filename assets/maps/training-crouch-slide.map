@@ -135,6 +135,22 @@
 //                     soffit passes below 56.125 — so the refused run is 202.8
 //                     units, not the flat 192.
 //
+//                     Both of those numbers describe the CEILING, not a player.
+//                     The player is a box 30 units long, and the soffit
+//                     descends with y, so it is the box's leading top corner
+//                     that meets the slope: a standing ORIGIN is refused from
+//                     y≈2278.2, fifteen units earlier, and stays refused until
+//                     y≈2511, fifteen past the lintel's end. The origin's
+//                     constrained run is therefore 232.8 units — the ceiling's
+//                     202.8 plus the hull's 30. Do not read 2293.2 as a place
+//                     the player can stand; `training_stubs.rs` once did, and
+//                     the test was wrong rather than the geometry.
+//
+//                     The Predicted: arithmetic below spans 202.8 and so is
+//                     optimistic by that hull length. It is unmeasured either
+//                     way — see NOT DONE — and whoever measures it should span
+//                     the origin's 232.8.
+//
 //                     Predicted: friction 1.0 decays speed as e^(−t) with t in
 //                     seconds, so a slide entered at v carries v·(1−e^(−0.6))
 //                     = 0.4512·v units before the 600 ms runs out. 202.8 units

@@ -135,18 +135,41 @@ fn the_lintel_admits_a_crouched_player_and_refuses_a_standing_one() {
     }
 
     // On the entry pad and the exit run, both hulls fit: this is the open
-    // ground where the tap-and-stand line is available.
-    for y in [2100.0f32, 2200.0, 2600.0, 3000.0, 3200.0] {
+    // ground where the tap-and-stand line is available. 2240 is the far end of
+    // the entry pad, which the map's S2 promises is "192 flat units at full
+    // height" — so a standing player has to fit on the last of them.
+    for y in [2100.0f32, 2200.0, 2240.0, 2600.0, 3000.0, 3200.0] {
         assert!(
             hull_fits(&world, at(y), false),
             "the standing hull must fit in the open at y={y}"
         );
     }
 
-    // The soffit refuses standing from y≈2293.2 and nowhere earlier.
+    // Where the soffit starts refusing a standing player.
+    //
+    // The map header's y≈2293.2 is where the sloped *plane* passes below the
+    // standing head height: its underside runs (y=2240, z=96) to (y=2304,
+    // z=48), so it reaches 56.125 at 2240 + (96 − 56.125) / 0.75. But a player
+    // is a box, not an eye. `hull_fits` traces that box, the soffit descends
+    // with y, and so what meets the slope first is the box's leading top
+    // corner — `half_extents.y` ahead of the origin. The last standing-clear
+    // ORIGIN is a hull half-length earlier than the plane crossing, and the
+    // two numbers are not interchangeable.
+    const SOFFIT_MEETS_STANDING_HEAD: f32 = 2240.0 + (96.0 - 56.125) / 0.75;
+    let lead = PhysicsProfile::experimental().hull(false).half_extents.y;
+    let last_clear = SOFFIT_MEETS_STANDING_HEAD - lead;
+
+    // Pinned on both sides, so the entry pad can neither shrink nor grow
+    // silently: a shallower lead-in would let a standing player further in, a
+    // steeper or lower one would cut the pad short.
     assert!(
-        hull_fits(&world, at(2280.0), false),
-        "the soffit refuses a standing player too early — the entry pad is short"
+        hull_fits(&world, at(last_clear - 0.5), false),
+        "the soffit refuses a standing player before y={last_clear} — the entry pad is short"
+    );
+    assert!(
+        !hull_fits(&world, at(last_clear + 0.5), false),
+        "the soffit still admits a standing player past y={last_clear} — the lead-in is \
+         too shallow, and the lintel's refusal starts later than the map says"
     );
 }
 
