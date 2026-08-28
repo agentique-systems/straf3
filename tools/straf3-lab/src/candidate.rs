@@ -441,6 +441,20 @@ pub struct Paired {
     /// The first command index at which the two velocities differed, if they
     /// ever did. G3 reads this.
     pub diverged_at: Option<usize>,
+    /// The largest horizontal-speed advantage the candidate held at **any**
+    /// command of the run, and the command it held it on.
+    ///
+    /// **This is not an outcome and no criterion is scored on it.** §1.1 defines
+    /// the outcome as the difference at the horizon and nothing else. It is
+    /// recorded because a delta of zero at the horizon has two completely
+    /// different causes — the mechanic did nothing, or the mechanic did
+    /// something and a second of friction erased it — and a report that could
+    /// not tell them apart would leave a reader to guess which. It is published
+    /// under its own name, as a diagnostic, beside the outcome rather than
+    /// instead of it.
+    pub peak_gain: Scalar,
+    /// Which command [`Self::peak_gain`] was reached on.
+    pub peak_at: usize,
 }
 
 impl Paired {
@@ -531,15 +545,48 @@ fn walk_pair(
     commands: usize,
     hold: bool,
 ) -> Paired {
+    walk_pair_perturbed(
+        mech, ctx, anchor, aim, invoke_at, commands, hold, None, s(0.0),
+    )
+}
+
+/// The same paired run, with the aim of **one** command rotated by `perturb`.
+///
+/// G3's second count asks whether the mechanic causes any input to be ignored.
+/// An input that is ignored is one whose value does not reach the outcome, so
+/// the way to find one is to change it and see whether anything moves. This
+/// changes exactly one command's wish direction and leaves everything else —
+/// the profile, the script, the anchor — alone, so a run that ends where the
+/// unperturbed one did is a run in which that command's steering did nothing.
+#[allow(clippy::too_many_arguments)]
+#[must_use]
+pub fn walk_pair_perturbed(
+    mech: Mechanic,
+    ctx: &Context,
+    anchor: &SimState,
+    aim: Scalar,
+    invoke_at: Option<usize>,
+    commands: usize,
+    hold: bool,
+    perturb_at: Option<usize>,
+    perturb: Scalar,
+) -> Paired {
     let candidate_profile = mech.profile();
     let control_profile = Mechanic::control();
     let mut out = Paired {
         candidate: *anchor,
         control: *anchor,
         diverged_at: None,
+        peak_gain: s(0.0),
+        peak_at: 0,
     };
     for i in 0..commands {
         let (jump, crouch) = presses(mech, ctx, i, invoke_at, hold);
+        let aim = if perturb_at == Some(i) {
+            aim + perturb
+        } else {
+            aim
+        };
         let a = command(&out.candidate, aim, jump, crouch);
         let b = command(&out.control, aim, jump, crouch);
         out.candidate = step(&out.candidate, &a, &ctx.world, &candidate_profile);
@@ -547,6 +594,11 @@ fn walk_pair(
         if out.diverged_at.is_none() && out.candidate.player.velocity != out.control.player.velocity
         {
             out.diverged_at = Some(i);
+        }
+        let gain = out.gain();
+        if gain > out.peak_gain {
+            out.peak_gain = gain;
+            out.peak_at = i;
         }
     }
     out
@@ -632,8 +684,19 @@ pub struct Anchor {
 /// reached.
 #[must_use]
 pub fn anchor(mech: Mechanic, ctx: &Context, entry: Scalar, aim: Scalar) -> Option<Anchor> {
+    anchor_from(mech, ctx, entering(mech, ctx, entry), aim)
+}
+
+/// The same search, from a start the caller chose.
+///
+/// G7's refinement rule names a **geometric** floor of a sixteenth of a unit
+/// beside its aim and timing floors, and the candidates' geometry parameter is
+/// where the approach begins — how far short of the wall, the riser or the edge
+/// the player was when the run started. Refining that needs a start that can be
+/// nudged, so [`entering`]'s answer is a default rather than the only way in.
+#[must_use]
+pub fn anchor_from(mech: Mechanic, ctx: &Context, start: SimState, aim: Scalar) -> Option<Anchor> {
     let profile = mech.profile();
-    let start = entering(mech, ctx, entry);
     match mech {
         // The window is open from the first command: a crouch press at speed is
         // available immediately, and the run starts on the ground.
@@ -687,6 +750,7 @@ pub fn anchor(mech: Mechanic, ctx: &Context, entry: Scalar, aim: Scalar) -> Opti
 }
 
 /// One (context, entry speed) cell of the sweep.
+#[derive(Clone)]
 pub struct Cell {
     /// Whether the mechanic's window ever opened here at all.
     pub reachable: bool,
@@ -708,6 +772,15 @@ pub struct Cell {
     /// Commands between the invoking command and the first command the two runs
     /// differ on, over every cell entry where it fired. G3 fails on any non-zero.
     pub worst_latency: usize,
+    /// Whether the invocation timing selects nothing here: every timing produced
+    /// the identical run.
+    ///
+    /// True only where the player has no choice about when the arming event
+    /// happens — a crouch slide under a ceiling that refuses a standing hull,
+    /// where crouching is forced on the first command. A timing sweep over such
+    /// a cell reports a window that is not a window, so the flag travels with
+    /// the number rather than being left for a reader to infer.
+    pub timing_degenerate: bool,
 }
 
 impl Cell {
@@ -722,6 +795,7 @@ impl Cell {
             control: Vec::new(),
             fired: Vec::new(),
             worst_latency: 0,
+            timing_degenerate: false,
         }
     }
 
@@ -943,6 +1017,84 @@ impl Cell {
         aims.sort_unstable();
         (timings, aims)
     }
+
+    /// G5(b)'s **point-naive** policy, which is not §1.1's neighbourhood:
+    /// invoke at the first available command, aimed along the current heading.
+    ///
+    /// Returns the timing it landed on and the outcome delta there. `None` when
+    /// the mechanic never fired at aim 0, which is a different answer from a
+    /// delta of zero and is reported as one.
+    #[must_use]
+    pub fn point_naive(&self) -> Option<(usize, Scalar)> {
+        (0..self.fired.len())
+            .find(|t| self.fired[*t][0])
+            .map(|t| (t, self.delta(t, 0)))
+    }
+
+    /// The centroids of the ≥95%-of-best sets, in commands and in aim index.
+    ///
+    /// W6 compares sets across contexts and accepts either disjointness or
+    /// centroids more than 10% of the swept range apart, so both halves of that
+    /// test need the same set. This is the second half.
+    #[must_use]
+    pub fn top_centroids(&self) -> Option<(Scalar, Scalar)> {
+        let (timings, aims) = self.top_set();
+        if timings.is_empty() || aims.is_empty() {
+            return None;
+        }
+        let mean = |v: &[usize]| {
+            let mut total = s(0.0);
+            for x in v {
+                total += s(*x as f32);
+            }
+            total / s(v.len() as f32)
+        };
+        // Aim is circular, so a set straddling 0° would have its centroid
+        // reported at 180° by a plain mean. Folded to a signed offset from the
+        // heading first, which is the quantity a player thinks in and the one
+        // §1.1's ±30° neighbourhood is written against.
+        let signed: Vec<Scalar> = aims
+            .iter()
+            .map(|a| {
+                let d = s(*a as f32 * AIM_STEP);
+                if d > s(180.0) { d - s(360.0) } else { d }
+            })
+            .collect();
+        let mut total = s(0.0);
+        for x in &signed {
+            total += *x;
+        }
+        Some((mean(&timings), total / s(signed.len() as f32)))
+    }
+
+    /// The signed aim offsets, in degrees, of the ≥95%-of-best set.
+    #[must_use]
+    pub fn top_aim_degrees(&self) -> Vec<Scalar> {
+        let (_, aims) = self.top_set();
+        let mut out: Vec<Scalar> = aims
+            .iter()
+            .map(|a| {
+                let d = s(*a as f32 * AIM_STEP);
+                if d > s(180.0) { d - s(360.0) } else { d }
+            })
+            .collect();
+        out.sort_by(|a, b| a.partial_cmp(b).expect("no NaN in an aim grid"));
+        out
+    }
+}
+
+/// The anchor for every aim of the sweep grid.
+///
+/// The anchor depends on the aim, because the aim is held from the first command
+/// of the run and therefore steers the approach. Found once per aim and reused
+/// across every timing — and across the canonical technique menu, so that a
+/// technique measured at angle θ and the candidate's control at aim θ are the
+/// same run and can be compared without an argument about where each started.
+#[must_use]
+pub fn anchors(mech: Mechanic, ctx: &Context, entry: Scalar) -> Vec<Option<Anchor>> {
+    (0..AIMS)
+        .map(|a| anchor(mech, ctx, entry, s(a as f32 * AIM_STEP)))
+        .collect()
 }
 
 /// Sweep one (mechanic, context, entry speed) cell.
@@ -951,16 +1103,30 @@ impl Cell {
 /// (8 ms) resolution, against every aim at 5°, each run paired with its control.
 #[must_use]
 pub fn sweep(mech: Mechanic, ctx: &Context, entry: Scalar) -> Cell {
+    sweep_with(mech, ctx, &anchors(mech, ctx, entry), false)
+}
+
+/// The same sweep, over anchors already found, and with the crouch style stated.
+///
+/// # Why the style is a parameter and not a constant
+///
+/// `docs/movement-canon.md` §2.0 asks whether tapping crouch and standing back
+/// up dominates sliding crouched, because `PM_Friction` reads `slide_ms` and not
+/// `p.crouched`. That is not a profile change and not a second mechanic: it is
+/// two policies a player can choose between under the same constants, so it is
+/// a parameter of the sweep. `hold` false is the tap; `hold` true keeps crouch
+/// down from the invoking command to the horizon. It does nothing for the dash
+/// or the wall jump, neither of which reads crouch.
+#[must_use]
+pub fn sweep_with(
+    mech: Mechanic,
+    ctx: &Context,
+    anchors: &[Option<Anchor>],
+    hold: bool,
+) -> Cell {
     let window = mech.window_commands();
     let total = window + HORIZON;
 
-    // The anchor depends on the aim, because the aim is held from the first
-    // command of the run and therefore steers the approach. Found once per aim
-    // and reused across every timing, which is what keeps the sweep affordable.
-    let mut anchors: Vec<Option<Anchor>> = Vec::with_capacity(AIMS);
-    for a in 0..AIMS {
-        anchors.push(anchor(mech, ctx, entry, s(a as f32 * AIM_STEP)));
-    }
     let Some(reference) = anchors[0] else {
         return Cell::unreachable();
     };
@@ -974,6 +1140,7 @@ pub fn sweep(mech: Mechanic, ctx: &Context, entry: Scalar) -> Cell {
         control: Vec::with_capacity(window),
         fired: Vec::with_capacity(window),
         worst_latency: 0,
+        timing_degenerate: false,
     };
 
     for t in 0..window {
@@ -995,7 +1162,7 @@ pub fn sweep(mech: Mechanic, ctx: &Context, entry: Scalar) -> Cell {
                 s(a as f32 * AIM_STEP),
                 invoke_at,
                 total,
-                false,
+                hold,
             );
             let fired = run.diverged_at.is_some();
             if let (Some(at), Some(d)) = (invoke_at, run.diverged_at) {
@@ -1009,7 +1176,284 @@ pub fn sweep(mech: Mechanic, ctx: &Context, entry: Scalar) -> Cell {
         cell.control.push(control_row);
         cell.fired.push(fired_row);
     }
+    // Measured rather than assumed from the context's name: if every timing
+    // produced the identical row, the timing axis selected nothing and any
+    // window read off it is an artefact of sweeping a parameter the player does
+    // not control here.
+    cell.timing_degenerate = cell.candidate.len() > 1
+        && cell
+            .candidate
+            .windows(2)
+            .all(|pair| pair[0] == pair[1]);
     cell
+}
+
+// ── the canonical technique menu, which W5 needs and the sweep cannot produce ──
+
+/// What a player's hands are doing, as distinct from what the geometry does to
+/// them.
+///
+/// # Why there are three of these and seven techniques
+///
+/// §1.2's domain table names seven canonical techniques. On the harness §1.2
+/// specifies — one context, one entry speed, an aim held off the current
+/// velocity and a jump the player may or may not press — **four of the seven
+/// are the same command policy**. `ground_turn`, `ramp traversal`, `step-up`,
+/// the `drop launch` and `air_forward` are all *hold a direction off your
+/// velocity and press nothing*; what distinguishes them is which context they
+/// are named in, because in each case the geometry supplies the technique. Only
+/// the strafe axis and the jump-on-landing rhythm are separate things for the
+/// player to do.
+///
+/// That is a finding rather than a shortcut, and it is published as one. The
+/// menu below therefore measures three policies per cell and maps the seven
+/// names onto them, so W5 can be scored exactly as written without pretending
+/// to seven independent measurements.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Policy {
+    /// Hold the forward axis at an angle off the current velocity. No jump.
+    HeldForward,
+    /// Hold the strafe axis at an angle off the current velocity. No jump.
+    HeldStrafe,
+    /// Hold the forward axis, and press jump on every command the player is
+    /// grounded — which also re-arms it, since an airborne command releases.
+    Bunnyhop,
+}
+
+impl Policy {
+    /// The name this policy carries in a measurement key.
+    #[must_use]
+    pub const fn key(self) -> &'static str {
+        match self {
+            Self::HeldForward => "held_forward",
+            Self::HeldStrafe => "held_strafe",
+            Self::Bunnyhop => "bunnyhop",
+        }
+    }
+
+    /// The three, in report order.
+    #[must_use]
+    pub fn all() -> Vec<Self> {
+        vec![Self::HeldForward, Self::HeldStrafe, Self::Bunnyhop]
+    }
+}
+
+/// One of §1.2's canonical techniques, with the domain the table gives it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Technique {
+    /// Turning while accelerating on the ground. Contexts 1, 2.
+    GroundTurn,
+    /// VQ3's strafejump. Every context.
+    AirForward,
+    /// CPM's pure-strafe model. Every context.
+    AirStrafe,
+    /// Strafe in the air, jump on the command you land. Contexts 1, 2.
+    Bunnyhop,
+    /// Running off the ledge and cashing the fall. Context 5.
+    DropLaunch,
+    /// Crossing the ramp seam. Contexts 2, 3.
+    RampTraversal,
+    /// Meeting the riser. Context 4.
+    StepUp,
+}
+
+impl Technique {
+    /// The name this technique carries in a measurement key.
+    #[must_use]
+    pub const fn key(self) -> &'static str {
+        match self {
+            Self::GroundTurn => "ground_turn",
+            Self::AirForward => "air_forward",
+            Self::AirStrafe => "air_strafe",
+            Self::Bunnyhop => "bunnyhop",
+            Self::DropLaunch => "drop_launch",
+            Self::RampTraversal => "ramp_traversal",
+            Self::StepUp => "step_up",
+        }
+    }
+
+    /// Which command policy the technique is, on this harness.
+    #[must_use]
+    pub const fn policy(self) -> Policy {
+        match self {
+            Self::GroundTurn
+            | Self::AirForward
+            | Self::DropLaunch
+            | Self::RampTraversal
+            | Self::StepUp => Policy::HeldForward,
+            Self::AirStrafe => Policy::HeldStrafe,
+            Self::Bunnyhop => Policy::Bunnyhop,
+        }
+    }
+
+    /// The contexts §1.2's domain table gives it, as indices into
+    /// [`contexts`].
+    #[must_use]
+    pub const fn domain(self) -> &'static [usize] {
+        match self {
+            Self::GroundTurn | Self::Bunnyhop => &[0, 1],
+            Self::AirForward | Self::AirStrafe => &[0, 1, 2, 3, 4, 5, 6],
+            Self::DropLaunch => &[4],
+            Self::RampTraversal => &[1, 2],
+            Self::StepUp => &[3],
+        }
+    }
+
+    /// The seven, in §1.2's table order.
+    #[must_use]
+    pub fn all() -> Vec<Self> {
+        vec![
+            Self::GroundTurn,
+            Self::AirForward,
+            Self::AirStrafe,
+            Self::Bunnyhop,
+            Self::DropLaunch,
+            Self::RampTraversal,
+            Self::StepUp,
+        ]
+    }
+}
+
+/// How many angles the menu sweeps: 0° to 90° at [`AIM_STEP`].
+///
+/// The same grid as the sweep's first quadrant, and the anchors are the sweep's
+/// own, so `air_forward` at angle θ and the candidate's control at aim θ are
+/// literally the same run.
+pub const MENU_ANGLES: usize = 19;
+
+/// What a canonical technique reached in one cell.
+#[derive(Debug, Clone, Copy)]
+pub struct Reached {
+    /// The angle it was held at, in degrees.
+    pub angle: Scalar,
+    /// Absolute horizontal speed at the horizon, in ups.
+    pub absolute: Scalar,
+}
+
+/// Run one policy from `anchor` for `commands` commands, under the control
+/// profile, holding `angle` off the current velocity.
+fn walk_policy(
+    policy: Policy,
+    ctx: &Context,
+    anchor: &SimState,
+    angle: Scalar,
+    commands: usize,
+) -> SimState {
+    let profile = Mechanic::control();
+    let axis = match policy {
+        Policy::HeldStrafe => Axis::Strafe,
+        Policy::HeldForward | Policy::Bunnyhop => Axis::Forward,
+    };
+    let mut st = *anchor;
+    for _ in 0..commands {
+        let want = heading_degrees(st.player.velocity) + angle;
+        let mut buttons = Buttons::NONE;
+        if policy == Policy::Bunnyhop && st.player.ground.is_grounded() {
+            buttons = buttons.with(Buttons::JUMP);
+        }
+        if ctx.crouch_only {
+            buttons = buttons.with(Buttons::CROUCH);
+        }
+        let cmd = UserCmd {
+            buttons,
+            ..holding(axis, yaw_for(axis, want))
+        };
+        st = step(&st, &cmd, &ctx.world, &profile);
+    }
+    st
+}
+
+/// The best a policy reaches in one cell, over the swept angles.
+///
+/// Measured from the **candidate's own anchors** and to the **candidate's own
+/// horizon**, because W5 compares the technique's outcome against the
+/// candidate's in the same cell and a comparison between two runs that started
+/// in different places is not a comparison.
+#[must_use]
+pub fn best_policy(
+    mech: Mechanic,
+    ctx: &Context,
+    anchors: &[Option<Anchor>],
+    policy: Policy,
+) -> Option<Reached> {
+    let commands = mech.window_commands() + HORIZON;
+    let mut best: Option<Reached> = None;
+    for (a, anchor) in anchors.iter().take(MENU_ANGLES).enumerate() {
+        let Some(anchor) = anchor else { continue };
+        let angle = s(a as f32 * AIM_STEP);
+        let end = walk_policy(policy, ctx, &anchor.state, angle, commands);
+        let absolute = horizontal_speed(end.player.velocity);
+        if best.is_none_or(|b| absolute > b.absolute) {
+            best = Some(Reached { angle, absolute });
+        }
+    }
+    best
+}
+
+// ── the dash's pre-registered retune, derived rather than patched ───────────
+
+/// The horizontal speed at each aim's arming event.
+///
+/// Not the nominal entry speed and not the aim-0 anchor speed: the aim steers
+/// the approach, so what the player was carrying when the window opened is a
+/// different number at every aim, and a retune conditioned on that speed has to
+/// read it at every aim or it is conditioned on something else.
+#[must_use]
+pub fn anchor_speeds(anchors: &[Option<Anchor>]) -> Vec<Option<Scalar>> {
+    anchors
+        .iter()
+        .map(|a| a.map(|a| horizontal_speed(a.state.player.velocity)))
+        .collect()
+}
+
+/// The same cell as it would read if the mechanic's arming carried a minimum
+/// speed at the arming event.
+///
+/// # Why this is a derivation and not a second measurement
+///
+/// `docs/movement-canon.md` §1.5 permits one pre-registered retune per
+/// candidate, and the one registered for the dash is a new `dash_entry_speed`
+/// constant tested against horizontal speed at the arming landing, set at 400
+/// to mirror `slide_entry_speed`. That change gates **arming and nothing else**:
+/// a landing at or above the threshold arms exactly the window that arms today,
+/// and a landing below it arms nothing. So the retuned sweep is the measured
+/// sweep with the mechanic removed wherever the arming event was too slow —
+/// which is an exact rewriting of numbers already taken, not an estimate of
+/// them.
+///
+/// **The condition under which that is exact is stated because everything rests
+/// on it:** the retune must be precisely a horizontal-speed gate at the arming
+/// event, changing no other behaviour. If the constant that lands does anything
+/// more — reads a different speed, gates the spend rather than the arm, or
+/// touches the window length — this derivation is wrong and the cells have to be
+/// re-measured against the patched crate. The report says so beside the numbers.
+///
+/// A run whose arming is refused is a run in which the mechanic is absent, so
+/// its outcome is the control's outcome and its delta is exactly zero. That is
+/// what the rewriting below writes.
+///
+/// # Why the anchor's speed *is* the speed at the arming event
+///
+/// The anchor is the state the arming command ended in, not the one it began in
+/// — see [`anchor`]. `set_ground`'s trailing probe, which is where `dash_ms` is
+/// written, is the last thing in the command that touches ground state, and
+/// nothing after it changes velocity. So the horizontal speed a
+/// `dash_entry_speed` test would read at the moment of arming is exactly the
+/// horizontal speed of the anchor state, and no approximation enters here.
+#[must_use]
+pub fn gated_by_entry_speed(cell: &Cell, anchors: &[Option<Anchor>], gate: Scalar) -> Cell {
+    let speeds = anchor_speeds(anchors);
+    let mut out = cell.clone();
+    for t in 0..out.fired.len() {
+        for (a, speed) in speeds.iter().enumerate().take(AIMS) {
+            if speed.is_none_or(|v| v < gate) {
+                out.fired[t][a] = false;
+                out.candidate[t][a] = out.control[t][a];
+            }
+        }
+    }
+    out.reachable = out.fired.iter().any(|row| row.iter().any(|f| *f));
+    out
 }
 
 /// A run that never invokes the mechanic at all, for the gates that ask what

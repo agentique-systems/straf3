@@ -67,13 +67,17 @@
 //!
 //! # Cost
 //!
-//! Recomputing every measurement is tens of millions of simulation commands —
-//! about ten seconds in release, a few minutes in a debug build. That is the
-//! price of pinning the real numbers rather than a summary of them, and it is
-//! paid once per test run rather than once per assertion because every
-//! measurement comes out of one pass.
+//! Recomputing every measurement is hundreds of millions of simulation commands
+//! — about a minute in release and several in a debug build, most of it
+//! section 9's candidate sweep. That is the price of pinning the real numbers
+//! rather than a summary of them. It is paid **twice** per test run and not
+//! three times: `measured_pair` computes the two independent runs the
+//! determinism check needs and hands the fixture comparison the first of them,
+//! because that comparison wants a freshly measured dataset and does not care
+//! whether anybody else is also reading it.
 
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use straf3_lab::{Dataset, dataset, report};
 
@@ -93,9 +97,31 @@ fn document_path() -> PathBuf {
         .join(report::DEFAULT_PATH)
 }
 
-/// Everything the lab measures, recomputed once and shared by the tests here.
-fn measured() -> Dataset {
-    straf3_lab::measurements()
+/// Two independent runs of the whole lab, computed once per process and shared
+/// by the tests here.
+///
+/// # Why two, and why cached
+///
+/// Two, because [`the_lab_is_deterministic_within_a_process`] compares a pair
+/// and a pair cannot be faked from one run. Cached, because before section 9
+/// landed the three call sites cost about four seconds each and it did not
+/// matter; the candidate sweep is 42 cells per mechanic and the same three call
+/// sites now cost minutes. Computing the pair once and using run A for the
+/// fixture comparison weakens nothing — that comparison wants a freshly measured
+/// dataset, and A is one — while removing a third of the wall clock from every
+/// `cargo test --workspace`.
+///
+/// The `OnceLock` also does the right thing under the test harness's threads:
+/// whichever test arrives first measures and the other waits, rather than both
+/// measuring.
+fn measured_pair() -> &'static (Dataset, Dataset) {
+    static PAIR: OnceLock<(Dataset, Dataset)> = OnceLock::new();
+    PAIR.get_or_init(|| (straf3_lab::measurements(), straf3_lab::measurements()))
+}
+
+/// Everything the lab measures.
+fn measured() -> &'static Dataset {
+    &measured_pair().0
 }
 
 #[test]
@@ -113,7 +139,7 @@ fn the_measurements_are_the_ones_that_were_pinned() {
         Dataset::from_tsv(&text).unwrap_or_else(|e| panic!("{} is malformed: {e}", path.display()));
     let now = measured();
 
-    let changes = dataset::diff(&pinned, &now);
+    let changes = dataset::diff(&pinned, now);
     assert!(
         changes.is_empty(),
         "\n{} of {} movement measurements moved.\n\n{}\n\
@@ -185,9 +211,8 @@ fn the_published_document_carries_the_pinned_numbers() {
 /// fixture comparison would then fail intermittently and blame the tree.
 #[test]
 fn the_lab_is_deterministic_within_a_process() {
-    let a = measured();
-    let b = measured();
-    let changes = dataset::diff(&a, &b);
+    let (a, b) = measured_pair();
+    let changes = dataset::diff(a, b);
     assert!(
         changes.is_empty(),
         "\nthe lab is not deterministic: {} measurements differed between two \

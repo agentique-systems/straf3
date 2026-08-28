@@ -339,6 +339,37 @@ pub(crate) fn report(section: &mut Section, test: &SelfTest) {
             step.at, step.refined, step.width,
         ));
     }
+    if let Some(fine) = &test.strafejump_fine {
+        section.say(format!(
+            "**The starting floor was not fine enough, and that is a finding \
+             rather than a failure.** `docs/movement-canon.md` G7 states the \
+             refinement floor as *a parameter of the rule, not a constant*: if a \
+             step is still above threshold at the starting floor, refine further \
+             and record the floor that was needed. It was. At the stated \
+             starting floor of {:.2}° the steepest step in **{}** still measures \
+             {:.2} ups — above the {MATERIAL:.0} ups threshold — so the \
+             instrument would have reported a cliff in strafejumping and, with \
+             it, rejected the technique the game is named after. Refined to \
+             {:.2}° the same step measures {:.2} ups. **It halved with the grid, \
+             which is what a gradient does**, so the finding is that the floor \
+             was too coarse and not that canon's own technique hides a cliff. \
+             Every G7 number in this section is taken at {:.2}°.\n\n\
+             Canon predicted this exposure and named a different curve for it: \
+             §1's `vq3`/`forward` at 500 ups entry, where gain is pinned at zero \
+             until the wish-speed clamp opens between 50° and 60°. That band is \
+             not the worst one. The worst is the row above, and a reader \
+             checking canon's prediction against this table should know that the \
+             *prediction was right about the mechanism and wrong about the \
+             curve*.",
+            AIM_FLOOR,
+            test.strafejump.what,
+            test.strafejump.refined(),
+            fine.floor,
+            fine.refined(),
+            test.aim_floor(),
+        ));
+    }
+
     section.say(if test.passed() {
         format!(
             "**The instrument passes both halves of its self-test**, refining aim \

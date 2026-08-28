@@ -170,7 +170,10 @@ fn lab(argv: &[String]) -> ExitCode {
     println!(
         "measuring the movement language (spec criterion 1)...\n\
          headless, deterministic, and slow enough to be worth waiting for:\n\
-         tens of millions of simulation commands, about ten seconds.\n"
+         hundreds of millions of simulation commands, about a minute. Most of\n\
+         that is section 9's candidate sweep: 42 cells per mechanic, each one\n\
+         every invocation timing crossed with every aim, run twice in lockstep\n\
+         against a control.\n"
     );
     match xtask::lab::run(argv) {
         Ok(true) => ExitCode::SUCCESS,
