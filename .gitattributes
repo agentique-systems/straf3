@@ -1,0 +1,36 @@
+# Line endings are part of this project's contract, not a formatting preference.
+#
+# Every file git detects as text is stored LF in the repository *and* checked
+# out LF in the working tree, on every platform. Without this, a Windows
+# checkout under `core.autocrlf=true` — the default this machine had — hands
+# CRLF to code that reads bytes. Rust's `std::fs::read_to_string` performs no
+# translation, so a parser splitting on a marker followed by "\n" finds nothing
+# in a file that visibly contains the marker.
+#
+# That is not hypothetical. `tools/straf3-lab/tests/pinned.rs` failed exactly
+# this way on the first Windows run: 2735 of 2735 line endings in
+# `docs/movement-lab.md` were CRLF in the working tree and LF in the index, so
+# the split on "```tsv\n" missed a section sitting at line 523. The panic it
+# raises advises regenerating the document — which would have overwritten the
+# published measurement baseline the movement verdict rests on, to "fix" a
+# line-ending artefact that was never in the committed bytes.
+#
+# For a project whose entire premise is that the same inputs produce the same
+# bytes, the working tree disagreeing with the index on the primary development
+# machine is a defect rather than an inconvenience.
+* text=auto eol=lf
+
+# Binary, never converted under any setting. Git's heuristic already classifies
+# most of these correctly; stating it means correctness does not depend on the
+# heuristic getting a new file type right.
+#
+# `*.s3d` is the load-bearing one and is listed before any such file exists.
+# A run artefact is a byte-exact record read against a magic, a format version
+# and fixed-width commands (`crates/straf3-replay/src/codec.rs`). End-of-line
+# conversion inside one would corrupt the run while leaving a plausible file
+# behind, and the resulting ghost-load refusal would present as a determinism
+# bug rather than as what it was.
+*.s3d   binary
+*.wasm  binary
+*.png   binary
+*.ppm   binary
