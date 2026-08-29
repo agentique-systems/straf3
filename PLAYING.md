@@ -31,13 +31,28 @@ distrust the wrong one.
   (`crates/straf3-sim/src/state.rs`). That is deliberate — a field the
   simulation branches on is a way for two builds to disagree about a run — and
   it means that adding a mechanic which needs a new timer changes the checksum
-  for `vq3` and `cpm` too, without canon movement having moved a millimetre.
+  under `straf3`, `vq3` and `cpm` alike, without canon movement having moved a
+  millimetre.
+
+  **This is not hypothetical, and it has already happened here.**
+  `SimState::checksum` folds `Timers::slide_ms`, `Timers::dash_ms`,
+  `Timers::wall_contact_ms` and `PlayerState::wall_normal` — the candidate
+  mechanics' state, which is present and permanently zero under every canon
+  profile. Any checksum published before those were folded in no longer
+  reproduces, without a millimetre of movement having changed. Determinism is
+  untouched by that: the property is same-build reproducibility, and it still
+  holds exactly.
 
 So every state checksum printed below is **an illustration of what one command
 printed on one build**, not a value to compare against. What this file claims is
 the *invariant*: that the three readers agree with each other, and that a
 deliberately hostile frame schedule reaches the same state as a regular one.
 Where a literal is quoted, the build that produced it is named.
+
+That last rule is the one this file has broken before. A literal attributed to
+"this tree" is a claim with an expiry date nobody can see; a literal attributed
+to a **commit** is history, and history does not expire — it just stops being
+the latest. Where a number below is quoted at all, it is quoted that way.
 
 For the same reason, where this file cites a specification or a decision it
 states what the decision *was*, not only which revision carried it. A bare
@@ -129,8 +144,9 @@ Every windowed command below assumes you have done that if you hit the error.
 Nothing headless needs it.
 
 That compiles `assets/maps/coil.map` and drops you at its `info_player_start`,
-under the `cpm` profile at 125 Hz (8 ms commands). A start **on the software
-adapter** prints:
+under the **`straf3` profile** at 125 Hz (8 ms commands) — Straf3's own frozen
+canon, and what a session runs when you name no profile. A start **on the
+software adapter** prints:
 
 ```
 [INFO  straf3_game::scene] map: 26 hulls, 4 triggers, 312 triangles, collision digest 0x47263b8845d8bb4b
@@ -143,6 +159,14 @@ The first line of that block was reproduced on this tree while writing this
 document; the three that follow it come from a windowed start, which was not
 re-run here — opening a window on the software adapter proves nothing that the
 headless paths do not.
+
+**That last line is a transcript from before the default moved, which is why it
+says `cpm profile` where a start today says `straf3 profile`.** It is left as
+captured rather than edited to match: a windowed start could not be re-run on
+this host, and rewriting the one word inside a block labelled as observed output
+would make it a fabrication instead of a record. The rest of the line is
+unaffected — the two profiles are numerically equal, so nothing but the name
+changed.
 
 The `adapter=... type=Cpu` line is what tells you which of the two sections you
 are in; on the Windows build it names the discrete GPU instead.
@@ -308,12 +332,17 @@ usage: straf3 [options]                     open a window and play
   --world <map|flat|empty>    geometry to play in (default map). `flat` and
                               `empty` need no map and are the two worlds
                               straf3-headless can reproduce.
-  --profile <cpm|vq3|experimental>
-                              movement constants (default cpm). `experimental`
-                              is straf3's own vocabulary: playable and
-                              recordable, but its personal bests are kept under
-                              their own name (runs/<map>.experimental.s3d) and
-                              are never ranked against a cpm or vq3 time.
+  --profile <straf3|cpm|vq3|experimental>
+                              movement constants (default straf3, the ruleset
+                              frozen in docs/movement-canon.md Part 3). `cpm`
+                              and `vq3` are the two games straf3 was
+                              reconstructed beside and are ranked alongside it.
+                              `experimental` carries the three candidate
+                              mechanics canon rejected — crouch slide, dash and
+                              wall jump — so it is playable and recordable, but
+                              its personal bests are kept under their own name
+                              (runs/<map>.experimental.s3d) and are never ranked
+                              against a canon time.
   --rate <hz>                 command rate, 1..=1000 (default 125)
   --record <file>             write every command produced to <file>, in
                               straf3-headless's input format
@@ -387,8 +416,20 @@ exactly as the probe's own verify command does
 $ straf3 --replay probes/coil-course/results/coil-run.txt --map assets/maps/coil.map
   world         Map
   run           5096 ms  (5.096 s, start 1800 ms, finish 6896 ms)
-  checksum      0x9a854d1a3653d8b7
+  crossings     start@1800ms/tick225 checkpoint0@4048ms/tick506 checkpoint1@6264ms/tick783 finish@6896ms/tick862
+  checksum      0xf3cabd183c90d8d7
 ```
+
+The `crossings` line is the run's **route**: which of the map's timing volumes
+it went through, and when. `coil` declares four — a start, two checkpoints and a
+finish — and the run above passes all four in the order the map declares them.
+The clock cannot tell you that: a shortcut from the start volume straight to the
+finish is `Finished` too, with a better time. Read it against the map when a run
+time is being offered as evidence.
+
+That checksum was printed by this tree on 2026-08-29. It had been
+`0x9a854d1a3653d8b7`, and it moved without a millimetre of movement changing —
+see the state-checksum note at the top of this file.
 
 An unattended run, for scripting:
 
@@ -396,25 +437,96 @@ An unattended run, for scripting:
 cargo run -p straf3-game --bin straf3 -- --exit-after 2000
 ```
 
+### The canon profile, and the two it was reconstructed beside
+
+`straf3` is the default and needs no flag. `--profile cpm` and `--profile vq3`
+select the two games it was reconstructed beside; all three are canon, and their
+times are ranked.
+
+`straf3` is **numerically equal to `cpm`** in this tree. Canon Part 2 judged
+three candidate mechanics and rejected all three, so no inherited constant
+moved and the freeze came out equal to the reconstruction it started from
+(`docs/movement-canon.md` §3.8). That is a finding, not a link: `cpm` is a
+reconstruction of somebody else's game and may be corrected against a CPMA demo
+one day, and `straf3` must not move when it is.
+
+What this means in practice is that the two differ **only in name** — which is
+not nothing, because the name is what a run is filed and ranked under. See
+"Where your personal best goes" below.
+
 ### The experimental profile
 
 `--profile experimental` is accepted, playable and recordable, and its personal
 bests are filed at `runs/<map>.experimental.s3d` so they are never ranked
-against `cpm` or `vq3`.
+against a canon time.
 
-**The flag landing is not the movement landing.** Those are two sessions' work
-and they merge separately. Until `straf3-sim` lands
-`PhysicsProfile::experimental()`, the profile holds CPM's constants and the
-client says so at startup:
+**It is where the rejected mechanics still live.** `PhysicsProfile::experimental()`
+is spelled `..Self::cpm()` with eight constants overridden — `slide_entry_speed`
+400, `dash_speed` 400, `wall_jump_velocity` 200 and the rest
+(`crates/straf3-sim/src/profile.rs`) — so it is canon's numbers today, since
+canon and `cpm` are equal, plus crouch slide, dash and wall jump switched on.
+Deliberately only those eight: anything the lab measures between the two is then
+attributable to the mechanics and to nothing else. Canon Part 2 rejected all
+three, and this profile is what they were measured in and what
+`tools/straf3-lab` still compares against canon. It did not become redundant
+when canon landed; measuring against it is the job it was built for.
+
+So the client says what you are getting at startup:
 
 ```
-[WARN  straf3_game::app] `experimental` is currently CPM's constants — straf3-sim has not landed PhysicsProfile::experimental() yet, so this session is experimental in name and record-keeping only, not in how it plays
+[WARN  straf3_game::app] profile `experimental` is not canon: its personal bests are kept under their own name and are never ranked against a canon time
+[WARN  straf3_game::app] `experimental` carries the three candidate mechanics canon Part 2 rejected — crouch slide, dash and wall jump. It is kept so they stay measurable (tools/straf3-lab), not because they are returning
 ```
 
-That line is emitted from a digest comparison against `cpm()`, not from a
-hardcoded flag, so it cannot claim the profile has landed while it is still
-canon's constants — and it removes itself when the real constants arrive. It is
-the check to trust, in preference to anything this document says about timing.
+An earlier version of this section described a third line, conditional on the
+profile still holding CPM's constants because `straf3-sim` had not landed its
+own yet. It has landed them, so that condition is permanently false and the line
+is gone; what it was guarding — that `experimental` is not canon under another
+name — is asserted in `profile.rs`'s
+`experimental_is_the_rejected_candidates_switched_on_not_canon_renamed`, which
+fails on the commit that breaks it rather than only for whoever happens to play
+that profile.
+
+### Where your personal best goes, and what moving the default did to it
+
+A finished run is filed as `runs/<map>.<profile>.s3d`, so the default session's
+personal best is now `runs/coil.straf3.s3d` where it used to be
+`runs/coil.cpm.s3d`.
+
+**Nothing committed was orphaned by that** — no `.s3d` exists anywhere in this
+tree. What it affects is a `runs/` directory you already have locally:
+
+- The old file is **not** touched, and `--profile cpm` still loads and races it
+  exactly as before. The physics digest did not move at the freeze, so
+  `ghost.rs`'s mismatch check — which binds a recording to the world and the
+  physics, never to a name — still passes.
+- A default session, though, looks for `runs/coil.straf3.s3d`, does not find it,
+  and starts **with no personal best and no ghost** until you set one. That is
+  by design and not a fault: a time set under a profile called `cpm` is filed
+  and ranked as a `cpm` time.
+- **Do not migrate it by copying the file.** A `.s3d` records the profile name
+  it was set under, and the client refuses to *race* one whose name is not the
+  session's — so `cp runs/coil.cpm.s3d runs/coil.straf3.s3d` gives you a
+  straf3 session with no ghost and this in the log:
+
+  ```
+  [WARN  straf3_game::app] not racing a run set under the `cpm` profile in a `straf3` session. […]
+  [WARN  straf3_game::app] the personal best at runs/coil.straf3.s3d is not being raced this session
+  ```
+
+  **The refusal covers the ghost and not the clock.** A recording that cannot be
+  raced is still adopted as the time to beat — deliberately, so that your own
+  record under geometry the compiler has since changed still has to be beaten —
+  and that rule does not distinguish a changed world from a foreign profile
+  name. So the copied `cpm` time *does* gate whether your straf3 run is saved,
+  while never appearing on screen.
+
+  It costs nothing today, because the two profiles are numerically equal and the
+  times are genuinely comparable. It would cost something with a file copied out
+  of `runs/<map>.experimental.s3d`, whose time was set with crouch slide and
+  wall jump available. Either way the honest way to get a straf3 personal best
+  is to set one; the digest cannot help here, since equal profiles fold to equal
+  digests and the recorded name is the only thing separating them.
 
 ---
 
@@ -454,12 +566,35 @@ stray zero-byte file means a session recorded nothing, not that a run was lost.
 The three readers, on a flat-world recording that needs no map:
 
 ```
-cargo run -p straf3-game --bin straf3 -- --world flat --record /tmp/flat.rec
+cargo run -p straf3-game --bin straf3 -- --world flat --profile cpm --record /tmp/flat.rec
 # play — strafe, jump — then close the window
 cargo run -p straf3-game --bin straf3 -- --replay /tmp/flat.rec
 cargo run -p straf3-sim --bin straf3-headless -- /tmp/flat.rec
 cargo run -p straf3-game --bin straf3 -- --replay /tmp/flat.rec --frame-ms 1,97,3,250,8
 ```
+
+> **`--profile cpm` on the first line is a workaround, marked rather than
+> hidden.** It would otherwise be unnecessary — the client's default is
+> `straf3`. But a recording is written in `straf3-headless`'s own input format
+> and carries the profile it was made under as a `profile <name>` directive, and
+> **`straf3-headless` does not know the name `straf3`.** Its parser accepts
+> `cpm` and `vq3` only, so it refuses a default recording and exits 1:
+>
+> ```
+> $ cargo run -p straf3-sim --bin straf3-headless -- /tmp/flat.rec
+> straf3-headless: /tmp/flat.rec: line 2: unknown profile `straf3` (cpm|vq3)
+> ```
+>
+> `tools/straf3-webcheck`'s fixture parser carries the same two-name table and
+> has the same gap.
+>
+> Recording under `cpm` sidesteps it and costs nothing here: the two profiles
+> are numerically equal, so the three readers are being compared on the same run
+> either way. It is a real hole all the same — the client can now produce a
+> recording the tree's own headless reader refuses — and the fix is a `straf3`
+> arm in both parsers, which is a change below the seam and not in this client.
+> Until it lands, a recording you intend to hand to `straf3-headless` has to be
+> made under a name it knows.
 
 All four print one checksum, and the three readers must agree. The last one is
 the one that matters most: the same input on a deliberately hostile frame
@@ -474,14 +609,19 @@ temporary file only its author ever had. On the release build of this tree:
 
 ```
 $ straf3 --replay probes/coil-course/results/coil-run.txt --map assets/maps/coil.map
-  checksum      0x9a854d1a3653d8b7
+  checksum      0xf3cabd183c90d8d7
 $ straf3 --replay probes/coil-course/results/coil-run.txt --map assets/maps/coil.map \
          --frame-ms 1,97,3,250,8
-  checksum      0x9a854d1a3653d8b7
+  checksum      0xf3cabd183c90d8d7
 ```
 
 Identical, as required. Expect the *value* to change when the simulation state
 gains a field; expect the *equality* not to.
+
+Which is exactly what happened: these two literals read `0x9a854d1a3653d8b7`
+until 2026-08-29, they were re-derived on this tree and they now read
+`0xf3cabd183c90d8d7`. The sentence above predicted it before it happened. The
+equality it protects never moved.
 
 **`[reported]`:** the full loop — play, record, replay — has since been closed on
 the 3060 Ti. A session driven by `--play` and re-recorded produced 864 commands,

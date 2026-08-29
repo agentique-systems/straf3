@@ -165,9 +165,16 @@ toolchain.
 
 **The movement code is written and the game is playable.** The native client
 compiles a Valve 220 `.map` into the geometry you collide with *and* the
-geometry you see, runs a Q3/CPM movement model at a fixed 125 Hz command rate,
-records and replays runs whose checksums three independent readers agree on,
-and can drive a windowed session from a recording (`--play`). `cargo test
+geometry you see, runs Straf3's own frozen movement canon at a fixed 125 Hz
+command rate, records and replays runs whose checksums three independent readers
+agree on, and can drive a windowed session from a recording (`--play`).
+
+That canon — `--profile straf3`, and what a session runs when you name no
+profile — is **numerically equal to the Q3/CPM model it was reconstructed
+beside**. `docs/movement-canon.md` Part 2 judged three candidate mechanics and
+rejected all three, so the freeze moved no constant and Straf3's ruleset came
+out equal to CPM's. That equality is a finding this tree keeps visible rather
+than a link between the two; `cpm` and `vq3` remain selectable and ranked. `cargo test
 --workspace` is green — 40 suites, 543 tests, on 2026-08-17 — and it includes
 the seam gate; `check-seam` and `determinism` additionally run as their own CI
 jobs, the latter across four targets. It has been played on a real RTX 3060 Ti

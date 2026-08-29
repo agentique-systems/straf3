@@ -27,7 +27,7 @@
 //! The remainder doubles as the render interpolation parameter — see
 //! [`FixedStep::alpha`].
 
-use straf3_sim::{PhysicsProfile, SimState, TickRate, UserCmd, World};
+use straf3_sim::{PhysicsProfile, SimState, TickRate, TriggerSet, UserCmd, World};
 
 /// The command rate straf3 runs at unless told otherwise: 125 Hz, 8 ms
 /// commands, per spec D2.
@@ -199,18 +199,33 @@ impl Default for FixedStep {
     }
 }
 
-/// Advance the simulation by exactly one command.
+/// Advance the simulation by exactly one command, reporting the timing volumes
+/// the player passed through during it.
 ///
 /// A one-line wrapper, and that is the point: it is the *only* path from the
 /// windowed build into the simulation, so "the renderer changes nothing below
 /// the seam" (criterion 4) is a claim about this function and nothing else.
 /// `harness` diffs it against calling [`straf3_sim::step_in_place`] directly,
 /// which is exactly what `straf3-headless` does.
-pub fn advance_one<W>(state: &mut SimState, cmd: &UserCmd, world: &W, profile: &PhysicsProfile)
+///
+/// The [`TriggerSet`] is *forwarded*, not interpreted. `step_in_place` has
+/// always returned it and this wrapper used to drop it on the floor, which is
+/// why a run's checkpoint crossings could not be read out of the shipped
+/// binary at all. Accumulating it is [`crate::game::Game`]'s job and
+/// deliberately not the simulation's: `step.rs` records that a checkpoint table
+/// in `SimState` would change every digest ever taken to carry data the physics
+/// never reads. Returning it here keeps the bookkeeping above the seam without
+/// moving a single byte of what the checksum folds.
+pub fn advance_one<W>(
+    state: &mut SimState,
+    cmd: &UserCmd,
+    world: &W,
+    profile: &PhysicsProfile,
+) -> TriggerSet
 where
     W: World + ?Sized,
 {
-    straf3_sim::step_in_place(state, cmd, world, profile);
+    straf3_sim::step_in_place(state, cmd, world, profile)
 }
 
 #[cfg(test)]

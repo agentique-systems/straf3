@@ -2,13 +2,20 @@
 //!
 //! # Why this file has no tests in it yet
 //!
-//! The guard it describes cannot compile until two things exist: the canonical
-//! profile (`straf3_game::profile::straf3()`, absent as of this commit — see
-//! `crates/straf3-sim/src/profile.rs`, which has `vq3()`, `cpm()` and
-//! `experimental()` and nothing else) and the artefact itself. Writing it now
-//! and leaving it broken would break every other seat's build, so the design
-//! lands here instead of in a conversation, and the "Arming it" checklist below
-//! is the whole of the work.
+//! It named two blockers. **One is gone:** the canonical profile exists —
+//! `PhysicsProfile::straf3()` was frozen by `docs/movement-canon.md` Part 3 and
+//! `straf3_game::profile::straf3()` is the accessor this file's snippet calls.
+//! (This paragraph used to say both were absent, and that `straf3-sim` had
+//! `vq3()`, `cpm()` and `experimental()` and nothing else. That stopped being
+//! true at the freeze.)
+//!
+//! **The artefact is still missing, and cannot honestly be produced right
+//! now.** No `.s3d` exists anywhere in the tree, the checklist below forbids
+//! generating one headlessly to make this test green, and the operator has
+//! ruled out human playtest evidence for this milestone — so the run that would
+//! arm this guard has no permitted way to be made. Writing the test now and
+//! leaving it red would break every other seat's build, so the design stays
+//! here and the "Arming it" checklist below is still the whole of the work.
 //!
 //! **This file does not satisfy the requirement it describes.** It is the
 //! design, in the tree, so that whoever captures the evidence executes it
@@ -61,8 +68,12 @@
 //!
 //! 1. Bind the artefact at compile time, next to the map:
 //!
+//!    The `<canon>` in that path was a placeholder because the canon profile
+//!    had no name yet. It has one, and a default session files its personal
+//!    best under it, so the path is now known: `runs/coil.straf3.s3d`.
+//!
 //!    ```ignore
-//!    const CANON_PB: &[u8] = include_bytes!("../../../runs/coil.<canon>.s3d");
+//!    const CANON_PB: &[u8] = include_bytes!("../../../runs/coil.straf3.s3d");
 //!    const COIL_MAP: &str = include_str!("../../../assets/maps/coil.map");
 //!    /// The time the artefact records, asserted so a *swapped* artefact is
 //!    /// caught and not only a stale one — the job `COIL_RUN_MS` does.
@@ -93,8 +104,11 @@
 //!    A truncated artefact reported as "the physics changed" sends the reader
 //!    hunting a movement regression that never happened.
 //!
-//! 3. Assert `recording.physics().name` is the canon name and
-//!    `ghost.run_time_ms() == CANON_PB_MS`.
+//! 3. Assert `recording.physics().name` is `"straf3"` and
+//!    `ghost.run_time_ms() == CANON_PB_MS`. The name matters on its own:
+//!    `straf3` and `cpm` are numerically equal, so a `cpm` recording renamed
+//!    into the canon path passes the digest check and is caught by nothing but
+//!    this assertion.
 //!
 //! 4. Delete this paragraph and the "no tests in it yet" section above.
 //!

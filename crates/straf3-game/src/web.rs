@@ -58,11 +58,21 @@ use crate::scene::WorldChoice;
 
 /// The category a `/play/<map>` link plays under when it names none.
 ///
-/// CPM rather than VQ3 because the shipped course is authored for it, and
-/// because a straf3 link with no `?p=` should land on the movement the project
-/// is about. Stated here rather than defaulted deep in a `unwrap_or` so that
-/// the answer to "what did this link actually run?" has one place to look.
-const DEFAULT_FAMILY: &str = "cpm";
+/// A straf3 link with no `?p=` should land on the movement the project is
+/// about, and since canon Part 3 there is a name for that movement. This was
+/// `cpm`, which was the same argument made with the only name then available:
+/// the shipped course is authored for CPM's movement and `straf3()` is
+/// numerically equal to it, so what a link with no `?p=` *runs* has not
+/// changed — only what it is called, and therefore what a run made through it
+/// is filed and ranked as.
+///
+/// It matches the native default in [`crate::app::Options`] deliberately.
+/// Native and browser disagreeing about what "no profile given" means is
+/// precisely the divergence `crate::profile`'s one-table rule exists to
+/// prevent, one level up. Stated here rather than defaulted deep in an
+/// `unwrap_or` so that the answer to "what did this link actually run?" has
+/// one place to look.
+const DEFAULT_FAMILY: &str = "straf3";
 
 /// Where a map's source is fetched from when the page does not say.
 ///

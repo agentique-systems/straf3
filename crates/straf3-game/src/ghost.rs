@@ -257,14 +257,24 @@ impl Ghost {
     /// # What "at the same point of the run" means here, and what it does not
     ///
     /// A true split needs the two runs compared where they are at the same
-    /// *place*, and the simulation does not record checkpoint times:
-    /// `straf3_sim::TriggerSet` can express checkpoints, but `RunState` carries
-    /// only the start and the finish, so there are no per-checkpoint times to
-    /// difference above the seam. What this does instead is match the player
-    /// to the nearest point on the ghost's re-simulated path — within a window
-    /// around the last match, so the match walks the route forward with the
-    /// player rather than teleporting to the far side of a course that crosses
-    /// itself — and difference the two clocks there.
+    /// *place*. `RunState` carries only the start and the finish, so the
+    /// simulation state has no per-checkpoint times to difference. What this
+    /// does instead is match the player to the nearest point on the ghost's
+    /// re-simulated path — within a window around the last match, so the match
+    /// walks the route forward with the player rather than teleporting to the
+    /// far side of a course that crosses itself — and difference the two clocks
+    /// there.
+    ///
+    /// **The data this would need does now exist, and this is still the
+    /// heuristic.** [`crate::game::Game::crossings`] records the tick and time
+    /// at which a run met each volume, so real per-checkpoint splits are
+    /// buildable from a ghost re-simulated through the same path. What stops it
+    /// being a one-line change is that the ghost's crossings would have to be
+    /// captured during `Ghost::from_recording`'s re-simulation and stored on the
+    /// track, and the player's live crossings compared against them — a
+    /// different shape of object from the position match below. Left as it is
+    /// deliberately rather than by oversight; the approximation is documented
+    /// and correct, and replacing it is worth doing on its own.
     ///
     /// That is an approximation, and it is stated as one. It is exact where it
     /// matters most (the finish line, and anywhere the two runs take the same

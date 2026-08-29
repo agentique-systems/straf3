@@ -72,7 +72,7 @@
 use straf3_platform::InputState;
 use straf3_sim::num::{Scalar, Vec3};
 use straf3_sim::world::Sweep;
-use straf3_sim::{PhysicsProfile, SimState, TickRate, UserCmd, World};
+use straf3_sim::{PhysicsProfile, SimState, TickRate, TriggerSet, UserCmd, World};
 
 use crate::input_map::command_from_input;
 use crate::record::Recorder;
@@ -98,6 +98,38 @@ pub struct Game<W> {
     recorder: Option<Recorder>,
     /// The recorded stream driving this session, if [`Game::play`] was called.
     playback: Option<Playback>,
+    /// Every timing volume this attempt has passed through, and the tick it
+    /// first touched each one.
+    ///
+    /// Kept here rather than in `SimState` on `straf3-sim`'s explicit
+    /// instruction: `step.rs` returns the per-command [`TriggerSet`] instead of
+    /// storing it because `SimState` is what a recording's digest folds, and a
+    /// checkpoint table in there would move every checksum ever taken to carry
+    /// data the physics never reads. This field is above the seam, so it costs
+    /// no digest.
+    crossings: Vec<TriggerCrossing>,
+    /// The union of everything in `crossings`, kept alongside it so that
+    /// deciding whether a volume is newly touched is not a linear scan per
+    /// command.
+    crossed: TriggerSet,
+}
+
+/// The first moment a run touched one or more timing volumes.
+///
+/// One entry per *command that touched something new*, so the list is in
+/// crossing order and a volume appears exactly once however long the player
+/// stands in it. `triggers` can hold more than one bit: a command is up to a
+/// whole tick of movement and can cross two adjacent volumes within it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TriggerCrossing {
+    /// The simulation tick at which the crossing was observed — the tick the
+    /// command produced, so it lines up with a trace line and with
+    /// `SimState::tick`.
+    pub tick: u32,
+    /// Simulation time at that tick, in whole milliseconds.
+    pub time_ms: u32,
+    /// The volumes newly touched, and only the newly touched ones.
+    pub triggers: TriggerSet,
 }
 
 /// A recorded command stream, and how far through it the session is.
@@ -147,7 +179,44 @@ impl<W: World> Game<W> {
             spawn_yaw,
             recorder: None,
             playback: None,
+            crossings: Vec::new(),
+            crossed: TriggerSet::NONE,
         }
+    }
+
+    /// Fold one command's worth of touched volumes into the crossing list.
+    ///
+    /// Only the bits not seen before this command are recorded, so standing in
+    /// a volume for twenty ticks produces one entry rather than twenty, and the
+    /// list reads as the order the run met them.
+    fn note_crossings(&mut self, touched: TriggerSet) {
+        let fresh = TriggerSet(touched.0 & !self.crossed.0);
+        if fresh.is_empty() {
+            return;
+        }
+        self.crossed = TriggerSet(self.crossed.0 | fresh.0);
+        self.crossings.push(TriggerCrossing {
+            tick: self.state.tick,
+            time_ms: self.state.time_ms,
+            triggers: fresh,
+        });
+    }
+
+    /// Every timing volume this attempt has touched, in the order it met them.
+    ///
+    /// The point of surfacing this is that a run's route can be checked by
+    /// somebody who did not produce the run: "it finished" is what the clock
+    /// says, and a clock cannot tell a lap of the course from a shortcut that
+    /// crossed the start and finish volumes and nothing between them.
+    #[must_use]
+    pub fn crossings(&self) -> &[TriggerCrossing] {
+        &self.crossings
+    }
+
+    /// The union of every volume touched so far.
+    #[must_use]
+    pub const fn crossed(&self) -> TriggerSet {
+        self.crossed
     }
 
     /// Drive this session from `cmds` instead of from [`Game::input`].
@@ -222,6 +291,12 @@ impl<W: World> Game<W> {
         self.state = SimState::spawned_at(self.spawn, self.input.look.yaw());
         self.state.player.view = self.input.look.angles();
         self.previous = self.state;
+        // R starts a new attempt, and the crossing list describes an attempt.
+        // Carrying the old one over would report a run as having passed a
+        // checkpoint it only reached before the respawn that discarded it —
+        // the same reasoning that restarts the recorder below.
+        self.crossings.clear();
+        self.crossed = TriggerSet::NONE;
         if self.recorder.is_some() {
             self.recorder = Some(Recorder::new(
                 self.step.rate(),
@@ -262,7 +337,8 @@ impl<W: World> Game<W> {
             if let Some(recorder) = &mut self.recorder {
                 recorder.push(cmd);
             }
-            advance_one(&mut self.state, &cmd, &self.world, &self.profile);
+            let touched = advance_one(&mut self.state, &cmd, &self.world, &self.profile);
+            self.note_crossings(touched);
             ran += 1;
         }
         // A finished stream holds still. Without this the renderer would keep
@@ -282,7 +358,8 @@ impl<W: World> Game<W> {
     /// at all.
     pub fn apply(&mut self, cmd: &UserCmd) {
         self.previous = self.state;
-        advance_one(&mut self.state, cmd, &self.world, &self.profile);
+        let touched = advance_one(&mut self.state, cmd, &self.world, &self.profile);
+        self.note_crossings(touched);
     }
 
     /// The current simulation state.
