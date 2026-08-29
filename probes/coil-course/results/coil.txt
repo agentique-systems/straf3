@@ -3,6 +3,13 @@
 # Published 2026-08-16, regenerated in full from the tree at that date. Not
 # hand-edited: everything below the blank line is the probe's own stdout.
 #
+# This commented header was added to on 2026-08-29 to say which of its numbers
+# are records of that day and which are claims about the tree as it stands. No
+# number was altered and no line of the probe's output was touched -- doing so
+# would forge the artefact to make a stale number look current. What was wrong
+# here was never the value; it was that a dated record was written in the
+# present tense as an instruction, so a reader could not tell the two apart.
+#
 # What changed since the previous publication
 # -------------------------------------------
 # A new phase, H6, runs the same bot against the SHIPPED compiler's collider
@@ -24,26 +31,104 @@
 # a clock still running. Both numbers are upper bounds produced by a greedy
 # one-step hill climber; neither is a course record.
 #
-# The claim H6 actually settles
-# -----------------------------
+# The claim H6 settled, on the day it settled it
+# ----------------------------------------------
 # H6 writes results/coil-run.txt, a command stream in straf3-headless's input
 # format. Replayed through the shipped binary, with no window and no GPU:
 #
 #   ./target/release/straf3 --replay probes/coil-course/results/coil-run.txt \
 #       --map assets/maps/coil.map
 #
+# On the build this file was published from, that printed:
+#
+# straf3:snapshot taken=2026-08-16 build=59cfd8f
 #   checksum      0x9a854d1a3653d8b7
 #
-# which is H6's own final checksum, bit for bit. `SimState::checksum` folds
-# `RunState` (crates/straf3-sim/src/state.rs:321), so that equality says the
-# shipped binary did not merely follow the same path -- it started its clock at
-# 1800 ms and stopped it at 6896 ms, on the same commands, for a 5096 ms run.
+# which was H6's own final checksum, bit for bit. `SimState::checksum` folds
+# `RunState` -- see `SimState::checksum` in crates/straf3-sim/src/state.rs --
+# so that equality said the shipped binary did not merely follow the same path:
+# it started its clock at 1800 ms and stopped it at 6896 ms, on the same
+# commands, for a 5096 ms run.
 #
 # With collider() reverted to its previous body, the same fixture through the
-# same binary gives an IDENTICAL final origin and velocity and the checksum
-# 0x4cf097f79975d542. Identical trajectory, different clock: timing volumes are
-# not solid, so attaching them changes what a run is worth and nothing about
-# how the player moves.
+# same binary gave an IDENTICAL final origin and velocity and the checksum
+# below. Identical trajectory, different clock: timing volumes are not solid,
+# so attaching them changes what a run is worth and nothing about how the
+# player moves. That measurement needed a local revert which is not in this
+# tree and cannot be reproduced from it by any command.
+#
+# straf3:snapshot taken=2026-08-16 build=59cfd8f measured=out-of-tree
+#   0x4cf097f79975d542
+#
+# What that same command prints today, and why the number moved
+# -------------------------------------------------------------
+# Every number above is a record of what one build printed on one day. None of
+# them is a promise about the tree you are holding.
+#
+# The checksum moved on 2026-08-17, in commit a604820, which added four fields
+# to the folded simulation state -- `Timers::slide_ms`, `Timers::dash_ms`,
+# `Timers::wall_contact_ms` and `PlayerState::wall_normal` -- for candidate
+# mechanics canon went on to reject. `SimState::checksum` folds every field of
+# `PlayerState`, so the state got wider and the number moved with it.
+#
+# THE RUN ITSELF DID NOT CHANGE. Replayed at 59cfd8f and again at 0c0e1f5, the
+# final origin and velocity are identical to every digit printed and the clock
+# still reads 5096 ms. This is a widened state, not a movement regression; the
+# distinction, and why the digest is deliberately built to over-invalidate
+# rather than under-invalidate, is argued in crates/straf3-replay/src/identity.rs.
+#
+# The four fields are KEPT, and that was decided rather than defaulted
+# ---------------------------------------------------------------------
+# The obvious response -- the mechanics were rejected, so revert the state they
+# drove and the old numbers become right again -- was considered and refused,
+# on 2026-08-29. Three reasons, in increasing order of weight.
+#
+# It is not a four-field revert. `PhysicsProfile::experimental()` sets all
+# eight candidate constants live, `--profile experimental` is a documented flag
+# filing its own personal bests, and the mover branches on every one of these
+# timers. Removing the state means gutting a shipping profile, not tidying dead
+# fields.
+#
+# It would move every published checksum a second time, invalidating the
+# documents this session is repairing, in the opposite direction, while three
+# other sessions are producing numbers against them.
+#
+# And it treats the symptom. The disease was that nothing re-derived a
+# published number; the revert buys nothing the gate does not, and choosing it
+# INSTEAD of the gate would be the worst outcome available.
+#
+# The counter-argument deserves an answer rather than a walk-past.
+# crates/straf3-replay/src/identity.rs argues that its digest should
+# over-invalidate, because "refusing a good run is a nuisance; accepting a bad
+# one is the thing this module exists to prevent". That reasoning is about
+# whether the FOLD should be narrowed to track behaviour, and it says no. It is
+# not an argument for adding state, and it does not decide this question --
+# but it does rule out the tempting middle road of leaving the fields in place
+# and excluding them from the fold, which would buy back the old numbers at the
+# cost of the exact safety property that section defends.
+#
+# Nine days passed before anyone noticed, because nothing in the tree
+# re-derived a published number and compared it against the document that
+# published it. `cargo xtask check-evidence` is what does that now, and these
+# three claims are what it re-derives on every run -- each one sitting next to
+# the command that produces it, which is what README.md asks for:
+#
+#   ./target/release/straf3 --replay probes/coil-course/results/coil-run.txt \
+#       --map assets/maps/coil.map
+#
+# straf3:claim kind=coil-collision-digest
+#   collision digest  0x47263b8845d8bb4b
+# straf3:claim kind=coil-replay-ms
+#   run               5096 ms
+# straf3:claim kind=coil-replay-checksum
+#   checksum          0xf3cabd183c90d8d7
+#
+# Everything from the blank line below to the end of this file is the probe's
+# own stdout from 2026-08-16, kept exactly as it was printed. Those numbers are
+# records and are not expected to reproduce; the three above are claims about
+# this tree and are expected to, or the gate goes red.
+#
+# straf3:snapshot taken=2026-08-16 build=59cfd8f scope=eof
 
 == coil-course probe ==
 map          ../../assets/maps/coil.map

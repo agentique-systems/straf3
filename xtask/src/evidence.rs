@@ -196,6 +196,28 @@ pub const NOT_COVERED: &[(&str, &str)] = &[
 
 // ── what a marker says ──────────────────────────────────────────────────────
 
+/// Where a snapshot's number was measured.
+///
+/// `docs/web/ARCHITECTURE.md` §1.2 forced this distinction. Four of its digests
+/// were measured on a `/tmp` copy of `straf3-sim` with `libm` substituted, and
+/// that copy has since been deleted — so no command in this repository can ever
+/// re-derive them, and no future one will be able to either.
+///
+/// That has to be sayable without becoming a way to silence the gate. It is
+/// not one, for two reasons: an out-of-tree snapshot still has to carry a date
+/// and a build like any other, and the gate **names every one of them
+/// individually** on every run rather than folding them into a count. The
+/// escape hatch a reader cannot see is the dangerous kind; this one is read
+/// aloud each time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Measured {
+    /// Produced by this repository at the stated commit. The default.
+    InTree,
+    /// Produced somewhere this repository cannot reach. Nothing can re-derive
+    /// it, now or later, and saying so is the honest record.
+    OutOfTree,
+}
+
 /// The category a marker declares. Never inferred from the text around it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Category {
@@ -209,6 +231,7 @@ pub enum Category {
         /// one. This is what lets captured stdout be declared without editing
         /// the stdout.
         scope_eof: bool,
+        measured: Measured,
     },
 }
 
@@ -289,12 +312,10 @@ fn is_commit_shaped(s: &str) -> bool {
 /// Parse one marker line. `Err` is a finding, not an absence: a line that opens
 /// a marker and then does not say what it means is worse than no marker.
 pub fn parse_marker(file: &str, line_no: usize, line: &str) -> Option<Result<Marker, Finding>> {
-    let (token, rest) = if let Some(at) = line.find(CLAIM_TOKEN) {
-        (CLAIM_TOKEN, &line[at + CLAIM_TOKEN.len()..])
-    } else if let Some(at) = line.find(SNAPSHOT_TOKEN) {
-        (SNAPSHOT_TOKEN, &line[at + SNAPSHOT_TOKEN.len()..])
-    } else {
-        return None;
+    let (token, rest) = match (line.find(CLAIM_TOKEN), line.find(SNAPSHOT_TOKEN)) {
+        (Some(at), _) => (CLAIM_TOKEN, &line[at + CLAIM_TOKEN.len()..]),
+        (None, Some(at)) => (SNAPSHOT_TOKEN, &line[at + SNAPSHOT_TOKEN.len()..]),
+        (None, None) => return None,
     };
     let fields = marker_fields(rest);
 
@@ -315,11 +336,7 @@ pub fn parse_marker(file: &str, line_no: usize, line: &str) -> Option<Result<Mar
                     "unknown claim kind `{kind}`. Known kinds: {}. An unknown \
                      kind is a failure rather than a skip — a claim nothing can \
                      re-derive is exactly what this gate exists to refuse.",
-                    KINDS
-                        .iter()
-                        .map(|k| k.name)
-                        .collect::<Vec<_>>()
-                        .join(", ")
+                    KINDS.iter().map(|k| k.name).collect::<Vec<_>>().join(", ")
                 ),
             )));
         }
@@ -331,6 +348,39 @@ pub fn parse_marker(file: &str, line_no: usize, line: &str) -> Option<Result<Mar
 
     // A snapshot. Provenance is the whole of what is checked, so its absence is
     // the whole of the failure.
+    // `measured=` is optional, but a value outside the enumeration is a
+    // failure rather than a shrug: a typo'd `measured=out_of_tree` must not
+    // quietly become the default.
+    let measured = match fields.get("measured").map(String::as_str) {
+        None | Some("in-tree") => Measured::InTree,
+        Some("out-of-tree") => Measured::OutOfTree,
+        Some(other) => {
+            return Some(Err(Finding::new(
+                file,
+                line_no,
+                format!(
+                    "`measured={other}` is not a value this gate knows. Use \
+                     `in-tree` (the default, may be omitted) or `out-of-tree` \
+                     for a number measured somewhere this repository cannot \
+                     reach and can never re-derive."
+                ),
+            )));
+        }
+    };
+    // `scope=` likewise: a misspelled scope would silently degrade a blanket
+    // marker to a point marker and leave everything below it unmarked.
+    let scope_eof = match fields.get("scope").map(String::as_str) {
+        None => false,
+        Some("eof") => true,
+        Some(other) => {
+            return Some(Err(Finding::new(
+                file,
+                line_no,
+                format!("`scope={other}` is not a value this gate knows. The only scope is `eof`."),
+            )));
+        }
+    };
+
     let taken = fields.get("taken");
     let build = fields.get("build");
     match (taken, build) {
@@ -339,7 +389,8 @@ pub fn parse_marker(file: &str, line_no: usize, line: &str) -> Option<Result<Mar
             category: Category::Snapshot {
                 taken: t.clone(),
                 build: b.clone(),
-                scope_eof: fields.get("scope").map(String::as_str) == Some("eof"),
+                scope_eof,
+                measured,
             },
         })),
         (None, _) | (_, None) => Some(Err(Finding::new(
@@ -368,17 +419,23 @@ pub fn parse_marker(file: &str, line_no: usize, line: &str) -> Option<Result<Mar
 /// silently here, and a looser pattern would sweep up byte counts and colour
 /// literals and make the mandatory-marking rule unlivable.
 pub fn find_digest(line: &str) -> Option<String> {
+    // Case-folded first, so `0X` is found as readily as `0x`. Not cosmetic: a
+    // digest this function fails to see is a digest the mandatory-marking rule
+    // never demands a marker for, which is a hole in a gate whose whole promise
+    // is that it fails closed. `to_ascii_lowercase` preserves byte length, so
+    // the offsets below still index the original correctly.
+    let lower = line.to_ascii_lowercase();
     let mut i = 0;
-    while let Some(at) = line[i..].find("0x") {
+    while let Some(at) = lower[i..].find("0x") {
         let start = i + at + 2;
         // `take_while` runs to the end of the hex run, so a 15- or 17-digit
         // literal fails this length test rather than matching a prefix of it.
-        let digits: String = line[start..]
+        let digits: String = lower[start..]
             .chars()
             .take_while(char::is_ascii_hexdigit)
             .collect();
         if digits.len() == 16 {
-            return Some(digits.to_ascii_lowercase());
+            return Some(digits);
         }
         i = start;
     }
@@ -392,8 +449,9 @@ pub fn find_digest(line: &str) -> Option<String> {
 /// against a run time — a false pass, which is the one outcome this module may
 /// not produce.
 fn find_integer(line: &str) -> Option<u64> {
+    let lower = line.to_ascii_lowercase();
     let mut cleaned = String::with_capacity(line.len());
-    let mut rest = line;
+    let mut rest = lower.as_str();
     while let Some(at) = rest.find("0x") {
         cleaned.push_str(&rest[..at]);
         cleaned.push(' ');
@@ -497,12 +555,43 @@ pub struct LiveClaim {
     pub published: String,
 }
 
+/// A snapshot site nothing in this repository can re-derive. Tracked
+/// individually rather than counted, so it is named on every run — see
+/// [`Measured::OutOfTree`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutOfTreeSite {
+    pub file: String,
+    pub line: usize,
+    pub taken: String,
+    pub build: String,
+}
+
 /// Everything one file's scan produced.
 #[derive(Debug, Default)]
 pub struct Scan {
     pub live: Vec<LiveClaim>,
     pub snapshots: usize,
+    pub out_of_tree: Vec<OutOfTreeSite>,
     pub findings: Vec<Finding>,
+}
+
+/// Count a snapshot site, and name it if nothing can ever re-derive it.
+fn record_snapshot(out: &mut Scan, file: &str, line_no: usize, m: &Marker) {
+    out.snapshots += 1;
+    if let Category::Snapshot {
+        taken,
+        build,
+        measured: Measured::OutOfTree,
+        ..
+    } = &m.category
+    {
+        out.out_of_tree.push(OutOfTreeSite {
+            file: file.to_owned(),
+            line: line_no,
+            taken: taken.clone(),
+            build: build.clone(),
+        });
+    }
 }
 
 /// Read a document's markers and the sites they govern.
@@ -586,15 +675,15 @@ pub fn scan(file: &str, text: &str) -> Scan {
                         )),
                     }
                 }
-                Category::Snapshot { .. } => out.snapshots += 1,
+                Category::Snapshot { .. } => record_snapshot(&mut out, file, line_no, &m),
             }
             continue;
         }
 
         // No point marker. A digest here is covered only by a blanket snapshot.
         if digest.is_some() {
-            if blanket.is_some() {
-                out.snapshots += 1;
+            if let Some(b) = blanket.clone() {
+                record_snapshot(&mut out, file, line_no, &b);
             } else {
                 out.findings.push(Finding::new(
                     file,
@@ -622,6 +711,61 @@ pub fn scan(file: &str, text: &str) -> Scan {
 }
 
 // ── running the reproducers ─────────────────────────────────────────────────
+
+// ── the completeness report ─────────────────────────────────────────────────
+
+/// Where documents that publish numbers tend to live. Used **only** to print a
+/// list, never to decide anything.
+const EVIDENCE_PATHS: &[&str] = &["docs", "probes", "PLAYING.md", "PLAYTEST.md", "README.md"];
+
+/// Every `.md`/`.txt` file under [`EVIDENCE_PATHS`] that contains a digest and
+/// is not in the inventory.
+///
+/// This never fails the build, and that is the point of it. The inventory's
+/// weakness is that a document can be forgotten; the answer is not to guess a
+/// category from a path — that is the silent wrongness this module exists to
+/// remove — but to make the completeness audit something a reader cannot avoid
+/// seeing rather than something they must remember to perform.
+fn uninventoried(root: &Path) -> Vec<(String, usize)> {
+    let mut found = Vec::new();
+    for entry in EVIDENCE_PATHS {
+        walk(&root.join(entry), root, &mut found);
+    }
+    found.sort();
+    found
+}
+
+fn walk(path: &Path, root: &Path, found: &mut Vec<(String, usize)>) {
+    if path.is_dir() {
+        let Ok(entries) = std::fs::read_dir(path) else {
+            return;
+        };
+        let mut paths: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
+        paths.sort();
+        for p in paths {
+            walk(&p, root, found);
+        }
+        return;
+    }
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    if !matches!(ext, "md" | "txt") {
+        return;
+    }
+    let Ok(rel) = path.strip_prefix(root) else {
+        return;
+    };
+    let rel = rel.to_string_lossy().replace('\\', "/");
+    if INVENTORY.contains(&rel.as_str()) {
+        return;
+    }
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return;
+    };
+    let n = text.lines().filter(|l| find_digest(l).is_some()).count();
+    if n > 0 {
+        found.push((rel, n));
+    }
+}
 
 fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -657,9 +801,11 @@ fn run_coil_replay(root: &Path) -> Result<String, String> {
         ));
     }
 
-    let exe = root
-        .join("target/release")
-        .join(if cfg!(windows) { "straf3.exe" } else { "straf3" });
+    let exe = root.join("target/release").join(if cfg!(windows) {
+        "straf3.exe"
+    } else {
+        "straf3"
+    });
     if !exe.is_file() {
         return Err(format!(
             "cargo reported success but {} does not exist",
@@ -731,6 +877,7 @@ pub fn run(argv: &[String]) -> Result<bool, String> {
     let mut findings: Vec<Finding> = Vec::new();
     let mut live: Vec<LiveClaim> = Vec::new();
     let mut snapshots = 0usize;
+    let mut out_of_tree: Vec<OutOfTreeSite> = Vec::new();
 
     println!("  inventory ({} file(s)):", INVENTORY.len());
     for rel in INVENTORY {
@@ -756,6 +903,7 @@ pub fn run(argv: &[String]) -> Result<bool, String> {
         );
         snapshots += scan.snapshots;
         live.extend(scan.live);
+        out_of_tree.extend(scan.out_of_tree);
         findings.extend(scan.findings);
     }
 
@@ -828,6 +976,22 @@ pub fn run(argv: &[String]) -> Result<bool, String> {
         }
     }
 
+    // ── numbers nothing can ever re-derive ──────────────────────────────────
+    // Named, never merely counted: an escape hatch a reader cannot see is the
+    // dangerous kind.
+    if !out_of_tree.is_empty() {
+        println!(
+            "\n  measured OUT OF TREE — no command in this repository can \
+             re-derive these,\n  now or ever. They are records, not claims:"
+        );
+        for s in &out_of_tree {
+            println!(
+                "    {}:{}  taken {} on {}",
+                s.file, s.line, s.taken, s.build
+            );
+        }
+    }
+
     // ── the stated hole ─────────────────────────────────────────────────────
     println!("\n  NOT covered by this gate, deliberately:");
     for (what, why) in NOT_COVERED {
@@ -837,11 +1001,26 @@ pub fn run(argv: &[String]) -> Result<bool, String> {
         }
     }
 
+    // ── the completeness audit, as output rather than as a chore ────────────
+    let missing = uninventoried(&root);
+    println!(
+        "\n  files under docs/, probes/ and the top-level documents that publish\n  \
+         a digest and are NOT in the inventory ({}). This is a LIST, not a\n  \
+         verdict — nothing here is failing, and the category of a number is\n  \
+         never inferred from where it lives:",
+        missing.len()
+    );
+    for (path, n) in &missing {
+        println!("    {path:<52} {n} digest line(s)");
+    }
+
     if findings.is_empty() {
         println!(
-            "\n  {} live claim(s) re-derived and agree; {snapshots} dated \
-             snapshot(s) carry provenance.",
-            live.len()
+            "\n  {} live claim(s) re-derived from the command published beside \
+             them and agree;\n  {snapshots} dated snapshot(s) carry a date and a \
+             build, of which {} could\n  never be re-derived by anything here.",
+            live.len(),
+            out_of_tree.len()
         );
         return Ok(true);
     }
@@ -885,4 +1064,346 @@ fn wrap(text: &str, width: usize) -> Vec<String> {
         out.push(String::new());
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// What the shipped binary actually prints, so the extractors are pinned
+    /// against the real format rather than against a convenient invention. If
+    /// the CLI's output shape changes, these tests are where it surfaces.
+    ///
+    /// Measured on this host: stdout, then `env_logger`'s stderr line. The
+    /// output shape is *not* stable across history — at `59cfd8f` there was no
+    /// `run` line at all — which is exactly why the gate reads by substring
+    /// and fails closed when a line is absent.
+    const REPLAY_TRANSCRIPT: &str = "\
+straf3 replay (probes/coil-course/results/coil-run.txt)
+  commands      864
+  rate          125 Hz (8 ms per command)
+  profile       cpm
+  world         Map
+final state
+  tick          864
+  time          6912 ms
+  run           5096 ms  (5.096 s, start 1800 ms, finish 6896 ms)
+  origin        23.528534 3409.000000 38.738361
+  checksum      0xf3cabd183c90d8d7
+[INFO  straf3_game::scene] map: 26 hulls, 4 triggers, collision digest 0x47263b8845d8bb4b
+";
+
+    fn findings(text: &str) -> Vec<String> {
+        scan("f.txt", text)
+            .findings
+            .into_iter()
+            .map(|f| f.detail)
+            .collect()
+    }
+
+    // ── the mandatory-marking rule ──────────────────────────────────────────
+
+    #[test]
+    fn an_unmarked_digest_is_a_failure() {
+        // The whole premise: inside an inventoried file, a number that does not
+        // declare what it is cannot be allowed to sit there quietly.
+        let f = findings("  checksum 0x9a854d1a3653d8b7\n");
+        assert_eq!(f.len(), 1, "{f:?}");
+        assert!(f[0].contains("unmarked digest"), "{}", f[0]);
+    }
+
+    #[test]
+    fn a_line_with_no_digest_needs_no_marker() {
+        // The rule must not make ordinary prose unwritable.
+        assert!(findings("the run took 5096 ms and finished.\n").is_empty());
+    }
+
+    // ── live claims ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn a_live_claim_carries_its_published_value_and_kind() {
+        let s = scan(
+            "f.txt",
+            "# straf3:claim kind=coil-replay-checksum\n  checksum 0x9a854d1a3653d8b7\n",
+        );
+        assert!(s.findings.is_empty(), "{:?}", s.findings);
+        assert_eq!(s.live.len(), 1);
+        assert_eq!(s.live[0].published, "0x9a854d1a3653d8b7");
+        assert_eq!(s.live[0].kind, "coil-replay-checksum");
+        assert_eq!(s.live[0].line, 2, "the value's line, not the marker's");
+    }
+
+    #[test]
+    fn an_unknown_kind_is_a_failure_and_not_a_skip() {
+        // A claim nothing can re-derive is precisely what this gate refuses. If
+        // this ever became a skip, the gate would go green on a number it never
+        // looked at.
+        let f = findings("# straf3:claim kind=invented-yesterday\n  0x9a854d1a3653d8b7\n");
+        assert!(f.iter().any(|d| d.contains("unknown claim kind")), "{f:?}");
+    }
+
+    #[test]
+    fn a_claim_without_a_kind_is_a_failure() {
+        let f = findings("# straf3:claim\n  0x9a854d1a3653d8b7\n");
+        assert!(f.iter().any(|d| d.contains("without `kind=`")), "{f:?}");
+    }
+
+    #[test]
+    fn a_run_time_claim_reads_an_integer_rather_than_a_digest() {
+        let s = scan(
+            "f.txt",
+            "# straf3:claim kind=coil-replay-ms\n  run 5096 ms\n",
+        );
+        assert!(s.findings.is_empty(), "{:?}", s.findings);
+        assert_eq!(s.live[0].published, "5096");
+    }
+
+    #[test]
+    fn a_claim_whose_value_line_holds_no_such_value_is_a_failure() {
+        // A digest where an integer was promised. Silently reading `0` out of
+        // `0x9a85...` and comparing that against a run time would be a false
+        // pass, which is the one outcome this module may not produce.
+        let f = findings("# straf3:claim kind=coil-replay-ms\n  checksum 0x9a854d1a3653d8b7\n");
+        assert!(f.iter().any(|d| d.contains("no integer value")), "{f:?}");
+    }
+
+    // ── snapshots are checked, for something else ───────────────────────────
+
+    #[test]
+    fn a_snapshot_without_provenance_is_a_failure() {
+        // The heart of the design. A snapshot with no date and no build is
+        // indistinguishable from a stale live claim — which is how coil.txt's
+        // number went wrong for nine days without anyone being able to tell.
+        let f = findings("# straf3:snapshot\n  0x9a854d1a3653d8b7\n");
+        assert!(f.iter().any(|d| d.contains("needs both")), "{f:?}");
+    }
+
+    #[test]
+    fn a_snapshot_missing_only_the_build_is_still_a_failure() {
+        let f = findings("# straf3:snapshot taken=2026-08-16\n  0x9a854d1a3653d8b7\n");
+        assert!(f.iter().any(|d| d.contains("needs both")), "{f:?}");
+    }
+
+    #[test]
+    fn malformed_provenance_is_a_failure() {
+        for bad in [
+            "# straf3:snapshot taken=August build=59cfd8f",
+            "# straf3:snapshot taken=2026-13-99 build=59cfd8f",
+            "# straf3:snapshot taken=2026-08-16 build=xyz",
+            "# straf3:snapshot taken=2026-08-16 build=59cf",
+        ] {
+            let f = findings(&format!("{bad}\n  0x9a854d1a3653d8b7\n"));
+            assert!(!f.is_empty(), "accepted malformed provenance: {bad}");
+        }
+    }
+
+    #[test]
+    fn a_well_formed_snapshot_passes_and_is_counted() {
+        let s = scan(
+            "f.txt",
+            "# straf3:snapshot taken=2026-08-16 build=59cfd8f\n  0x9a854d1a3653d8b7\n",
+        );
+        assert!(s.findings.is_empty(), "{:?}", s.findings);
+        assert_eq!(s.snapshots, 1);
+        assert!(s.live.is_empty(), "a snapshot is never re-derived");
+    }
+
+    // ── the load-bearing property ───────────────────────────────────────────
+
+    #[test]
+    fn the_same_digest_is_live_in_one_file_and_a_snapshot_in_another() {
+        // This is why the category is declared and never detected.
+        // `0x9a854d1a3653d8b7` is a live claim in PLAYING.md and a dated
+        // snapshot in coil.txt — identical text, opposite fates. Any rule that
+        // inferred the category from the number, the path or a nearby date
+        // would get one of these two wrong, and silently.
+        let live = scan(
+            "PLAYING.md",
+            "<!-- straf3:claim kind=coil-replay-checksum -->\n  checksum 0x9a854d1a3653d8b7\n",
+        );
+        let snap = scan(
+            "coil.txt",
+            "# straf3:snapshot taken=2026-08-16 build=59cfd8f\n  checksum 0x9a854d1a3653d8b7\n",
+        );
+        assert_eq!(live.live.len(), 1);
+        assert_eq!(live.snapshots, 0);
+        assert_eq!(snap.live.len(), 0);
+        assert_eq!(snap.snapshots, 1);
+        assert!(live.findings.is_empty() && snap.findings.is_empty());
+    }
+
+    #[test]
+    fn a_blanket_snapshot_covers_captured_output_without_editing_it() {
+        // `scope=eof` is what lets a probe's own stdout be declared wholesale.
+        // Requiring a marker per line would mean editing the captured output,
+        // destroying the one property that makes it evidence.
+        let s = scan(
+            "coil.txt",
+            "# straf3:snapshot taken=2026-08-16 build=59cfd8f scope=eof\n\
+             \n\
+             collision digest 0x47263b8845d8bb4b\n\
+             some prose\n\
+             final checksum 0x9a854d1a3653d8b7\n",
+        );
+        assert!(s.findings.is_empty(), "{:?}", s.findings);
+        assert_eq!(s.snapshots, 2);
+    }
+
+    // ── markers that promise coverage they do not deliver ───────────────────
+
+    #[test]
+    fn a_marker_governing_nothing_is_a_failure() {
+        // A marker binding to nothing reads as coverage that does not exist,
+        // which is worse than no marker at all.
+        let f = findings("# straf3:claim kind=coil-replay-checksum\n");
+        assert!(f.iter().any(|d| d.contains("governs nothing")), "{f:?}");
+    }
+
+    #[test]
+    fn two_markers_in_a_row_means_the_first_governs_nothing() {
+        let f = findings(
+            "# straf3:claim kind=coil-replay-checksum\n\
+             # straf3:claim kind=coil-replay-checksum\n\
+             0x9a854d1a3653d8b7\n",
+        );
+        assert!(f.iter().any(|d| d.contains("governs nothing")), "{f:?}");
+    }
+
+    #[test]
+    fn an_unknown_scope_or_measured_value_is_a_failure() {
+        // A typo'd `scope=EOF` would silently degrade a blanket marker into a
+        // point marker and leave every line below it unmarked; a typo'd
+        // `measured=out_of_tree` would silently claim in-tree provenance.
+        for bad in [
+            "# straf3:snapshot taken=2026-08-16 build=59cfd8f scope=all",
+            "# straf3:snapshot taken=2026-08-16 build=59cfd8f measured=out_of_tree",
+        ] {
+            let f = findings(&format!("{bad}\n0x9a854d1a3653d8b7\n"));
+            assert!(!f.is_empty(), "accepted: {bad}");
+        }
+    }
+
+    #[test]
+    fn an_out_of_tree_snapshot_is_named_rather_than_merely_counted() {
+        // ARCHITECTURE.md §1.2's digests were measured on a deleted /tmp copy.
+        // That must be sayable without becoming a silent exemption, so every
+        // one is named on every run.
+        let s = scan(
+            "ARCHITECTURE.md",
+            "<!-- straf3:snapshot taken=2026-08-14 build=a0e62d4 measured=out-of-tree -->\n\
+             glibc 0x2af318592c222e64\n",
+        );
+        assert!(s.findings.is_empty(), "{:?}", s.findings);
+        assert_eq!(s.out_of_tree.len(), 1);
+        assert_eq!(s.out_of_tree[0].line, 2);
+        assert_eq!(s.out_of_tree[0].taken, "2026-08-14");
+    }
+
+    // ── syntax independence ─────────────────────────────────────────────────
+
+    #[test]
+    fn markers_work_in_any_comment_syntax() {
+        // Markdown, shell-style text files and Rust all have to be able to
+        // carry one, so the gate reads the bare token and ignores the wrapper.
+        for m in [
+            "<!-- straf3:claim kind=coil-replay-checksum -->",
+            "# straf3:claim kind=coil-replay-checksum",
+            "// straf3:claim kind=coil-replay-checksum",
+            "/* straf3:claim kind=coil-replay-checksum */",
+        ] {
+            let s = scan("f", &format!("{m}\n  0x9a854d1a3653d8b7\n"));
+            assert!(s.findings.is_empty(), "{m} -> {:?}", s.findings);
+            assert_eq!(s.live.len(), 1, "{m}");
+        }
+    }
+
+    // ── the value readers ───────────────────────────────────────────────────
+
+    #[test]
+    fn find_digest_wants_exactly_sixteen_hex_digits() {
+        assert_eq!(
+            find_digest("checksum 0x9a854d1a3653d8b7").as_deref(),
+            Some("9a854d1a3653d8b7")
+        );
+        assert_eq!(find_digest("0x9a854d1a3653d8b").as_deref(), None, "15");
+        assert_eq!(find_digest("0x9a854d1a3653d8b77").as_deref(), None, "17");
+        assert_eq!(find_digest("bit 0x04").as_deref(), None);
+        assert_eq!(find_digest("no digest here").as_deref(), None);
+        // Case-folded, so a document may write either.
+        assert_eq!(
+            find_digest("0X9A854D1A3653D8B7").as_deref(),
+            Some("9a854d1a3653d8b7")
+        );
+    }
+
+    #[test]
+    fn find_integer_ignores_hex_literals() {
+        // `0x9a85...` starts with a digit. A naive scan would read `0`.
+        assert_eq!(find_integer("checksum 0x9a854d1a3653d8b7"), None);
+        assert_eq!(find_integer("  run  5096 ms  (5.096 s)"), Some(5096));
+        assert_eq!(find_integer("0x47263b8845d8bb4b then 26"), Some(26));
+    }
+
+    // ── the comparator, against the real transcript ─────────────────────────
+
+    #[test]
+    fn each_kind_reads_its_own_field_out_of_one_replay() {
+        // Three claims, one command. The grouping is what keeps the gate from
+        // building the client once per number.
+        let got = |name: &str| extract(kind(name).unwrap(), REPLAY_TRANSCRIPT).unwrap();
+        assert_eq!(got("coil-replay-checksum"), "0xf3cabd183c90d8d7");
+        assert_eq!(got("coil-replay-ms"), "5096");
+        assert_eq!(got("coil-collision-digest"), "0x47263b8845d8bb4b");
+    }
+
+    #[test]
+    fn extract_fails_closed_when_the_output_line_is_absent() {
+        // The 59cfd8f case, made into a test: that build printed no `run` line
+        // at all. Reading a missing field as "no change" would be the exact
+        // false pass this module exists to prevent.
+        let without_run = REPLAY_TRANSCRIPT
+            .lines()
+            .filter(|l| !l.contains("  run "))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let e = extract(kind("coil-replay-ms").unwrap(), &without_run).unwrap_err();
+        assert!(e.contains("no line containing"), "{e}");
+    }
+
+    #[test]
+    fn a_value_that_moved_is_visible_to_the_comparator() {
+        // The gate's whole job, in one assertion: what a document published and
+        // what the tree produces now are different strings.
+        let published = "0x9a854d1a3653d8b7";
+        let current = extract(kind("coil-replay-checksum").unwrap(), REPLAY_TRANSCRIPT).unwrap();
+        assert_ne!(published, current);
+    }
+
+    // ── the table itself ────────────────────────────────────────────────────
+
+    #[test]
+    fn every_kind_is_named_once_and_is_reachable() {
+        let mut names: Vec<&str> = KINDS.iter().map(|k| k.name).collect();
+        let before = names.len();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), before, "two kinds share a name");
+        for k in KINDS {
+            assert!(kind(k.name).is_some());
+            assert!(
+                !k.reproducer.command_line().is_empty(),
+                "{} has no published command",
+                k.name
+            );
+        }
+    }
+
+    #[test]
+    fn the_inventory_is_not_empty_and_names_real_paths() {
+        // An empty inventory is a gate that checks nothing while exiting 0.
+        assert!(!INVENTORY.is_empty());
+        for f in INVENTORY {
+            assert!(!f.contains('\\'), "{f} must use forward slashes");
+        }
+    }
 }
