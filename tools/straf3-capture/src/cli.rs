@@ -318,7 +318,9 @@ mod tests {
     #[test]
     fn the_process_check_can_be_renamed_or_waived_but_not_emptied() {
         match options(&["--out", "s.png", "--process", "straf3-dev.exe"]).source {
-            Source::Window { process, .. } => assert_eq!(process.as_deref(), Some("straf3-dev.exe")),
+            Source::Window { process, .. } => {
+                assert_eq!(process.as_deref(), Some("straf3-dev.exe"))
+            }
             other => panic!("expected a window source, got {other:?}"),
         }
         // Waiving it is a decision someone has to spell out.

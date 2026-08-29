@@ -97,7 +97,10 @@ fn the_dash_arms_on_flat_ground_at_zero_speed() {
 fn the_slide_never_arms_below_the_entry_speed_on_flat_ground() {
     let p = PhysicsProfile::experimental();
     let world = FlatGround::at(s(0.0));
-    assert!(p.slide_entry_speed > p.max_speed, "premise: entry above the cap");
+    assert!(
+        p.slide_entry_speed > p.max_speed,
+        "premise: entry above the cap"
+    );
 
     let mut st = settled(&world, &p);
     // Accelerate forward on the ground for four seconds: ground acceleration

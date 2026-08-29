@@ -205,8 +205,9 @@ fn run(request: Request) -> ExitCode {
                          Nothing was written — this tool captures a window, never the \
                          screen.",
                         match &process {
-                            Some(exe) =>
-                                format!(" whose title contains {title:?} and which belongs to {exe}"),
+                            Some(exe) => format!(
+                                " whose title contains {title:?} and which belongs to {exe}"
+                            ),
                             None => format!(" whose title contains {title:?}"),
                         }
                     );

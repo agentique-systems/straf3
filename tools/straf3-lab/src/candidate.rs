@@ -546,7 +546,15 @@ fn walk_pair(
     hold: bool,
 ) -> Paired {
     walk_pair_perturbed(
-        mech, ctx, anchor, aim, invoke_at, commands, hold, None, s(0.0),
+        mech,
+        ctx,
+        anchor,
+        aim,
+        invoke_at,
+        commands,
+        hold,
+        None,
+        s(0.0),
     )
 }
 
@@ -1118,12 +1126,7 @@ pub fn sweep(mech: Mechanic, ctx: &Context, entry: Scalar) -> Cell {
 /// down from the invoking command to the horizon. It does nothing for the dash
 /// or the wall jump, neither of which reads crouch.
 #[must_use]
-pub fn sweep_with(
-    mech: Mechanic,
-    ctx: &Context,
-    anchors: &[Option<Anchor>],
-    hold: bool,
-) -> Cell {
+pub fn sweep_with(mech: Mechanic, ctx: &Context, anchors: &[Option<Anchor>], hold: bool) -> Cell {
     let window = mech.window_commands();
     let total = window + HORIZON;
 
@@ -1180,11 +1183,8 @@ pub fn sweep_with(
     // produced the identical row, the timing axis selected nothing and any
     // window read off it is an artefact of sweeping a parameter the player does
     // not control here.
-    cell.timing_degenerate = cell.candidate.len() > 1
-        && cell
-            .candidate
-            .windows(2)
-            .all(|pair| pair[0] == pair[1]);
+    cell.timing_degenerate =
+        cell.candidate.len() > 1 && cell.candidate.windows(2).all(|pair| pair[0] == pair[1]);
     cell
 }
 

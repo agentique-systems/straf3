@@ -27,7 +27,7 @@
 use straf3_sim::num::{Scalar, s};
 
 use crate::candidate::{
-    self, AIMS, AIM_STEP, Anchor, Cell, Context, ENTRY_SPEEDS, HORIZON, Kind, MATERIAL, Mechanic,
+    self, AIM_STEP, AIMS, Anchor, Cell, Context, ENTRY_SPEEDS, HORIZON, Kind, MATERIAL, Mechanic,
     NAIVE_HALF_WIDTH, Policy, Reached, TOP_FRACTION, Technique,
 };
 use crate::dataset::{Dataset, Measurement, Section, Table, diff};
@@ -71,8 +71,8 @@ struct Work {
 fn work(mech: Mechanic, ctx: &Context, entry: Scalar) -> Work {
     let anchors = candidate::anchors(mech, ctx, entry);
     let tap = candidate::sweep_with(mech, ctx, &anchors, false);
-    let hold = (mech == Mechanic::CrouchSlide)
-        .then(|| candidate::sweep_with(mech, ctx, &anchors, true));
+    let hold =
+        (mech == Mechanic::CrouchSlide).then(|| candidate::sweep_with(mech, ctx, &anchors, true));
     let menu = Policy::all()
         .into_iter()
         .map(|p| (p, candidate::best_policy(mech, ctx, &anchors, p)))
@@ -328,7 +328,10 @@ fn sweep_table(section: &mut Section, mech: Mechanic, contexts: &[Context], work
             let cell = &w.tap;
             let key = cell_key(mech, ctx, entry);
 
-            section.record(Measurement::flag(format!("{key}.reachable"), cell.reachable));
+            section.record(Measurement::flag(
+                format!("{key}.reachable"),
+                cell.reachable,
+            ));
             if !cell.reachable {
                 table.push(vec![
                     ctx.name.to_string(),
@@ -393,13 +396,13 @@ fn sweep_table(section: &mut Section, mech: Mechanic, contexts: &[Context], work
                         format!("{key}.best_aim_deg"),
                         s(a as f32 * AIM_STEP),
                     ));
-                    section.record(Measurement::flag(
-                        format!("{key}.material"),
-                        g >= MATERIAL,
-                    ));
+                    section.record(Measurement::flag(format!("{key}.material"), g >= MATERIAL));
                 }
                 None => {
-                    section.record(Measurement::label(format!("{key}.best_delta_ups"), "never-fired"));
+                    section.record(Measurement::label(
+                        format!("{key}.best_delta_ups"),
+                        "never-fired",
+                    ));
                     section.record(Measurement::flag(format!("{key}.material"), false));
                 }
             }
@@ -661,7 +664,10 @@ fn w2_and_g5b(section: &mut Section, mech: Mechanic, contexts: &[Context], work:
                     format!("{:.1}%", g * s(100.0))
                 }
                 _ => {
-                    section.record(Measurement::label(format!("{key}.w2_gap"), "not-meaningful"));
+                    section.record(Measurement::label(
+                        format!("{key}.w2_gap"),
+                        "not-meaningful",
+                    ));
                     "not meaningful".to_string()
                 }
             };
@@ -820,10 +826,7 @@ fn w3(section: &mut Section, mech: Mechanic, contexts: &[Context], work: &[Vec<W
                         if d > slope_max {
                             slope_max = d;
                         }
-                        section.record(Measurement::ratio(
-                            format!("{key}.w3_entry_slope"),
-                            d,
-                        ));
+                        section.record(Measurement::ratio(format!("{key}.w3_entry_slope"), d));
                         Some(d)
                     }
                     _ => None,
@@ -1012,7 +1015,10 @@ fn w5(section: &mut Section, mech: Mechanic, contexts: &[Context], work: &[Vec<W
             let candidate_abs = w.tap.candidate_best();
             let over = candidate_abs.map(|c| c - best_technique);
             if let Some(o) = over {
-                section.record(Measurement::ups(format!("{key}.w5_over_best_technique_ups"), o));
+                section.record(Measurement::ups(
+                    format!("{key}.w5_over_best_technique_ups"),
+                    o,
+                ));
             }
             table.push(vec![
                 ctx.name.to_string(),
@@ -1037,7 +1043,12 @@ fn w5(section: &mut Section, mech: Mechanic, contexts: &[Context], work: &[Vec<W
              not zero.",
             mech.title()
         ),
-        &["technique", "policy", "domain cells", "not beaten materially"],
+        &[
+            "technique",
+            "policy",
+            "domain cells",
+            "not beaten materially",
+        ],
     );
     for technique in Technique::all() {
         let policy = technique.policy();
@@ -1070,7 +1081,11 @@ fn w5(section: &mut Section, mech: Mechanic, contexts: &[Context], work: &[Vec<W
             survived as u32,
         ));
         section.record(Measurement::count(
-            format!("candidate.{}.w5.{}.domain_cells", mech.key(), technique.key()),
+            format!(
+                "candidate.{}.w5.{}.domain_cells",
+                mech.key(),
+                technique.key()
+            ),
             cells as u32,
         ));
         survival.push(vec![
@@ -1206,7 +1221,10 @@ fn w6(section: &mut Section, mech: Mechanic, contexts: &[Context], work: &[Vec<W
             }
         }
         let key = format!("candidate.{}.w6.e{}", mech.key(), pad(entry as u32, 4));
-        section.record(Measurement::count(format!("{key}.context_pairs"), pairs as u32));
+        section.record(Measurement::count(
+            format!("{key}.context_pairs"),
+            pairs as u32,
+        ));
         section.record(Measurement::count(
             format!("{key}.timing_disjoint_pairs"),
             timing_disjoint as u32,
@@ -1370,7 +1388,10 @@ fn g5a(section: &mut Section, mech: Mechanic, contexts: &[Context]) {
             format!("{key}.available_commands"),
             e.available_commands as u32,
         ));
-        section.record(Measurement::ups(format!("{key}.peak_speed_ups"), e.max_speed));
+        section.record(Measurement::ups(
+            format!("{key}.peak_speed_ups"),
+            e.max_speed,
+        ));
         table.push(vec![
             ctx.name.to_string(),
             e.arming_events.to_string(),
@@ -1385,8 +1406,7 @@ fn g5a(section: &mut Section, mech: Mechanic, contexts: &[Context]) {
 // ── G2 ─────────────────────────────────────────────────────────────────────
 
 fn g2(section: &mut Section, mech: Mechanic, control_set: &Dataset) {
-    let candidate_set =
-        Dataset::from_sections(&super::vocabulary(&[("p", mech.profile())]));
+    let candidate_set = Dataset::from_sections(&super::vocabulary(&[("p", mech.profile())]));
     let changes = diff(control_set, &candidate_set);
     let key = format!("candidate.{}.g2", mech.key());
     section.record(Measurement::count(
@@ -1567,7 +1587,10 @@ fn g7(
             // a boundary the player can perceive, and nobody can check that
             // against a height without knowing where the step was found.
             if let Some(st) = aim_step {
-                section.record(Measurement::ups(format!("{key}.g7_aim_refined_ups"), st.refined));
+                section.record(Measurement::ups(
+                    format!("{key}.g7_aim_refined_ups"),
+                    st.refined,
+                ));
                 section.record(Measurement::degrees(format!("{key}.g7_aim_at_deg"), st.at));
                 worst_aim = worst_aim.max(st.refined);
             }
@@ -1660,10 +1683,7 @@ fn g7(
         ups(worst_geometry),
         ups(predicted_worst),
         ups(self_test.overbounce.step.map_or(s(0.0), |st| st.refined)),
-        self_test
-            .overbounce
-            .step
-            .map_or(s(0.0), |st| st.width),
+        self_test.overbounce.step.map_or(s(0.0), |st| st.width),
     ));
 }
 
@@ -1775,7 +1795,10 @@ fn retuned_dash(section: &mut Section, contexts: &[Context], work: &[Vec<Work>])
                     "never-fired",
                 )),
             }
-            section.record(Measurement::flag(format!("{key}.reachable"), after.reachable));
+            section.record(Measurement::flag(
+                format!("{key}.reachable"),
+                after.reachable,
+            ));
             // How many of the 72 aims still arm the dash. This is the number
             // that explains the shape of the retune: the fall to the arming
             // landing is itself a strafejump, so an aim held off the velocity
@@ -1784,7 +1807,10 @@ fn retuned_dash(section: &mut Section, contexts: &[Context], work: &[Vec<Work>])
                 .iter()
                 .filter(|v| v.is_some_and(|v| v >= DASH_ENTRY_SPEED))
                 .count();
-            section.record(Measurement::count(format!("{key}.aims_armed"), armed as u32));
+            section.record(Measurement::count(
+                format!("{key}.aims_armed"),
+                armed as u32,
+            ));
             let (bh, bn) = w.tap.naive_harm(Mechanic::Dash);
             let (ah, an) = after.naive_harm(Mechanic::Dash);
             section.record(Measurement::count(format!("{key}.naive_harmed"), ah as u32));
@@ -2046,7 +2072,10 @@ fn tap_and_stand(section: &mut Section, contexts: &[Context], work: &[Vec<Work>]
             }
             let (th, tn) = tap.naive_harm(Mechanic::CrouchSlide);
             let (hh, hn) = hold.naive_harm(Mechanic::CrouchSlide);
-            section.record(Measurement::count(format!("{key}.hold_naive_harmed"), hh as u32));
+            section.record(Measurement::count(
+                format!("{key}.hold_naive_harmed"),
+                hh as u32,
+            ));
             let advantage = match (tb, hb) {
                 (Some(t), Some(h)) => {
                     let d = t - h;
@@ -2077,12 +2106,18 @@ fn tap_and_stand(section: &mut Section, contexts: &[Context], work: &[Vec<Work>]
         }
     }
     section.table(table);
-    section.record(Measurement::count("candidate.crouch_slide.tap.cells_won", tap_wins as u32));
+    section.record(Measurement::count(
+        "candidate.crouch_slide.tap.cells_won",
+        tap_wins as u32,
+    ));
     section.record(Measurement::count(
         "candidate.crouch_slide.hold.cells_won",
         hold_wins as u32,
     ));
-    section.record(Measurement::count("candidate.crouch_slide.tap_hold.cells_tied", ties as u32));
+    section.record(Measurement::count(
+        "candidate.crouch_slide.tap_hold.cells_tied",
+        ties as u32,
+    ));
     section.record(Measurement::ups(
         "candidate.crouch_slide.tap.largest_advantage_ups",
         if worst_advantage > Scalar::NEG_INFINITY {
@@ -2136,12 +2171,18 @@ fn tap_and_stand(section: &mut Section, contexts: &[Context], work: &[Vec<Work>]
                 if hold_crouch { "hold" } else { "tap" },
                 pad(*entry as u32, 4)
             );
-            section.record(Measurement::count(format!("{key}.commands"), l.commands as u32));
+            section.record(Measurement::count(
+                format!("{key}.commands"),
+                l.commands as u32,
+            ));
             section.record(Measurement::count(
                 format!("{key}.standing_commands"),
                 l.standing_commands as u32,
             ));
-            section.record(Measurement::ups(format!("{key}.exit_speed_ups"), l.exit_speed));
+            section.record(Measurement::ups(
+                format!("{key}.exit_speed_ups"),
+                l.exit_speed,
+            ));
             section.record(Measurement::ups(
                 format!("{key}.lowest_speed_ups"),
                 l.lowest_speed,

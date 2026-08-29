@@ -65,7 +65,10 @@ fn measure_jump(profile: &PhysicsProfile, ms: u16) -> Jump {
     let rest_z = rest.player.origin.z;
 
     let mut st = step(&rest, &jump_cmd(ms), &world, profile);
-    assert!(!st.player.ground.is_grounded(), "premise: the jump left the ground");
+    assert!(
+        !st.player.ground.is_grounded(),
+        "premise: the jump left the ground"
+    );
 
     let mut apex = st.player.origin.z;
     let mut commands: u32 = 1;

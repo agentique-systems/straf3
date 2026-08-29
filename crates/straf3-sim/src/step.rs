@@ -2055,7 +2055,10 @@ mod tests {
             held.player.timers.since_landed_ms < 2000,
             "premise: the run should have landed at some point"
         );
-        assert!(held.player.jump_held, "premise: the input was held throughout");
+        assert!(
+            held.player.jump_held,
+            "premise: the input was held throughout"
+        );
     }
 
     #[test]
@@ -2135,7 +2138,10 @@ mod tests {
         let down = vec3(s(0.0), s(0.0), s(-1.0));
         let side = vec3(s(0.0), s(1.0), s(0.0));
 
-        assert!(down.z < p.wall_normal_max, "premise: a signed test admits it");
+        assert!(
+            down.z < p.wall_normal_max,
+            "premise: a signed test admits it"
+        );
         assert!(down.z.abs() > p.wall_normal_max, "a ceiling is not a wall");
         assert!(up.z.abs() > p.wall_normal_max, "a floor is not a wall");
         assert!(side.z.abs() <= p.wall_normal_max, "a wall is a wall");
