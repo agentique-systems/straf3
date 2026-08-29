@@ -1,0 +1,25 @@
+# Standalone on purpose, same reasoning as probes/coil-course/Cargo.toml: the
+# empty [workspace] table excludes this crate from the root workspace, so a
+# probe can never perturb what the shipped build resolves.
+[workspace]
+
+[package]
+name = "course-lab"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "course-lab"
+path = "src/main.rs"
+
+[dependencies]
+# The SHIPPED compiler, deliberately, and unlike probes/coil-course, which
+# carries its own independent brush-to-hull derivation. That probe was written
+# while the compiler was in flight and its independence is the point of it; this
+# one asks a different question. Every claim here is about the world a player
+# actually runs in — `CompiledMap::collider()`'s — so a second derivation would
+# be measuring a world nobody plays.
+straf3-map = { path = "../../crates/straf3-map" }
+straf3-sim = { path = "../../crates/straf3-sim" }
+straf3-collision = { path = "../../crates/straf3-collision" }
