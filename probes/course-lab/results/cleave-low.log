@@ -1,0 +1,18 @@
+profile        straf3 (canon), 125 Hz; equal to cpm today
+== search ==
+goal finish (0x00000002)  progress hull distance to next goal volume  alphabet jump-only  horizon 40 stride 8 budget 8000  controls 180
+
+  window end     run ms  volume
+        1856         56  t_start
+        3968       2168  t_cp_fork
+
+touched mask   0x00000005
+clock          RUNNING from 1800 ms, 62200 ms at cut-off
+end            Vec3(1045.087, 3505.0, 105.1866)  1017 ups  peak 1017 ups  after 64000 ms
+
+coverage       stop=BudgetExhausted  states explored 180000  commands simulated 7208000
+               horizon 40 ticks  stride 8  controls 180  alphabet jump-only  budget 8000 ticks
+NEGATIVE: no line satisfying the goal was found at this budget. That is a
+statement about this search, not a proof that none exists.
+final checksum 0x8ffb906652d5f6ad
+wrote results/cleave-low.txt (244113 bytes, 6834 cmd lines)
