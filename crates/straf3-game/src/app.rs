@@ -308,8 +308,20 @@ impl Default for Options {
     fn default() -> Self {
         Self {
             world: WorldChoice::default(),
-            profile: PhysicsProfile::cpm(),
-            profile_name: "cpm".to_owned(),
+            // Straf3's own frozen canon, per `docs/movement-canon.md` Part 3 —
+            // which also made it `straf3-sim`'s `Default`.
+            //
+            // Spelled `straf3()` rather than `PhysicsProfile::default()`, for
+            // the reason canon spelled it out rather than writing
+            // `Self::cpm()`: the name on the line below is a literal that goes
+            // into the `.s3d` header, and delegating would let a change to
+            // `Default` move the constants while the recorded name stayed
+            // `straf3` — a run labelled with a profile it was not simulated
+            // under, which is the artefact this repository has already had to
+            // delete once. `the_default_session_names_the_profile_it_simulates`
+            // is the check.
+            profile: PhysicsProfile::straf3(),
+            profile_name: "straf3".to_owned(),
             rate: crate::tick::DEFAULT_RATE,
             record: false,
             pb_dir: Some(crate::pb::DEFAULT_DIR.to_owned()),
@@ -518,25 +530,34 @@ impl App {
     /// Say what a non-canonical profile means before anyone plays under it.
     ///
     /// Two facts, and neither is inferable from the window: an experimental
-    /// time is never ranked against `cpm` or `vq3` (spec D2), and — until
-    /// `straf3-sim` lands the constants — the profile is a placeholder that
-    /// plays exactly like CPM. A session that felt identical to canon and said
-    /// nothing would be indistinguishable from one where the new mechanics
-    /// simply did nothing, which is the single most misleading thing this flag
-    /// could do.
+    /// time is never ranked against a canon one (spec D2), and the mechanics
+    /// that make it feel different from canon are ones canon **rejected**.
+    /// Somebody who found `--profile experimental` in the usage text and liked
+    /// how it played would otherwise have no way to learn that it is not where
+    /// the game is going.
+    ///
+    /// This used to carry a third line, conditional on
+    /// `profile::is_stub()`, saying the profile was still CPM's constants
+    /// because `straf3-sim` had not landed its own. It has landed them, so the
+    /// condition is permanently false and the line said something untrue about
+    /// the world. What the check was protecting — that `experimental` is not
+    /// canon wearing another name — is now asserted in
+    /// `experimental_is_the_rejected_candidates_switched_on_not_canon_renamed`,
+    /// where it fails on the commit that breaks it rather than only for
+    /// whoever happens to play that profile.
     fn announce_profile(profile_name: &str) {
         if crate::profile::is_canon(profile_name) {
             return;
         }
         log::warn!(
             "profile `{profile_name}` is not canon: its personal bests are kept under \
-             their own name and are never ranked against a cpm or vq3 time"
+             their own name and are never ranked against a canon time"
         );
-        if profile_name == "experimental" && crate::profile::is_stub() {
+        if profile_name == "experimental" {
             log::warn!(
-                "`experimental` is currently CPM's constants — straf3-sim has not landed \
-                 PhysicsProfile::experimental() yet, so this session is experimental in \
-                 name and record-keeping only, not in how it plays"
+                "`experimental` carries the three candidate mechanics canon Part 2 \
+                 rejected — crouch slide, dash and wall jump. It is kept so they stay \
+                 measurable (tools/straf3-lab), not because they are returning"
             );
         }
     }
@@ -596,14 +617,16 @@ impl App {
         // enforce: `runs/<map>.<profile>.s3d` means a session never *opens*
         // another profile's record, but a file copied or renamed into this
         // namespace — or named by a URL — would be raced and ranked as if it
-        // belonged here. An experimental time is not a CPM time, so this is
+        // belonged here. An experimental time is not a canon time, so this is
         // refused by the name the recording carries rather than trusted to the
         // path it was found at.
         //
-        // The physics digest below would catch it once the profiles' constants
-        // actually differ. It does not while `experimental` is still CPM's
-        // constants (see `crate::profile::is_stub`), which is exactly why this
-        // check does not depend on it.
+        // The physics digest below cannot stand in for this, and the canon
+        // freeze is why: `straf3` and `cpm` are numerically equal, so a `cpm`
+        // recording renamed into a `straf3` session matches on digest and is
+        // separated by nothing but the name it carries. That was already the
+        // reason the check did not depend on the digest, back when the equal
+        // pair was `experimental` and `cpm` instead.
         if recording.physics().name != profile_name {
             log::warn!(
                 "not racing a run set under the `{}` profile in a `{profile_name}` session. \
@@ -1531,6 +1554,37 @@ mod tests {
     use super::*;
     use crate::replay::{ReplayOptions, parse, replay};
 
+    /// The default session's profile *name* and its profile *constants* are
+    /// two fields that could disagree, and the name is what a `.s3d` header
+    /// carries and what `runs/<map>.<profile>.s3d` is filed under. A build
+    /// where they disagreed would record every default run under a profile it
+    /// had not simulated — silently, and in a file that then travels as
+    /// evidence.
+    #[test]
+    fn the_default_session_names_the_profile_it_simulates() {
+        let options = Options::default();
+        assert_eq!(options.profile_name, "straf3");
+        assert_eq!(
+            crate::profile::by_name(&options.profile_name),
+            Some(options.profile),
+            "the default profile's name resolves to different constants than \
+             the default session runs"
+        );
+        // And a default run is rankable. `is_canon` is a separate table from
+        // `by_name`, so canon's own profile being absent from it is a thing
+        // that can happen without any other test noticing.
+        assert!(crate::profile::is_canon(&options.profile_name));
+        // The visible consequence of moving the default, pinned where somebody
+        // looking for it will find it: a default session's personal best is
+        // filed under canon's name, not `cpm`'s. `runs/coil.cpm.s3d` is a
+        // different file, is not touched, and is still what `--profile cpm`
+        // opens.
+        assert_eq!(
+            crate::pb::path_in(crate::pb::DEFAULT_DIR, "coil", &options.profile_name),
+            "runs/coil.straf3.s3d"
+        );
+    }
+
     /// A run long enough to leave the ground and land again, on the flat world
     /// — which is the only world a test in this process can rely on, since the
     /// map is a process-wide singleton (`scene::install`).
@@ -1596,7 +1650,7 @@ cmd 80 127 127 0 - 0 108.25
     #[test]
     fn a_played_session_matches_the_headless_replay_at_every_tick() {
         let fixture = parse(FIXTURE).unwrap();
-        let reference = replay(&fixture, &ReplayOptions::default()).unwrap();
+        let reference = replay(&fixture, &ReplayOptions::default()).unwrap().trace;
         assert_eq!(reference.len(), fixture.cmds.len() + 1);
 
         for schedule in HOSTILE_SCHEDULES {
@@ -1724,7 +1778,13 @@ cmd 80 127 127 0 - 0 108.25
         let options = Options::default();
         assert_eq!(options.rate, TickRate::HZ_125);
         assert_eq!(options.rate.command_millis(), 8);
-        assert_eq!(options.profile, PhysicsProfile::cpm());
+        // `straf3()`, not `cpm()`. The two are equal today, so this line passed
+        // unchanged when the default moved — which is exactly why it had to be
+        // changed by hand: the day `cpm()` is corrected against a CPMA demo,
+        // asserting `cpm()` here would fail and send the reader looking for a
+        // regression in the default rather than at the correction they just
+        // made. Canon and the reconstruction are not linked.
+        assert_eq!(options.profile, PhysicsProfile::straf3());
         assert_eq!(options.world, WorldChoice::Map);
         assert!(!options.record);
     }

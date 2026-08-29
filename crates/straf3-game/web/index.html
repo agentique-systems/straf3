@@ -81,9 +81,14 @@
 
         // `?p=<family>@<digest16>` — split on the last `@` so a family name
         // could contain one without breaking the pin.
+        //
+        // The `|| "straf3"` matches the client's own DEFAULT_FAMILY (web.rs).
+        // This shell always sends a family, so the client's default is never
+        // reached from here; two defaults that could disagree about what a
+        // bare link runs are worse than one repeated on purpose.
         const p = params.get("p") || "";
         const at = p.lastIndexOf("@");
-        const family = (at === -1 ? p : p.slice(0, at)) || "cpm";
+        const family = (at === -1 ? p : p.slice(0, at)) || "straf3";
         const digest = at === -1 ? null : p.slice(at + 1);
 
         return {

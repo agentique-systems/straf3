@@ -30,10 +30,12 @@
 //! by sharing code. That is the stronger check anyway: shared code cannot
 //! disagree, so it cannot demonstrate agreement.
 
-use straf3_sim::num::{Scalar, Vec3, s, vec3};
-use straf3_sim::{Buttons, PhysicsProfile, SimState, TickRate, UserCmd, ViewAngles};
+use std::fmt::Write as _;
 
-use crate::game::Game;
+use straf3_sim::num::{Scalar, Vec3, s, vec3};
+use straf3_sim::{Buttons, PhysicsProfile, SimState, TickRate, TriggerSet, UserCmd, ViewAngles};
+
+use crate::game::{Game, TriggerCrossing};
 use crate::scene::WorldChoice;
 use crate::tick::FixedStep;
 
@@ -71,6 +73,17 @@ pub struct Fixture {
 /// the arena lives above the line and the headless runner is below it.
 pub fn parse(text: &str) -> Result<Fixture, String> {
     let mut rate: Option<TickRate> = None;
+    // `cpm`, deliberately, and *not* the client's own default profile — which
+    // is `straf3` since the canon freeze. This is the default for a fixture
+    // that names no profile at all, and the fixture format belongs to
+    // `straf3-headless`, whose parser defaults to `cpm` too. Moving this one
+    // and not that one would make the same file replay under two different
+    // profile *names* in the two readers, which is the disagreement
+    // `crate::profile` exists to prevent — and the names are what a `.s3d`
+    // header and `runs/<map>.<profile>.s3d` are built from.
+    //
+    // Every fixture this client writes names its profile explicitly
+    // (`record::Recorder::to_fixture`), so this reaches hand-written files only.
     let mut profile = PhysicsProfile::cpm();
     let mut profile_name = "cpm".to_owned();
     let mut world = WorldChoice::Flat;
@@ -267,8 +280,8 @@ pub fn trace_line(state: &SimState, csv: bool) -> String {
     }
 }
 
-/// Run a fixture and return the state at every tick, starting with the state
-/// *before* the first command.
+/// Run a fixture and return the state at every tick — starting with the state
+/// *before* the first command — together with the timing volumes it crossed.
 ///
 /// Commands are pulled by the accumulator, not by a bare loop: the frame
 /// schedule decides how many are consumed each frame, exactly as the window
@@ -293,7 +306,7 @@ pub fn trace_line(state: &SimState, csv: bool) -> String {
 /// criterion-4 diff, a personal best — would be comparing against a world
 /// nobody played in, and nothing in the output says so loudly enough to stop
 /// a script.
-pub fn replay(fixture: &Fixture, options: &ReplayOptions) -> Result<Vec<SimState>, String> {
+pub fn replay(fixture: &Fixture, options: &ReplayOptions) -> Result<Replayed, String> {
     let world = fixture.world;
     if !world.is_available() {
         return Err(format!(
@@ -344,7 +357,84 @@ pub fn replay(fixture: &Fixture, options: &ReplayOptions) -> Result<Vec<SimState
         }
     }
 
-    Ok(trace)
+    Ok(Replayed {
+        trace,
+        crossings: game.crossings().to_vec(),
+    })
+}
+
+/// Render a crossing list as one line, in the order the run met the volumes.
+///
+/// `start@1800ms/tick225 checkpoint0@3184ms/tick398 …`, or `none` for a run
+/// that touched nothing. Both the time and the tick are printed because they
+/// answer different questions: the time is what a split is quoted in, and the
+/// tick is what indexes a trace line.
+///
+/// A checkpoint is named by its index, which is the number the map compiler
+/// assigned in source order (`straf3_map::TriggerKind::Checkpoint`) — so this
+/// line is directly comparable against the order the `.map` declares them,
+/// which is the whole point of printing it.
+#[must_use]
+pub fn format_crossings(crossings: &[TriggerCrossing]) -> String {
+    if crossings.is_empty() {
+        return "none".to_owned();
+    }
+    let mut out = String::new();
+    for crossing in crossings {
+        for name in trigger_names(crossing.triggers) {
+            if !out.is_empty() {
+                out.push(' ');
+            }
+            let _ = write!(
+                out,
+                "{name}@{}ms/tick{}",
+                crossing.time_ms, crossing.tick
+            );
+        }
+    }
+    out
+}
+
+/// The volumes in `set`, named, lowest bit first.
+///
+/// Lowest bit first means start, then finish, then checkpoints in index order.
+/// Within a single crossing that ordering is arbitrary anyway — one command
+/// touched them all — and a stable order beats one that depends on iteration
+/// accident.
+fn trigger_names(set: TriggerSet) -> Vec<String> {
+    let mut names = Vec::new();
+    if set.contains(TriggerSet::START) {
+        names.push("start".to_owned());
+    }
+    if set.contains(TriggerSet::FINISH) {
+        names.push("finish".to_owned());
+    }
+    for index in 0..TriggerSet::MAX_CHECKPOINTS {
+        let Some(bit) = TriggerSet::checkpoint(index) else {
+            break;
+        };
+        if set.contains(bit) {
+            names.push(format!("checkpoint{index}"));
+        }
+    }
+    names
+}
+
+/// What a replay produced: the state at every tick, and the route the run took.
+///
+/// The crossings are here rather than derivable from `trace` because they are
+/// not in the trace at all — `SimState` does not carry which volumes were
+/// touched, deliberately (see [`crate::tick::advance_one`]). A trace can show
+/// that a run finished; only this can show *where it went to get there*, which
+/// is what distinguishes a lap of the course from a shortcut between the start
+/// and finish volumes.
+#[derive(Debug, Clone)]
+pub struct Replayed {
+    /// The simulation state after every command, plus the spawn state at index
+    /// zero — so `trace.len()` is one more than the command count.
+    pub trace: Vec<SimState>,
+    /// Timing volumes touched, in the order the run met them.
+    pub crossings: Vec<TriggerCrossing>,
 }
 
 fn num<T: std::str::FromStr>(f: &[&str], i: usize) -> Result<T, String> {
@@ -512,10 +602,11 @@ cmd 50 127 64 0 - 0 92.5
             },
             &ReplayOptions::default(),
         )
-        .unwrap();
+        .unwrap()
+        .trace;
 
         let text = recorder.to_fixture(WorldSpec::Flat(s(0.0)), "cpm");
-        let from_file = replay(&parse(&text).unwrap(), &ReplayOptions::default()).unwrap();
+        let from_file = replay(&parse(&text).unwrap(), &ReplayOptions::default()).unwrap().trace;
 
         assert_eq!(live.len(), 1_001);
         assert_eq!(live.len(), from_file.len());
@@ -571,7 +662,7 @@ cmd 50 127 64 0 - 0 92.5
         // Criterion 5, as an equality between two traces rather than a claim.
         let fixture = parse(FIXTURE).unwrap();
 
-        let regular = replay(&fixture, &ReplayOptions::default()).unwrap();
+        let regular = replay(&fixture, &ReplayOptions::default()).unwrap().trace;
         let hostile = replay(
             &fixture,
             &ReplayOptions {
@@ -579,7 +670,8 @@ cmd 50 127 64 0 - 0 92.5
                 ..ReplayOptions::default()
             },
         )
-        .unwrap();
+        .unwrap()
+        .trace;
 
         assert_eq!(regular.len(), fixture.cmds.len() + 1);
         assert_eq!(regular.len(), hostile.len());
@@ -605,7 +697,7 @@ cmd 50 127 64 0 - 0 92.5
     #[test]
     fn the_csv_header_matches_the_columns_that_follow_it() {
         let fixture = parse(FIXTURE).unwrap();
-        let trace = replay(&fixture, &ReplayOptions::default()).unwrap();
+        let trace = replay(&fixture, &ReplayOptions::default()).unwrap().trace;
         let line = trace_line(&trace[1], true);
         assert_eq!(
             TRACE_HEADER.split(',').count(),
@@ -618,8 +710,8 @@ cmd 50 127 64 0 - 0 92.5
     #[test]
     fn replaying_the_same_fixture_twice_lands_on_the_same_bits() {
         let fixture = parse(FIXTURE).unwrap();
-        let a = replay(&fixture, &ReplayOptions::default()).unwrap();
-        let b = replay(&fixture, &ReplayOptions::default()).unwrap();
+        let a = replay(&fixture, &ReplayOptions::default()).unwrap().trace;
+        let b = replay(&fixture, &ReplayOptions::default()).unwrap().trace;
         assert_eq!(a.last().unwrap().checksum(), b.last().unwrap().checksum());
     }
 
@@ -629,7 +721,7 @@ cmd 50 127 64 0 - 0 92.5
         // crate's loop must land exactly where calling `straf3_sim` directly
         // does, at every tick and not just the last.
         let fixture = parse(FIXTURE).unwrap();
-        let ours = replay(&fixture, &ReplayOptions::default()).unwrap();
+        let ours = replay(&fixture, &ReplayOptions::default()).unwrap().trace;
 
         let world = straf3_sim::world::FlatGround::at(s(0.0));
         let mut theirs = SimState::spawned_at(fixture.spawn, fixture.yaw);

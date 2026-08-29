@@ -78,11 +78,11 @@ pub mod tick;
 pub mod web;
 
 pub use app::{App, Options, Playback, run};
-pub use game::Game;
+pub use game::{Game, TriggerCrossing};
 pub use ghost::{Ghost, GhostError};
 pub use input_map::command_from_input;
 pub use record::{Recorder, WorldSpec};
-pub use replay::{Fixture, ReplayOptions, TRACE_HEADER, trace_line};
+pub use replay::{Fixture, Replayed, ReplayOptions, TRACE_HEADER, format_crossings, trace_line};
 pub use scene::WorldChoice;
 pub use tick::{DEFAULT_RATE, FixedStep, TickPlan, advance_one, plan_ticks};
 

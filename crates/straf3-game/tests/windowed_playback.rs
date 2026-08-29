@@ -35,6 +35,7 @@ use std::sync::OnceLock;
 
 use straf3_game::app::{App, Options, Playback};
 use straf3_game::replay::{Fixture, ReplayOptions, parse, replay};
+use straf3_sim::TriggerSet;
 
 /// The bot's run of the course: 125 Hz, cpm, `world map`, and it finishes.
 ///
@@ -111,7 +112,7 @@ fn pb_dir(tag: &str) -> String {
 fn a_played_course_run_matches_the_headless_replay_at_every_tick() {
     course();
     let fixture = fixture();
-    let reference = replay(&fixture, &ReplayOptions::default()).unwrap();
+    let reference = replay(&fixture, &ReplayOptions::default()).unwrap().trace;
     assert_eq!(reference.len(), fixture.cmds.len() + 1);
 
     for schedule in [
@@ -421,4 +422,47 @@ fn an_experimental_session_is_playable_recordable_and_separately_filed() {
     assert!(straf3_game::replay::parse("rate 125\nprofile experimental\nworld flat 0\n").is_ok());
 
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// **The route, not just the clock.** `coil` declares four timing volumes and
+/// the bot's run passes through all four, in the order the map declares them.
+///
+/// This is the check a run time cannot make. `RunState::Finished` says the
+/// player crossed the start volume and later crossed the finish volume; a
+/// shortcut that skipped both checkpoints in between would produce exactly the
+/// same `Finished`, with a better time. Reading the crossings out of the
+/// replay path is what makes the difference visible to somebody who did not
+/// produce the run.
+#[test]
+fn the_bot_run_crosses_every_volume_coil_declares_in_the_declared_order() {
+    course();
+    let replayed = replay(&fixture(), &ReplayOptions::default()).unwrap();
+
+    let order: Vec<TriggerSet> = replayed.crossings.iter().map(|c| c.triggers).collect();
+    assert_eq!(
+        order,
+        vec![
+            TriggerSet::START,
+            TriggerSet::checkpoint(0).unwrap(),
+            TriggerSet::checkpoint(1).unwrap(),
+            TriggerSet::FINISH,
+        ],
+        "crossings were {}",
+        straf3_game::replay::format_crossings(&replayed.crossings)
+    );
+
+    // Each volume appears once however many ticks the player spent inside it,
+    // and the times rise — a list that went backwards would mean the crossing
+    // order was an artefact of how the bits are named rather than of the route.
+    let times: Vec<u32> = replayed.crossings.iter().map(|c| c.time_ms).collect();
+    assert!(
+        times.windows(2).all(|w| w[0] < w[1]),
+        "crossing times are not strictly increasing: {times:?}"
+    );
+
+    // The clock's own account has to agree with the route's: the run starts
+    // when the start volume is crossed and ends when the finish one is.
+    let first = replayed.crossings.first().expect("the run crosses start");
+    let last = replayed.crossings.last().expect("the run crosses finish");
+    assert_eq!(last.time_ms - first.time_ms, COIL_RUN_MS);
 }

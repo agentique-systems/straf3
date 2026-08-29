@@ -54,12 +54,17 @@ usage: straf3 [options]                     open a window and play
   --world <map|flat|empty>    geometry to play in (default map). `flat` and
                               `empty` need no map and are the two worlds
                               straf3-headless can reproduce.
-  --profile <cpm|vq3|experimental>
-                              movement constants (default cpm). `experimental`
-                              is straf3's own vocabulary: playable and
-                              recordable, but its personal bests are kept under
-                              their own name (runs/<map>.experimental.s3d) and
-                              are never ranked against a cpm or vq3 time.
+  --profile <straf3|cpm|vq3|experimental>
+                              movement constants (default straf3, the ruleset
+                              frozen in docs/movement-canon.md Part 3). `cpm`
+                              and `vq3` are the two games straf3 was
+                              reconstructed beside and are ranked alongside it.
+                              `experimental` carries the three candidate
+                              mechanics canon rejected — crouch slide, dash and
+                              wall jump — so it is playable and recordable, but
+                              its personal bests are kept under their own name
+                              (runs/<map>.experimental.s3d) and are never ranked
+                              against a canon time.
   --rate <hz>                 command rate, 1..=1000 (default 125)
   --record <file>             write every command produced to <file>, in
                               straf3-headless's input format
@@ -342,13 +347,14 @@ recording that spanned one could not be replayed.
                 return ExitCode::FAILURE;
             }
         };
-        let trace = match straf3_game::replay::replay(&fixture, options) {
-            Ok(trace) => trace,
+        let replayed = match straf3_game::replay::replay(&fixture, options) {
+            Ok(replayed) => replayed,
             Err(e) => {
                 eprintln!("straf3: {path}: {e}");
                 return ExitCode::FAILURE;
             }
         };
+        let trace = &replayed.trace;
 
         let Some(final_state) = trace.last() else {
             eprintln!("straf3: {path}: nothing to replay");
@@ -359,10 +365,17 @@ recording that spanned one could not be replayed.
             if options.csv {
                 println!("{}", straf3_game::TRACE_HEADER);
             }
-            for state in &trace {
+            for state in trace {
                 println!("{}", straf3_game::trace_line(state, options.csv));
             }
             if !options.csv {
+                // Before the checksum, never after: the checksum is the last
+                // line on purpose so a determinism check can take it with
+                // `tail -1`.
+                println!(
+                    "  crossings     {}",
+                    straf3_game::replay::format_crossings(&replayed.crossings)
+                );
                 println!("  checksum      {:#018x}", final_state.checksum());
             }
             return ExitCode::SUCCESS;
@@ -437,8 +450,16 @@ recording that spanned one could not be replayed.
             final_state.player.velocity.y,
             final_state.player.velocity.z
         );
+        // The route, not just the outcome. `run` above says the clock started
+        // and stopped; this says which volumes the run actually went through to
+        // do it, so a shortcut that crosses start and finish and nothing
+        // between them is visible to somebody who did not produce the run.
+        println!(
+            "  crossings     {}",
+            straf3_game::replay::format_crossings(&replayed.crossings)
+        );
         // Printed last so a determinism check can pull it out with `tail -1`,
-        // exactly as `straf3-headless` does.
+        // exactly as `straf3-headless` does. Nothing goes below this line.
         println!("  checksum      {:#018x}", final_state.checksum());
         ExitCode::SUCCESS
     }
@@ -615,13 +636,26 @@ recording that spanned one could not be replayed.
         }
 
         #[test]
-        fn no_arguments_is_the_default_map_at_125hz_under_cpm() {
+        fn no_arguments_is_the_default_map_at_125hz_under_straf3() {
             let parsed = parse_args(&[]).unwrap().unwrap();
             assert_eq!(parsed.session.world, WorldChoice::Map);
             assert_eq!(parsed.map_path, DEFAULT_MAP);
             assert_eq!(parsed.session.rate, TickRate::HZ_125);
-            assert_eq!(parsed.session.profile_name, "cpm");
+            // Was `cpm` until canon Part 3. The name is the visible half of the
+            // change — see `Options::default` for why the constants beside it
+            // are spelled out rather than delegated.
+            assert_eq!(parsed.session.profile_name, "straf3");
             assert!(parsed.record_to.is_none());
+        }
+
+        #[test]
+        fn straf3_is_a_name_the_command_line_accepts() {
+            let parsed = parse_args(&["--profile", "straf3"]).unwrap().unwrap();
+            assert_eq!(parsed.session.profile_name, "straf3");
+            assert_eq!(parsed.session.profile, PhysicsProfile::straf3());
+            // Asking for canon by name and getting it by default are two paths
+            // to the same session, and neither may drift from the other.
+            assert_eq!(parsed.session.profile, Options::default().profile);
         }
 
         #[test]
@@ -680,6 +714,9 @@ recording that spanned one could not be replayed.
             // to `runs/coil.cpm.s3d`. A committed artefact whose profile is not
             // the one the person asked for is exactly the object this
             // repository has already had to delete once.
+            // `--profile straf3` is the command the comment above describes,
+            // and it stopped being hypothetical when the name landed.
+            assert!(parse_args(&["--play", "run.txt", "--profile", "straf3"]).is_err());
             assert!(parse_args(&["--play", "run.txt", "--profile", "cpm"]).is_err());
             assert!(parse_args(&["--replay", "run.txt", "--profile", "cpm"]).is_err());
             assert!(parse_args(&["--play", "run.txt", "--rate", "125"]).is_err());
