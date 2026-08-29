@@ -65,7 +65,9 @@ fn the_crouch_slide_stub_compiles_to_a_timeable_run() {
         "no target_stopTimer — this map cannot stop a clock: {kinds:?}"
     );
     assert!(
-        kinds.iter().any(|k| matches!(k, TriggerKind::Checkpoint(_))),
+        kinds
+            .iter()
+            .any(|k| matches!(k, TriggerKind::Checkpoint(_))),
         "no checkpoints, so a run has no splits: {kinds:?}"
     );
 
@@ -106,7 +108,10 @@ fn the_crouch_slide_spawn_is_not_inside_anything() {
         "the spawn at {:?} is inside a solid",
         m.spawn
     );
-    assert_eq!(m.spawn_yaw, 90.0, "the spawn must face +Y down the corridor");
+    assert_eq!(
+        m.spawn_yaw, 90.0,
+        "the spawn must face +Y down the corridor"
+    );
 }
 
 /// The whole point of the map: a ceiling in the open band between the crouched
