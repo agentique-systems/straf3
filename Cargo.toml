@@ -33,6 +33,14 @@ members = [
     # the numbers. A workspace member for the same reason det-runner is — it
     # must measure the tree this Cargo.lock describes, not a neighbouring one.
     "tools/straf3-lab",
+    # The movement agent (r2): completes a course without a person, and emits a
+    # command stream the shipped binary replays to the same checksum. A member
+    # for the same reason again, and this one is load-bearing rather than
+    # tidy — the equality it claims is between a run this crate simulated and a
+    # run `straf3 --replay` produced, and two resolutions of `glam` would make
+    # that comparison meaningless. `probes/coil-course` is the standalone
+    # ancestor, kept as published evidence rather than promoted.
+    "tools/straf3-agent",
 ]
 
 [workspace.package]

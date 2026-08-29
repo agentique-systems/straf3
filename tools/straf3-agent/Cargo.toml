@@ -1,0 +1,44 @@
+# The movement agent: the instrument every self-verified claim in this milestone
+# rests on. It reads a compiled map, derives the course from the map's own
+# trigger volumes, runs it through the same `straf3_sim::step_in_place` a player
+# drives, and emits a command stream the shipped binary replays.
+#
+# A workspace member rather than a standalone crate like `probes/`, for the same
+# reason `tools/det-runner` is one: it must resolve `glam` and the `straf3-*`
+# crates through this workspace's Cargo.lock. A run produced against a different
+# resolution is a run of a different tree, and its checksum could not be
+# compared with one the shipped binary produces — which is the whole evidence
+# this tool exists to collect. `probes/coil-course` is the standalone version of
+# this idea; it is kept as evidence of a past run rather than as a build input,
+# and that is exactly why it could not simply be promoted.
+#
+# It lives under `tools/` and above the seam because it reads `.map` files and
+# writes command streams, and nothing below the line may touch a filesystem.
+[package]
+name = "straf3-agent"
+description = "Derives a course from a map's own trigger volumes and runs it without human input."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "straf3_agent"
+
+[[bin]]
+name = "straf3-agent"
+path = "src/main.rs"
+
+# The shipped compiler, and the simulation the player runs in. Both, and only
+# both: the course has to be derived from the world the game builds
+# (`CompiledMap::collider`), and the agent has to move through the same mover.
+#
+# `straf3-collision` is deliberately absent. `Hull`, `HullWorld` and `Aabb`
+# arrive through `straf3-map`'s own re-exports, so naming it here would put a
+# version in this manifest that nothing in this crate resolves on its own —
+# the failure mode `tools/straf3-lab`'s manifest warns about, in the other
+# direction.
+[dependencies]
+straf3-map.workspace = true
+straf3-sim.workspace = true
