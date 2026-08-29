@@ -1,0 +1,119 @@
+# tools/straf3-agent/results/coil-plan.txt
+#
+# Published from the tree at 0c0e1f5 plus this crate. Not hand-edited:
+# everything below the blank line is the tool's own stdout, from
+#
+#   cargo run --release -p straf3-agent -- plan assets/maps/coil.map
+#
+# WHAT THIS IS EVIDENCE FOR
+# -------------------------
+# r27: the course goals come from the compiled map's own trigger volumes. Nothing
+# below was typed into the agent. `probes/coil-course` reached the same finish
+# line by having `(0, 3456, 112)` and `y > 3040` written into its source; this
+# crate reaches it from `CompiledMap::triggers` and a downward trace, and the
+# same program produces the neighbouring file for a map it has never seen.
+#
+# CROSS-CHECK AGAINST THE KNOWN-GOOD
+# ----------------------------------
+# The probe published its own trigger table for this map in
+# probes/coil-course/results/coil.txt. The two agree exactly:
+#
+#   volume    probe (coil.txt, H6 and the header table)   this file
+#   t_start   START     (-224,32,-32)..(224,64,768)        identical
+#   t_cp1     bit 0x04  (-224,1536,-32)..(224,1568,768)    checkpoint 0, identical
+#   t_cp2     bit 0x08  (-224,3104,-96)..(224,3136,768)    checkpoint 1, identical
+#   t_finish  FINISH    (-96,3424,64)..(96,3488,768)       identical
+#
+# and so do the compiler's own numbers: 26 solids, 4 trigger volumes, collision
+# digest 0x47263b8845d8bb4b, which is the digest the probe's H6 printed. Same
+# geometry, same volumes, same order, reached independently.
+#
+# WHERE THE DERIVED AIM DIFFERS FROM THE HAND-WRITTEN ONE, AND WHY IT MATTERS
+# --------------------------------------------------------------------------
+# The probe aimed at the finish volume's `mins.z + 48` = z 112, reasoning that
+# aiming at the middle of a 704-unit column would aim 350 units into the air.
+# That reasoning is right and the rule it produced is coil's geometry: it assumes
+# the volume's floor IS its `mins.z`. Here the floor is found by tracing, and it
+# is at z=80 — sixteen units above `mins.z`. The derived aim is z 104.1.
+#
+# On the same map's second checkpoint the difference is not sixteen units. That
+# volume's `mins.z` is -96 and the surface a player crosses it on is z=64, so
+# `mins.z + 48` would aim 112 units UNDERGROUND. The probe never noticed because
+# it only ever applied that rule to the finish.
+#
+# A SHIPPED TRAP THE PLAN NOW REPORTS
+# -----------------------------------
+# coil.map's checkpoints declare `"count" "1"` and `"count" "2"`. Nothing reads
+# them. straf3-map takes six keys out of a .map — classname, origin, angle,
+# angles, target, targetname — and checkpoint numbering comes from the order the
+# entities appear in the file (`Checkpoint(*next_checkpoint)` in entity.rs).
+# training-crouch-slide.map declares the same key with the same non-effect.
+#
+# On both maps the two orders agree, which is exactly why nobody has been bitten:
+# the plan compares them and reports no contradiction here. It would report one,
+# loudly and by name, on a map where they disagreed — a reversal is the first
+# geometry where they can — and it would still follow the compiled order, because
+# that is the order the shipped game reads. `a_count_key_that_contradicts_source_
+# order_is_reported_and_not_obeyed` is the test.
+#
+# WHAT THIS FILE DOES NOT SHOW
+# ----------------------------
+# Anything about running the course. No player moves here, no clock starts, and
+# the leg distances are straight lines between aim points, not a route: they say
+# how far apart the goals are, not how far a run travels. Search and completion
+# are the next unit of work.
+#
+# Read the `turn` column: every leg of the course proper reads 0.0. coil is a
+# corridor, and the 22.2 degrees is the spawn walking sideways onto the start
+# line. See results/first-party-geometry.md.
+
+== straf3-agent plan ==
+map            assets/maps/coil.map
+compiler       straf3-map, collision digest 0x47263b8845d8bb4b
+solids         26 hulls
+triggers       4 volumes (4 timing, 0 recorded only)
+clock          coverage 0x0000000f  START=true  FINISH=true  has_timing()=true
+bounds         (-768.0, -864.0, -224.0) .. (768.0, 5376.0, 512.0)
+profile        cpm  hull 30 x 30 x 56, origin offset (0.0, 0.0, 4.0)
+runnable       yes — the plan reaches a finish volume
+
+-- compiler warnings --
+  (none)
+
+-- spawn --
+origin         (-320.0, -736.0, 24.1) yaw 0.0
+clearance      start_solid=false all_solid=false
+ground         surface z 0.000, 24.125 below the origin
+
+-- trigger volumes, in source order --
+   #  kind           target       resolved             pieces  bounds
+   0  START          t_start      target_starttimer         1  (-224.0, 32.0, -32.0) .. (224.0, 64.0, 768.0)
+   1  checkpoint 0   t_cp1        target_checkpoint         1  (-224.0, 1536.0, -32.0) .. (224.0, 1568.0, 768.0)
+   2  checkpoint 1   t_cp2        target_checkpoint         1  (-224.0, 3104.0, -96.0) .. (224.0, 3136.0, 768.0)
+   3  FINISH         t_finish     target_stoptimer          1  (-96.0, 3424.0, 64.0) .. (96.0, 3488.0, 768.0)
+
+-- the course, derived from those volumes --
+  step     target       aim (player origin)          horizontal             vertical
+  start    t_start      (0.0, 48.0, 24.1)            bounds centre          standing on z=0.0
+  cp0      t_cp1        (0.0, 1552.0, 24.1)          bounds centre          standing on z=0.0
+  cp1      t_cp2        (0.0, 3120.0, 88.1)          bounds centre          standing on z=64.0
+  finish   t_finish     (0.0, 3456.0, 104.1)         bounds centre          standing on z=80.0
+
+  horizontal `bounds centre` and vertical `standing on ...` are the general
+  rules; anything else is a fallback and is listed in the notes below.
+
+-- legs (straight lines between consecutive aim points) --
+  leg                  distance     ground      rise   bearing     turn
+  spawn -> start          846.8      846.8       0.0      67.8        -
+  start -> cp0           1504.0     1504.0       0.0      90.0     22.2
+  cp0 -> cp1             1569.3     1568.0      64.0      90.0      0.0
+  cp1 -> finish           336.4      336.0      16.0      90.0      0.0
+
+  sharpest turn between legs: 22.2 deg. A course whose legs all read
+  the same bearing is a corridor, and a bot that maximises one coordinate
+  completes it without ever having to steer.
+
+-- notes --
+  ASSUMPTION: the 2 checkpoints are visited in source order. Defrag gives them no explicit index and straf3-map numbers them as it meets them, so a map that declares them out of order gets a plan in that same wrong order. Nothing here can check it
+  2 checkpoints declare a `count` key and nothing reads it. straf3-map takes classname, origin, angle, angles, target and targetname out of a .map and nothing else; checkpoint numbering comes from source order. Both first-party maps declare `count`, and on both it happens to agree — reported so the next author does not find out otherwise
+  the 2 checkpoints are route guidance, not gates: RunState::finish reads TriggerSet::FINISH alone, so a run that skips them all still produces a time
