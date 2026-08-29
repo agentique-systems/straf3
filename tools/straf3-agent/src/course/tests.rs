@@ -15,94 +15,15 @@
 //!
 //! # The brush fixtures
 //!
-//! A `.map` face is three points whose winding decides which way it faces, and
-//! an inverted brush is a floor you fall through. [`box_brush`] derives the
-//! winding from the outward normal rather than hand-writing it: for a face at
-//! `o` spanning in-plane directions `u` and `v`, the emitted points are
-//! `o+u, o, o+v`, and Quake's `normal = (p0 - p1) × (p2 - p1)` makes that
-//! `u × v`. So the six faces pick their `u`/`v` from `x × y = z`, `y × z = x`,
-//! `z × x = y` and the negatives, which are the same pairs swapped.
+//! The primitives that write `.map` text — and in particular the winding rule
+//! that decides whether a brush is a floor or a hole — live in [`crate::brush`],
+//! because `crate::fixture` needs the same ones to generate a committed map and
+//! two copies of that rule would be one copy too many.
 
 use super::*;
 
+use crate::brush::{box_brush, brush_entity, point_entity, timed_trigger, timed_trigger_with};
 use straf3_map::compile;
-
-const AXIS: [[i32; 3]; 3] = [[64, 0, 0], [0, 64, 0], [0, 0, 64]];
-
-fn face(o: [i32; 3], u: [i32; 3], v: [i32; 3], texture: &str) -> String {
-    let p =
-        |a: [i32; 3], b: [i32; 3]| format!("( {} {} {} )", a[0] + b[0], a[1] + b[1], a[2] + b[2]);
-    format!(
-        "{} {} {} {texture} [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 0.5 0.5\n",
-        p(o, u),
-        p(o, [0, 0, 0]),
-        p(o, v),
-    )
-}
-
-fn box_brush(mins: [i32; 3], maxs: [i32; 3], texture: &str) -> String {
-    let [x, y, z] = AXIS;
-    let lo = mins;
-    let hi_x = [maxs[0], mins[1], mins[2]];
-    let hi_y = [mins[0], maxs[1], mins[2]];
-    let hi_z = [mins[0], mins[1], maxs[2]];
-
-    let mut out = String::from("{\n");
-    out.push_str(&face(lo, z, y, texture)); // -X
-    out.push_str(&face(hi_x, y, z, texture)); // +X
-    out.push_str(&face(lo, x, z, texture)); // -Y
-    out.push_str(&face(hi_y, z, x, texture)); // +Y
-    out.push_str(&face(lo, y, x, texture)); // -Z
-    out.push_str(&face(hi_z, x, y, texture)); // +Z
-    out.push_str("}\n");
-    out
-}
-
-fn point_entity(classname: &str, keys: &[(&str, &str)]) -> String {
-    let mut out = format!("{{\n\"classname\" \"{classname}\"\n");
-    for (k, v) in keys {
-        out.push_str(&format!("\"{k}\" \"{v}\"\n"));
-    }
-    out.push_str("}\n");
-    out
-}
-
-fn brush_entity(classname: &str, keys: &[(&str, &str)], brushes: &[String]) -> String {
-    let mut out = format!("{{\n\"classname\" \"{classname}\"\n");
-    for (k, v) in keys {
-        out.push_str(&format!("\"{k}\" \"{v}\"\n"));
-    }
-    for b in brushes {
-        out.push_str(b);
-    }
-    out.push_str("}\n");
-    out
-}
-
-/// A trigger brush entity and the point entity that gives it meaning, in the
-/// two-part shape Defrag maps use.
-fn timed_trigger(target_classname: &str, name: &str, brushes: &[String]) -> String {
-    timed_trigger_with(target_classname, name, &[], brushes)
-}
-
-/// The same, with extra keys on the point entity — used to author the `count`
-/// key both shipped maps carry and nothing reads.
-fn timed_trigger_with(
-    target_classname: &str,
-    name: &str,
-    extra: &[(&str, &str)],
-    brushes: &[String],
-) -> String {
-    let mut keys: Vec<(&str, &str)> = vec![("targetname", name), ("origin", "0 0 32")];
-    keys.extend_from_slice(extra);
-    let mut out = point_entity(target_classname, &keys);
-    out.push_str(&brush_entity(
-        "trigger_multiple",
-        &[("target", name)],
-        brushes,
-    ));
-    out
-}
 
 fn plan_of(source: &str) -> (CompiledMap, CoursePlan) {
     let map = compile(source).expect("the fixture must compile");

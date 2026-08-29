@@ -57,6 +57,9 @@
 #![warn(missing_docs)]
 #![warn(clippy::all)]
 
+pub mod brush;
 pub mod course;
+pub mod fixture;
 pub mod profile;
 pub mod report;
+pub mod search;
