@@ -1,0 +1,189 @@
+# probes/course-lab/results/cleave.txt
+#
+# The measurements behind assets/maps/cleave.map's header. Everything below the
+# blank line is `course-lab`'s own stdout, not hand-edited.
+#
+# ONE WORLD, AND IT IS THE SHIPPED ONE
+# ------------------------------------
+# Every number here was produced in the world `straf3_map::compile` builds and
+# `CompiledMap::collider()` hands over -- the same call `straf3-game`'s scene and
+# `straf3-render` both go through. This probe has no second brush-to-hull
+# derivation and does not depend on the `quake-map` parser at all; `map.collider()`
+# at src/main.rs:175 is the only world it ever constructs, and every trace, every
+# `step_in_place` and every gate sweep runs against it.
+#
+# That is a deliberate difference from `probes/coil-course`, which carries two
+# worlds and says so: its H1-H5 use its own `Hull::from_planes` path and only its
+# H6 uses the shipped compiler, because that probe's value is being an independent
+# second derivation of the compile step. This one asks a different question --
+# what does the course afford a player -- and a player runs in the compiled world.
+# `compile_hull` adds the bevel planes a swept box needs, and a hull clearing a lip
+# at 600 ups is exactly the case that is sensitive to them, so measuring anywhere
+# else would have been measuring a course nobody plays.
+#
+# WHAT THIS FILE DOES NOT ESTABLISH
+# ---------------------------------
+# - No completing run. At the time of writing, no search has driven cleave from
+#   the start line to the finish. The searcher's negatives are recorded in full
+#   below, with their coverage, because a negative with no coverage numbers is
+#   not a result. They are statements about this search, not about the map.
+# - No branch times, and therefore no crossover speed. The map's headline
+#   question -- at what entry speed does the leap start beating the sweep --
+#   has no answer yet in any form.
+# - No maximum deliverable speed at the launch lip. Section S3's gate is only a
+#   gate if that number is near it, and it is unmeasured.
+# - Nothing here was played by a human, by operator decision for this milestone.
+#
+# REGENERATE
+# ----------
+#   cd probes/course-lab
+#   cargo run --release -- ../../assets/maps/cleave.map compile
+#   cargo run --release -- ../../assets/maps/cleave.map spawn
+#   cargo run --release -- ../../assets/maps/cleave.map survey --line "0,1400;-700,1900;-700,4700"
+#   cargo run --release -- ../../assets/maps/cleave.map survey --line "0,1400;900,2560;900,2900;0,3400;0,4700"
+#   cargo run --release -- ../../assets/maps/cleave.map gates \
+#       --gate "the_leap:-672,2932,152:560,700,10:75,105,5" \
+#       --gate "the_finish:0,4980,152:480,560,10:75,105,5"
+#
+# Output paths are derived from the map's file stem, so running this tool on one
+# map can never overwrite another map's evidence.
+
+profile        straf3 (canon), 125 Hz; equal to cpm today
+== compile ==
+map            ../../assets/maps/cleave.map
+stem           cleave
+solids         29 hulls   mesh 696 vertices / 348 triangles
+digests        collision 0x58e3e260d6348b90  full 0xf7d41c5d65b30ab9
+bounds         Vec3(-928.0, -864.0, -192.0) .. Vec3(1120.0, 6720.0, 640.0)
+spawn          Vec3(-320.0, -736.0, 24.125) yaw 0  (1 spawn entities)
+warnings       none
+
+triggers       4
+   t_start        -> target_starttimer    START                        Vec3(-224.0, 32.0, -32.0) .. Vec3(224.0, 64.0, 768.0)
+   t_cp_fork      -> target_checkpoint    checkpoint 0 bit 0x00000004  Vec3(-224.0, 1376.0, -32.0) .. Vec3(224.0, 1440.0, 768.0)
+   t_cp_rejoin    -> target_checkpoint    checkpoint 1 bit 0x00000008  Vec3(-896.0, 4608.0, 96.0) .. Vec3(1088.0, 4672.0, 768.0)
+   t_finish       -> target_stoptimer     FINISH                       Vec3(-192.0, 5344.0, 128.0) .. Vec3(192.0, 5408.0, 768.0)
+
+coverage       0x0000000f   has_timing()=true  START=true  FINISH=true
+every trigger volume resolves to a clock bit.
+
+volume depth along +Y (a fast line steps ~8 units per tick at 1000 ups)
+   t_start            32 units
+   t_cp_fork          64 units
+   t_cp_rejoin        64 units
+   t_finish           64 units
+
+profile        straf3 (canon), 125 Hz; equal to cpm today
+== spawn ==
+spawn Vec3(-320.0, -736.0, 24.125) yaw 0  start_solid=false  all_solid=false
+ground under spawn: Some((0.0, Vec3(0.0, 0.0, 1.0)))
+
+== survey: the HIGH branch, (0,1400) -> (-700,1900) -> (-700,4700) ==
+     3612      -700      4652     128.0    1.0000  Grounded
+     3644      -700      4684     128.0    1.0000  Grounded
+
+void samples: 0
+  Grounded: 115 samples, normal.z 0.9285..1.0000
+
+  (full 115-sample table elided here only in this summary block; the
+   command above prints it. 0 void samples, normal.z 0.9285..1.0000.)
+
+== survey: the LOW branch, (0,1400) -> (900,2560) -> (900,2900) -> (0,3400) -> (0,4700) ==
+     4086         0      4648     128.0    1.0000  Grounded
+     4118         0      4680     128.0    1.0000  Grounded
+
+void samples: 0
+  Grounded: 131 samples, normal.z 0.9701..1.0000
+
+profile        straf3 (canon), 125 Hz; equal to cpm today
+== ballistic gates, swept over speed x approach yaw ==
+Every gate reports the WORST approach as well as the best, because a single
+column from one yaw measures one approach rather than the admissible window.
+
+-- the_leap from Vec3(-672.0, 2932.0, 152.0), yaw 75..105 step 5
+     ups     best y     best z    worst y    worst z  exit ups
+     560       3377         24       3377         24       145
+     570       3377         24       3377         24       148
+     580       3377         24       3377         24       150
+     590       3377         24       3377         24       153
+     600       3381        152       3377         24       600
+     610       3381        152       3377         24       610
+     620       3382        152       3378        152       620
+     630       3381        152       3379        152       630
+     640       3381        152       3377        152       640
+     650       3379        152       3377        152       650
+     660       3386        152       3379        152       660
+     670       3393        152       3377        152       670
+     680       3400        152       3384        152       680
+     690       3407        152       3391        152       690
+     700       3414        152       3397        152       700
+
+-- the_finish from Vec3(0.0, 4980.0, 152.0), yaw 75..105 step 5
+     ups     best y     best z    worst y    worst z  exit ups
+     480       5329        -82       5329        -82       342
+     490       5329        -82       5329        -82       343
+     500       5329        -82       5329        -82       344
+     510       5331        168       5329        -82       510
+     520       5332        168       5329        -82       520
+     530       5332        168       5331        168       530
+     540       5333        168       5330        168       540
+     550       5333        168       5331        168       550
+     560       5333        168       5329        168       560
+
+== the searcher's negatives, recorded in full ==
+
+Neither branch has been driven to the finish. Both runs below are NEGATIVE and
+their coverage is printed because that is the only thing that makes a negative
+readable. What defeats the searcher is worth stating precisely, because it is a
+property of a greedy one-step hill climber and not of the map:
+
+  Its objective is the hull's distance to the next goal volume, which is the
+  right SHAPE -- the clock is satisfied by crossing a volume, not by arriving at
+  a point -- but it descends that distance greedily. Cleave's slot is therefore
+  a local minimum: from the launch lane, walking off the lip and INTO the slot
+  reduces distance to the landing pad, and the pad's 160-unit south face is then
+  a wall the search cannot climb. An earlier run sat there for 43 seconds of
+  simulated time, circling, and reached 1437 ups doing it.
+
+  Forbidding the slot (--forbid-box) is what a bypass hypothesis is for and it
+  does force the flight, but each remaining local minimum -- the finish bail
+  ramp, the chicane blocks -- has to be named the same way. That is per-map hand
+  tuning of the measurement driver. It is legitimate here, where the driver is
+  an instrument; it is exactly what r2's reusable agent may not need.
+
+== search ==
+goal finish (0x00000002)  progress hull distance to next goal volume  alphabet jump-only  horizon 40 stride 8 budget 8000  controls 180
+
+  window end     run ms  volume
+        1856         56  t_start
+        3968       2168  t_cp_fork
+
+touched mask   0x00000005
+clock          RUNNING from 1800 ms, 62200 ms at cut-off
+end            Vec3(-463.2046, 1905.0, 89.95995)  852 ups  peak 852 ups  after 64000 ms
+
+coverage       stop=BudgetExhausted  states explored 180000  commands simulated 7208000
+               horizon 40 ticks  stride 8  controls 180  alphabet jump-only  budget 8000 ticks
+NEGATIVE: no line satisfying the goal was found at this budget. That is a
+statement about this search, not a proof that none exists.
+final checksum 0xce751e1a7076f603
+wrote results/cleave-high.txt (262876 bytes, 7555 cmd lines)
+
+== search ==
+goal finish (0x00000002)  progress hull distance to next goal volume  alphabet jump-only  horizon 40 stride 8 budget 8000  controls 180
+
+  window end     run ms  volume
+        1856         56  t_start
+        3968       2168  t_cp_fork
+        9280       7480  t_cp_rejoin
+
+touched mask   0x0000000d
+clock          RUNNING from 1800 ms, 62200 ms at cut-off
+end            Vec3(-207.0, 5419.7065, -54.602283)  849 ups  peak 900 ups  after 64000 ms
+
+coverage       stop=BudgetExhausted  states explored 180000  commands simulated 7208000
+               horizon 40 ticks  stride 8  controls 180  alphabet jump-only  budget 8000 ticks
+NEGATIVE: no line satisfying the goal was found at this budget. That is a
+statement about this search, not a proof that none exists.
+final checksum 0x8017df8ef084f997
+wrote results/cleave-low.txt (259989 bytes, 7344 cmd lines)

@@ -112,6 +112,37 @@ fn hull_in_box(b: &Aabb, origin: Vec3, half: Vec3, offset: Vec3) -> bool {
     (0..3).all(|i| c[i] + half[i] >= b.mins[i] && c[i] - half[i] <= b.maxs[i])
 }
 
+/// Distance from a player hull at `origin` to `b`, zero once it overlaps.
+fn hull_distance_to_box(b: &Aabb, origin: Vec3, half: Vec3, offset: Vec3) -> Scalar {
+    let c = origin + offset;
+    let mut d2 = s(0.0);
+    for i in 0..3 {
+        let (lo, hi) = (b.mins[i] - half[i], b.maxs[i] + half[i]);
+        let over = if c[i] < lo {
+            lo - c[i]
+        } else if c[i] > hi {
+            c[i] - hi
+        } else {
+            s(0.0)
+        };
+        d2 += over * over;
+    }
+    d2.sqrt()
+}
+
+/// Something the searcher steers at: a timing volume, or a region of the map.
+///
+/// Regions exist because a course's own timing volumes are not always enough to
+/// steer by. `cleave.map` carries no checkpoint on either fork branch — r35
+/// forbids one — so "go round the east side of the chicane" cannot be said in
+/// trigger bits at all. It is also the form a reviewer's hypothesis takes:
+/// "reach FINISH *via* here and *not* through there".
+#[derive(Clone, Copy)]
+enum Aim {
+    Bits(TriggerSet),
+    Region(Aabb),
+}
+
 struct Course {
     world: HullWorld,
     volumes: Vec<Volume>,
@@ -277,10 +308,10 @@ struct SearchSpec {
     /// predicate: the searcher stops when the *swept* hull has overlapped every
     /// named volume, which is the same question `step` answers for the clock.
     goal: TriggerSet,
-    /// Ordered waypoints. The searcher descends toward the first goal volume it
-    /// has not yet touched; with `ToGoal` and no waypoints that is the goal
-    /// itself, which on a long course is too far away to steer by.
-    waypoints: Vec<TriggerSet>,
+    /// Ordered waypoints. The searcher descends toward the first one it has not
+    /// yet reached; with `ToGoal` and no waypoints that is the goal itself,
+    /// which on a long course is too far away to steer by.
+    waypoints: Vec<Aim>,
     forbid: Vec<Forbid>,
     progress: Progress,
     alphabet: Alphabet,
@@ -321,11 +352,15 @@ struct Held {
     /// and comes out the far side has gone through it. Sampling only the final
     /// state of a 40-tick horizon would admit exactly that.
     entered_forbidden: bool,
+    /// The hull was inside `aim_region` at the end of some tick, for the same
+    /// reason: a waypoint passed through at speed has been reached.
+    entered_aim: bool,
 }
 
 #[allow(clippy::too_many_arguments)]
 fn hold(
     forbid: &[Aabb],
+    aim_region: Option<Aabb>,
     half: Vec3,
     offset: Vec3,
     rate: TickRate,
@@ -340,6 +375,7 @@ fn hold(
     let mut touched = TriggerSet::NONE;
     let mut simulated = 0u64;
     let mut entered_forbidden = false;
+    let mut entered_aim = false;
     for _ in 0..ticks {
         // Q3 requires releasing jump between hops, so the button is pressed
         // only when there is ground to leave.
@@ -372,12 +408,18 @@ fn hold(
         {
             entered_forbidden = true;
         }
+        if !entered_aim
+            && aim_region.is_some_and(|b| hull_in_box(&b, st.player.origin, half, offset))
+        {
+            entered_aim = true;
+        }
     }
     Held {
         state: st,
         touched,
         simulated,
         entered_forbidden,
+        entered_aim,
     }
 }
 
@@ -400,6 +442,7 @@ fn search(
     let mut states_explored = 0u64;
     let mut commands_simulated = 0u64;
     let mut stop = Stop::BudgetExhausted;
+    let mut reached_regions = vec![false; spec.waypoints.len()];
 
     let forbidden_boxes: Vec<Aabb> = spec
         .forbid
@@ -419,20 +462,29 @@ fn search(
             stop = Stop::GoalReached;
             break;
         }
-        // The volume the searcher is currently descending toward: the first
-        // waypoint not yet touched, else the goal itself.
-        let aim: TriggerSet = spec
+        // What the searcher is currently descending toward: the first waypoint
+        // not yet reached, else the goal itself.
+        let aim: Aim = spec
             .waypoints
             .iter()
-            .copied()
-            .find(|w| !touched.contains(*w))
-            .unwrap_or(spec.goal);
+            .enumerate()
+            .find(|(i, w)| match w {
+                Aim::Bits(b) => !touched.contains(*b),
+                Aim::Region(_) => !reached_regions[*i],
+            })
+            .map(|(_, w)| *w)
+            .unwrap_or(Aim::Bits(spec.goal));
+        let aim_region = match aim {
+            Aim::Region(b) => Some(b),
+            Aim::Bits(_) => None,
+        };
 
         let mut best = None;
         let mut best_score = Scalar::NEG_INFINITY;
         for &c in &set {
             let h = hold(
                 &forbidden_boxes,
+                aim_region,
                 half,
                 offset,
                 rate,
@@ -456,10 +508,15 @@ fn search(
                         - s(0.5) * (f.player.origin.z - state.player.origin.z).min(s(0.0))
                 }
                 Progress::ToGoal => {
-                    let d = course
-                        .volumes_for(aim)
-                        .map(|v| v.hull_distance(f.player.origin, half, offset))
-                        .fold(Scalar::INFINITY, Scalar::min);
+                    let d = match aim {
+                        Aim::Bits(bits) => course
+                            .volumes_for(bits)
+                            .map(|v| v.hull_distance(f.player.origin, half, offset))
+                            .fold(Scalar::INFINITY, Scalar::min),
+                        Aim::Region(b) => {
+                            hull_distance_to_box(&b, f.player.origin, half, offset)
+                        }
+                    };
                     // Speed breaks ties at a tenth the weight, which is what
                     // keeps the searcher from stalling one unit short of a face
                     // and what lets a fly-through outscore a landing.
@@ -477,6 +534,7 @@ fn search(
         };
         let committed = hold(
             &forbidden_boxes,
+            aim_region,
             half,
             offset,
             rate,
@@ -488,6 +546,14 @@ fn search(
             Some(&mut cmds),
         );
         commands_simulated += committed.simulated;
+        if committed.entered_aim {
+            for (i, w) in spec.waypoints.iter().enumerate() {
+                if matches!(w, Aim::Region(_)) && !reached_regions[i] {
+                    reached_regions[i] = true;
+                    break;
+                }
+            }
+        }
         let crossed = committed.touched;
         state = committed.state;
         ticks += spec.decide_every;
@@ -709,6 +775,9 @@ phases
 search options
   --goal <sel>        volume-crossing predicate: bits that must all be touched
   --waypoint <sel>    ordered intermediate volume, repeatable
+  --via x0,x1,y0,y1,z0,z1            ordered intermediate REGION, repeatable;
+                      interleaves with --waypoint in the order given. Needed
+                      wherever a course carries no trigger to steer by.
   --forbid <sel>      bits that must not be touched, repeatable
   --forbid-box x0,x1,y0,y1,z0,z1     region the hull must not enter
   --progress y|goal   scoring metric (default goal)
@@ -765,6 +834,7 @@ fn parse_args() -> Args {
         match argv[i].as_str() {
             "--goal" => a.goal = next(&mut i),
             "--waypoint" => a.waypoints.push(next(&mut i)),
+            "--via" => a.waypoints.push(format!("box:{}", next(&mut i))),
             "--forbid" => a.forbid.push(next(&mut i)),
             "--forbid-box" => a.forbid.push(format!("box:{}", next(&mut i))),
             "--progress" => {
@@ -799,27 +869,32 @@ fn parse_args() -> Args {
     a
 }
 
+fn parse_box(rest: &str, what: &str) -> Aabb {
+    let n: Vec<Scalar> = rest
+        .split(',')
+        .map(|t| {
+            t.trim()
+                .parse()
+                .unwrap_or_else(|_| panic!("{what} wants six numbers"))
+        })
+        .collect();
+    assert_eq!(n.len(), 6, "{what} wants x0,x1,y0,y1,z0,z1");
+    Aabb {
+        mins: vec3(n[0].min(n[1]), n[2].min(n[3]), n[4].min(n[5])),
+        maxs: vec3(n[0].max(n[1]), n[2].max(n[3]), n[4].max(n[5])),
+    }
+}
+
 fn parse_forbid(course: &Course, specs: &[String]) -> Vec<Forbid> {
     specs
         .iter()
-        .map(|spec| {
-            if let Some(rest) = spec.strip_prefix("box:") {
-                let n: Vec<Scalar> = rest
-                    .split(',')
-                    .map(|t| t.trim().parse().expect("--forbid-box wants six numbers"))
-                    .collect();
-                assert_eq!(n.len(), 6, "--forbid-box wants x0,x1,y0,y1,z0,z1");
-                Forbid::Box(Aabb {
-                    mins: vec3(n[0].min(n[1]), n[2].min(n[3]), n[4].min(n[5])),
-                    maxs: vec3(n[0].max(n[1]), n[2].max(n[3]), n[4].max(n[5])),
-                })
-            } else {
-                Forbid::Bits(
-                    course
-                        .select(spec)
-                        .unwrap_or_else(|| panic!("no volume matches --forbid {spec}")),
-                )
-            }
+        .map(|spec| match spec.strip_prefix("box:") {
+            Some(rest) => Forbid::Box(parse_box(rest, "--forbid-box")),
+            None => Forbid::Bits(
+                course
+                    .select(spec)
+                    .unwrap_or_else(|| panic!("no volume matches --forbid {spec}")),
+            ),
         })
         .collect()
 }
@@ -1076,7 +1151,7 @@ fn main() {
             let goal = course
                 .select(&args.goal)
                 .unwrap_or_else(|| panic!("no volume matches --goal {}", args.goal));
-            let waypoints: Vec<TriggerSet> = if baseline {
+            let waypoints: Vec<Aim> = if baseline {
                 // The trivial heuristic, reproduced exactly: sort the timing
                 // volumes by the y of their centroid and steer at the next one.
                 let mut vs: Vec<&Volume> = course
@@ -1094,14 +1169,17 @@ fn main() {
                     "baseline order (volumes sorted by centroid y): {:?}",
                     vs.iter().map(|v| v.name.as_str()).collect::<Vec<_>>()
                 );
-                vs.iter().map(|v| v.set).collect()
+                vs.iter().map(|v| Aim::Bits(v.set)).collect()
             } else {
                 args.waypoints
                     .iter()
-                    .map(|w| {
-                        course
-                            .select(w)
-                            .unwrap_or_else(|| panic!("no volume matches --waypoint {w}"))
+                    .map(|w| match w.strip_prefix("box:") {
+                        Some(rest) => Aim::Region(parse_box(rest, "--via")),
+                        None => Aim::Bits(
+                            course
+                                .select(w)
+                                .unwrap_or_else(|| panic!("no volume matches --waypoint {w}")),
+                        ),
                     })
                     .collect()
             };
