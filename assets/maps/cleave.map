@@ -23,11 +23,21 @@
 // NOT DONE, stated plainly rather than left to be discovered:
 //   - Never played by a human, by operator decision for this whole milestone.
 //     No claim here rests on feel and none should be read as one.
-//   - The two branches' completion TIMES are not yet measured, so the crossover
-//     speed at which the leap starts beating the sweep does not yet exist in
-//     any form, predicted or otherwise. Section S3 says what is known instead.
-//   - The maximum speed a runner can deliver to the launch lip is UNMEASURED,
-//     and it is the number this map most depends on. See THE OPEN QUESTION.
+//   - THE FORK DOES NOT WORK ON THE NUMBERS MEASURED. Fork to rejoin: the low
+//     line 5888 ms, the high line 7040 ms, the deliberate hybrid 10560 ms. The
+//     harder branch is 1152 ms SLOWER, so as measured this is a hard line that
+//     costs a second and buys nothing, and nobody would take the leap. That is
+//     published as a negative rather than left open, and the map was NOT
+//     widened to turn it around. Caveats and coverage in the results file.
+//   - Only the hybrid has been driven end to end. The low and high lines are
+//     PRESUMED completable -- their gates clear at the measured speeds and both
+//     surveys are continuous -- but neither is a run, so their times are
+//     segments of lines that failed later.
+//   - WHETHER ANY RUN HAS ENGAGED THE FORK IS UNRESOLVED. See the launch
+//     predicate below: it separates jumped from walked, not leapt from
+//     declined.
+//   - The maximum speed deliverable to the launch lip is bounded below at 620
+//     ups and not above. See THE OPEN QUESTION.
 //
 // ---------------------------------------------------------------------------
 // The line, and why each piece is the shape it is. Physics: gravity 800,
@@ -88,51 +98,70 @@
 //                      with 145..153 ups. You keep about a quarter of what you
 //                      brought.
 //
-//     THE LOW LINE — the sweep.  x -448..1088, at z=0.
+//     THE LOW LINE — the sweep.  x -448..1216, at z=0.
 //                      No gate, no threshold, forgiving of any entry speed, and
-//                      longer: block_c1 (x -448..704, y 2432..2752) forces the
-//                      line east of x=704, and block_c2 (x 192..1088,
-//                      y 3520..3840) then forces it back west of x=192. Two
+//                      longer: block_c1 (x -448..832, y 3456..3840) forces the
+//                      line east of x=832, and block_c2 (x 320..1216,
+//                      y 4352..4864) then forces it back west of x=320. Two
 //                      long carved turns instead of one committed jump — and a
 //                      sustained turn is where a strafejumper GAINS speed, so
 //                      the sweep is longer in distance and may well be faster
 //                      in arrival speed. Which of those wins is the map's
 //                      question, and see NOT DONE: it is not yet answered.
-//                      ramp_low_out (y 4096..4608, normal.z 0.9701) climbs back
-//                      to z=128 to rejoin.
+//                      ramp_low_out (x -448..320, y 4352..4864, normal.z
+//                      0.9701) climbs back to z=128 to rejoin.
 //
-//     ONE-WAY PERMEABILITY, on the record. The divider is deliberately ABSENT
-//                      across the slot's y-range 2944..3392. It has to be:
-//                      there is no kill plane anywhere in straf3-sim, so a
-//                      runner who fell short into a sealed slot would be inside
-//                      a box with 160-unit faces on three sides and a run that
-//                      could never end. The gap makes the slot drain east into
-//                      the low line. So low -> high is impossible everywhere,
-//                      and high -> low is possible in exactly one place, at the
-//                      cost of the leap and three quarters of your speed.
-//                      Whether that failure path is genuinely slower than
-//                      simply taking the low line is a TIME comparison that has
-//                      not been made. Until it has, this is one-way
-//                      permeability with the penalty measured at the speed
-//                      level only.
+//     WHY BOTH BLOCKS SIT DOWNSTREAM OF THE SLOT. This is the map's least
+//                      obvious constraint and it is load-bearing, so it is
+//                      stated rather than left in the coordinates.
+//                      The divider is deliberately ABSENT across the slot's
+//                      y-range 2944..3392. It has to be: there is no kill plane
+//                      anywhere in straf3-sim, and trigger_teleport is parsed
+//                      but not implemented, so a runner who fell short into a
+//                      SEALED slot would be inside a box with 160-unit faces on
+//                      three sides, in a run that could never end. The gap
+//                      makes the slot drain east into the low line.
+//                      That gap creates a THIRD line, and it is chosen rather
+//                      than suffered: take the high line's climb, run the lane,
+//                      then drop through the slot ON PURPOSE and cross east,
+//                      skipping the leap. Measured as a geometric fact rather
+//                      than argued — a survey across (-700,3100) -> (400,3100)
+//                      finds 35 samples of continuous flat floor, normal.z
+//                      1.0000, no wall at x=-448.
+//                      So the hybrid cannot be prevented. It is instead made
+//                      STRICTLY WORSE BY CONSTRUCTION: both blocks begin at
+//                      y=3456, downstream of the slot's exit window, so
+//                      anything arriving in the low line — from the corridor,
+//                      from a failed leap, or by dropping on purpose — pays the
+//                      low line's cost in full. The hybrid is therefore the low
+//                      line PLUS the westward climb PLUS the drop, and cannot
+//                      be faster than the low line for any runner. An earlier
+//                      cut had block_c1 at y 2432..2752, upstream of the exit,
+//                      and the hybrid skipped that whole sweep; that was a real
+//                      bypass and this is the fix for it.
+//                      Low -> high remains impossible everywhere.
 //
-//   S4  y 4608..4992   The rejoin, full width at z=128. checkpoint 1 sits at
-//                      y 4608..4672: the far side of the fork, and the first
+//   S4  y 4864..5248   The rejoin, full width at z=128. checkpoint 1 sits at
+//                      y 4864..4928: the far side of the fork, and the first
 //                      common ground since checkpoint 0.
 //
-//   S5  y 4992..5664   The finish. 352 units of open air from the lip onto a
+//   S5  y 5248..5920   The finish. 352 units of open air from the lip onto a
 //                      ledge 16 units higher and 384 wide.
 //                      Measured, same two-dimensional sweep, from
-//                      (0, 4980, 152): 510 ups head-on, 530 ups from every
+//                      (0, 5236, 152): 510 ups head-on, 530 ups from every
 //                      approach in the band. Below 510 you land on
 //                      ramp_finish_bail (normal.z 0.809, walkable both ways),
 //                      which runs you down to the pit floor and lets you walk
 //                      back up to the approach pad and try again — the ledge's
 //                      front face is 272 units tall and cannot be climbed.
-//                      No upper bound was found: at 1000 ups the landing is
-//                      y=5348 against a ledge spanning 5344..5664, and above
-//                      that the finish volume is crossed in flight anyway,
-//                      which is why pit_floor reaches y=6720.
+//                      NO UPPER BOUND was found: at 1000 ups the landing is
+//                      still on the ledge, and above that the finish volume is
+//                      crossed in flight anyway, which is why pit_floor reaches
+//                      y=6976. That makes this gate a THRESHOLD rather than a
+//                      window, and a threshold is the shape a speed farm
+//                      defeats. Whether that matters here depends on what speed
+//                      a TIME-COMPETITIVE line can deliver, which is the open
+//                      question below.
 //
 // ---------------------------------------------------------------------------
 // THE OPEN QUESTION, which is this map's biggest risk and is recorded rather
@@ -143,11 +172,27 @@
 // wish-speed base, not a ceiling — and CPM air control accumulates speed on a
 // sustained turn. An automated search left circling in the apron of an earlier
 // cut of this map reached 1437 ups against coil's measured peak of 783.
-// If a runner can deliver much more than 620 ups to the lip, then the leap is
-// free, the sweep is strictly dominated, and this stops being a fork at all.
-// The number that decides it is the MAXIMUM speed deliverable at the lip, and
-// it is not measured yet. It is not honest to publish a crossover speed before
-// that exists, so none is published.
+//
+// That number is a RESERVOIR, not a delivery. It was bought with 43 seconds of
+// simulated time spent going nowhere, and the run clock is running the whole
+// time; in a timed race, speed farmed by circling is paid for in exactly the
+// currency the game scores. So the question that decides this map is not "what
+// is the maximum speed reachable in the apron" but "what is the maximum speed
+// DELIVERED AT THE LIP — ups at the tick of first overlap with the gate — on a
+// line that beats the low branch". Those are different numbers and only the
+// second one is a finding.
+//
+// Measured, across all three lines searched: the best speed ever DELIVERED to
+// the launch lip is 620 ups, against the leap's own 620 worst-approach
+// threshold. Nothing that was trying to go fast arrived fast, so the reservoir
+// does not become a delivery on any line found. That is a LOWER bound from a
+// weak searcher and does not close the question in the other direction.
+//
+// The leap's UPPER bound is UNMEASURED ABOVE THE SWEPT RANGE. The sweep covers
+// 560..700 ups and says nothing whatever about 1437. So this gate is a
+// THRESHOLD, not a window, and a threshold is the shape a speed farm defeats if
+// one is ever delivered. No crossover speed is published, because the two
+// branch times do not cross: the low line simply wins.
 //
 // ---------------------------------------------------------------------------
 // WHICH LINE A RUN TOOK, without a checkpoint on either branch.
@@ -158,10 +203,43 @@
 // alone, which any replay's --trace supplies, so the test is mechanical and is
 // derived from the shipped binary rather than self-reported by a probe:
 //
-//   HIGH  the hull is inside x -896..-448, y 1920..4608, z   96..640
-//   LOW   the hull is inside x -448..1088, y 1920..4096, z  -32..96
+//   HIGH  the hull is inside x -896..-448, y 1920..4864, z   96..640
+//   LOW   the hull is inside x -448..1216, y 1920..4864, z  -32..96
 //
-// Every completing run enters exactly one of them.
+//   FARSIDE  the hull is inside x -896..-448, y 3392..3520, z   96..640
+//
+// FARSIDE is past the gap and only a cleared leap reaches it. Four readings:
+//
+//   LOW only                    the sweep was run
+//   HIGH + FARSIDE              the leap was flown and cleared
+//   HIGH + LOW + launched       fell short -- the failure the slot permits
+//   HIGH + LOW + not launched   the DESCENT EXPLOIT: climbed the ramp,
+//                               declined the leap, dropped through, crossed
+//   NEITHER, on a finished run  a bypass finding by definition
+//
+// LAUNCHED := peak origin z, over ticks where the hull is inside the gap
+// footprint x -896..-448, y 2944..3392, exceeds 168. The 168 is DERIVED, not
+// chosen: the lip surface is z=128, a standing hull sits 24 above it at 152,
+// and a jump adds 45.6. Positional, so it needs no velocity and reproduces
+// from --trace alone.
+//
+// THAT PREDICATE IS CONTESTED AND THE OBJECTION IS SOUND. It separates JUMPED
+// from WALKED, not a committed LEAP from an ordinary strafe-jump, and it errs
+// PERMISSIVE. An ordinary hop is above 168 for 80.6% of its 0.675 s flight --
+// 326 units of travel at 600 ups -- so a runner hopping along the lane and
+// continuing off the end would score LAUNCHED without leaping. The one run that
+// exists measured 152.1, exactly standing height, so it scored NOT launched
+// correctly; but that is because it never jumped, not because the predicate can
+// tell a decline from a commitment. The discriminating quantity is horizontal,
+// not vertical, and no threshold for it is proposed here: an unresolved
+// question beats a constant fitted under time pressure.
+//
+// TWO LIMITS ON THIS COLUMN. LOW-only is NOT evidence of route choice, because
+// the low line is what a runner reaches by doing nothing. And these are
+// DISJOINT CLASSIFICATION BOXES, not solid separation: cleave's branches are
+// connected space across the slot, and the separation that matters lives in the
+// compiled hulls -- print them with
+// `cargo run -p straf3-map --bin mapdump -- assets/maps/cleave.map`.
 //
 // ---------------------------------------------------------------------------
 // CHECKPOINT SEMANTICS: SPLITS. Declared on worldspawn as
@@ -283,12 +361,12 @@
 }
 {
 // brush: floor_apron
-( -448 1472 -32 ) ( 1088 1472 -32 ) ( 1088 1920 -32 ) straf3/floor [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
-( -448 1472 0 ) ( 1088 1920 0 ) ( 1088 1472 0 ) straf3/floor [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
-( -448 1472 -32 ) ( 1088 1472 0 ) ( 1088 1472 -32 ) straf3/floor [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
-( -448 1920 -32 ) ( 1088 1920 -32 ) ( 1088 1920 0 ) straf3/floor [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -448 1472 -32 ) ( 1216 1472 -32 ) ( 1216 1920 -32 ) straf3/floor [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -448 1472 0 ) ( 1216 1920 0 ) ( 1216 1472 0 ) straf3/floor [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -448 1472 -32 ) ( 1216 1472 0 ) ( 1216 1472 -32 ) straf3/floor [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -448 1920 -32 ) ( 1216 1920 -32 ) ( 1216 1920 0 ) straf3/floor [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
 ( -448 1472 -32 ) ( -448 1920 0 ) ( -448 1472 0 ) straf3/floor [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
-( 1088 1472 -32 ) ( 1088 1920 0 ) ( 1088 1920 -32 ) straf3/floor [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 1216 1472 -32 ) ( 1216 1920 0 ) ( 1216 1920 -32 ) straf3/floor [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
 }
 {
 // brush: ramp_climb
@@ -319,30 +397,30 @@
 }
 {
 // brush: wall_south_e
-( 256 1472 -32 ) ( 1120 1472 -32 ) ( 1120 1504 -32 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
-( 256 1472 640 ) ( 1120 1504 640 ) ( 1120 1472 640 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
-( 256 1472 -32 ) ( 1120 1472 640 ) ( 1120 1472 -32 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
-( 256 1504 -32 ) ( 1120 1504 -32 ) ( 1120 1504 640 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 256 1472 -32 ) ( 1248 1472 -32 ) ( 1248 1504 -32 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( 256 1472 640 ) ( 1248 1504 640 ) ( 1248 1472 640 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( 256 1472 -32 ) ( 1248 1472 640 ) ( 1248 1472 -32 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 256 1504 -32 ) ( 1248 1504 -32 ) ( 1248 1504 640 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
 ( 256 1472 -32 ) ( 256 1504 640 ) ( 256 1472 640 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
-( 1120 1472 -32 ) ( 1120 1504 640 ) ( 1120 1504 -32 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 1248 1472 -32 ) ( 1248 1504 640 ) ( 1248 1504 -32 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
 }
 {
 // brush: wall_chamber_w
-( -928 1472 -32 ) ( -896 1472 -32 ) ( -896 4992 -32 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
-( -928 1472 640 ) ( -896 4992 640 ) ( -896 1472 640 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -928 1472 -32 ) ( -896 1472 -32 ) ( -896 5248 -32 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -928 1472 640 ) ( -896 5248 640 ) ( -896 1472 640 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
 ( -928 1472 -32 ) ( -896 1472 640 ) ( -896 1472 -32 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
-( -928 4992 -32 ) ( -896 4992 -32 ) ( -896 4992 640 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
-( -928 1472 -32 ) ( -928 4992 640 ) ( -928 1472 640 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
-( -896 1472 -32 ) ( -896 4992 640 ) ( -896 4992 -32 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -928 5248 -32 ) ( -896 5248 -32 ) ( -896 5248 640 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -928 1472 -32 ) ( -928 5248 640 ) ( -928 1472 640 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -896 1472 -32 ) ( -896 5248 640 ) ( -896 5248 -32 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
 }
 {
 // brush: wall_chamber_e
-( 1088 1472 -32 ) ( 1120 1472 -32 ) ( 1120 4992 -32 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
-( 1088 1472 640 ) ( 1120 4992 640 ) ( 1120 1472 640 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
-( 1088 1472 -32 ) ( 1120 1472 640 ) ( 1120 1472 -32 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
-( 1088 4992 -32 ) ( 1120 4992 -32 ) ( 1120 4992 640 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
-( 1088 1472 -32 ) ( 1088 4992 640 ) ( 1088 1472 640 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
-( 1120 1472 -32 ) ( 1120 4992 640 ) ( 1120 4992 -32 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 1216 1472 -32 ) ( 1248 1472 -32 ) ( 1248 5248 -32 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( 1216 1472 640 ) ( 1248 5248 640 ) ( 1248 1472 640 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( 1216 1472 -32 ) ( 1248 1472 640 ) ( 1248 1472 -32 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 1216 5248 -32 ) ( 1248 5248 -32 ) ( 1248 5248 640 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 1216 1472 -32 ) ( 1216 5248 640 ) ( 1216 1472 640 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 1248 1472 -32 ) ( 1248 5248 640 ) ( 1248 5248 -32 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
 }
 {
 // brush: pad_high_lane
@@ -364,12 +442,12 @@
 }
 {
 // brush: pad_high_land
-( -896 3392 -32 ) ( -448 3392 -32 ) ( -448 4608 -32 ) straf3/pad [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
-( -896 3392 128 ) ( -448 4608 128 ) ( -448 3392 128 ) straf3/pad [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -896 3392 -32 ) ( -448 3392 -32 ) ( -448 4864 -32 ) straf3/pad [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -896 3392 128 ) ( -448 4864 128 ) ( -448 3392 128 ) straf3/pad [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
 ( -896 3392 -32 ) ( -448 3392 128 ) ( -448 3392 -32 ) straf3/pad [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
-( -896 4608 -32 ) ( -448 4608 -32 ) ( -448 4608 128 ) straf3/pad [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
-( -896 3392 -32 ) ( -896 4608 128 ) ( -896 3392 128 ) straf3/pad [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
-( -448 3392 -32 ) ( -448 4608 128 ) ( -448 4608 -32 ) straf3/pad [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -896 4864 -32 ) ( -448 4864 -32 ) ( -448 4864 128 ) straf3/pad [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -896 3392 -32 ) ( -896 4864 128 ) ( -896 3392 128 ) straf3/pad [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -448 3392 -32 ) ( -448 4864 128 ) ( -448 4864 -32 ) straf3/pad [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
 }
 {
 // brush: wall_divide_s
@@ -382,84 +460,84 @@
 }
 {
 // brush: wall_divide_n
-( -480 3392 -32 ) ( -448 3392 -32 ) ( -448 4608 -32 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
-( -480 3392 512 ) ( -448 4608 512 ) ( -448 3392 512 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -480 3392 -32 ) ( -448 3392 -32 ) ( -448 4864 -32 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -480 3392 512 ) ( -448 4864 512 ) ( -448 3392 512 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
 ( -480 3392 -32 ) ( -448 3392 512 ) ( -448 3392 -32 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
-( -480 4608 -32 ) ( -448 4608 -32 ) ( -448 4608 512 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
-( -480 3392 -32 ) ( -480 4608 512 ) ( -480 3392 512 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
-( -448 3392 -32 ) ( -448 4608 512 ) ( -448 4608 -32 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -480 4864 -32 ) ( -448 4864 -32 ) ( -448 4864 512 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -480 3392 -32 ) ( -480 4864 512 ) ( -480 3392 512 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -448 3392 -32 ) ( -448 4864 512 ) ( -448 4864 -32 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
 }
 {
 // brush: floor_low
-( -448 1920 -32 ) ( 1088 1920 -32 ) ( 1088 4096 -32 ) straf3/floor [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
-( -448 1920 0 ) ( 1088 4096 0 ) ( 1088 1920 0 ) straf3/floor [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
-( -448 1920 -32 ) ( 1088 1920 0 ) ( 1088 1920 -32 ) straf3/floor [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
-( -448 4096 -32 ) ( 1088 4096 -32 ) ( 1088 4096 0 ) straf3/floor [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
-( -448 1920 -32 ) ( -448 4096 0 ) ( -448 1920 0 ) straf3/floor [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
-( 1088 1920 -32 ) ( 1088 4096 0 ) ( 1088 4096 -32 ) straf3/floor [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -448 1920 -32 ) ( 1216 1920 -32 ) ( 1216 4864 -32 ) straf3/floor [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -448 1920 0 ) ( 1216 4864 0 ) ( 1216 1920 0 ) straf3/floor [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -448 1920 -32 ) ( 1216 1920 0 ) ( 1216 1920 -32 ) straf3/floor [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -448 4864 -32 ) ( 1216 4864 -32 ) ( 1216 4864 0 ) straf3/floor [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -448 1920 -32 ) ( -448 4864 0 ) ( -448 1920 0 ) straf3/floor [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 1216 1920 -32 ) ( 1216 4864 0 ) ( 1216 4864 -32 ) straf3/floor [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
 }
 {
 // brush: block_c1
-( -448 2432 0 ) ( 704 2432 0 ) ( 704 2752 0 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
-( -448 2432 384 ) ( 704 2752 384 ) ( 704 2432 384 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
-( -448 2432 0 ) ( 704 2432 384 ) ( 704 2432 0 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
-( -448 2752 0 ) ( 704 2752 0 ) ( 704 2752 384 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
-( -448 2432 0 ) ( -448 2752 384 ) ( -448 2432 384 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
-( 704 2432 0 ) ( 704 2752 384 ) ( 704 2752 0 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -448 3456 0 ) ( 832 3456 0 ) ( 832 3840 0 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -448 3456 384 ) ( 832 3840 384 ) ( 832 3456 384 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -448 3456 0 ) ( 832 3456 384 ) ( 832 3456 0 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -448 3840 0 ) ( 832 3840 0 ) ( 832 3840 384 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -448 3456 0 ) ( -448 3840 384 ) ( -448 3456 384 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 832 3456 0 ) ( 832 3840 384 ) ( 832 3840 0 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
 }
 {
 // brush: block_c2
-( 192 3520 0 ) ( 1088 3520 0 ) ( 1088 3840 0 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
-( 192 3520 384 ) ( 1088 3840 384 ) ( 1088 3520 384 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
-( 192 3520 0 ) ( 1088 3520 384 ) ( 1088 3520 0 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
-( 192 3840 0 ) ( 1088 3840 0 ) ( 1088 3840 384 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
-( 192 3520 0 ) ( 192 3840 384 ) ( 192 3520 384 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
-( 1088 3520 0 ) ( 1088 3840 384 ) ( 1088 3840 0 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 320 4352 0 ) ( 1216 4352 0 ) ( 1216 4864 0 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( 320 4352 384 ) ( 1216 4864 384 ) ( 1216 4352 384 ) straf3/wall [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( 320 4352 0 ) ( 1216 4352 384 ) ( 1216 4352 0 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 320 4864 0 ) ( 1216 4864 0 ) ( 1216 4864 384 ) straf3/wall [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 320 4352 0 ) ( 320 4864 384 ) ( 320 4352 384 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 1216 4352 0 ) ( 1216 4864 384 ) ( 1216 4864 0 ) straf3/wall [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
 }
 {
 // brush: ramp_low_out
-( -448 4096 -32 ) ( 1088 4096 -32 ) ( 1088 4608 -32 ) straf3/ramp [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
-( -448 4096 0 ) ( 1088 4608 128 ) ( 1088 4096 0 ) straf3/ramp [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
-( -448 4096 -32 ) ( 1088 4096 0 ) ( 1088 4096 -32 ) straf3/ramp [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
-( -448 4608 -32 ) ( 1088 4608 -32 ) ( 1088 4608 128 ) straf3/ramp [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
-( -448 4096 -32 ) ( -448 4608 128 ) ( -448 4096 0 ) straf3/ramp [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
-( 1088 4096 -32 ) ( 1088 4608 128 ) ( 1088 4608 -32 ) straf3/ramp [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -448 4352 -32 ) ( 320 4352 -32 ) ( 320 4864 -32 ) straf3/ramp [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -448 4352 0 ) ( 320 4864 128 ) ( 320 4352 0 ) straf3/ramp [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -448 4352 -32 ) ( 320 4352 0 ) ( 320 4352 -32 ) straf3/ramp [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -448 4864 -32 ) ( 320 4864 -32 ) ( 320 4864 128 ) straf3/ramp [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -448 4352 -32 ) ( -448 4864 128 ) ( -448 4352 0 ) straf3/ramp [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 320 4352 -32 ) ( 320 4864 128 ) ( 320 4864 -32 ) straf3/ramp [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
 }
 {
 // brush: pad_rejoin
-( -896 4608 -32 ) ( 1088 4608 -32 ) ( 1088 4992 -32 ) straf3/pad [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
-( -896 4608 128 ) ( 1088 4992 128 ) ( 1088 4608 128 ) straf3/pad [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
-( -896 4608 -32 ) ( 1088 4608 128 ) ( 1088 4608 -32 ) straf3/pad [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
-( -896 4992 -32 ) ( 1088 4992 -32 ) ( 1088 4992 128 ) straf3/pad [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
-( -896 4608 -32 ) ( -896 4992 128 ) ( -896 4608 128 ) straf3/pad [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
-( 1088 4608 -32 ) ( 1088 4992 128 ) ( 1088 4992 -32 ) straf3/pad [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -896 4864 -32 ) ( 1216 4864 -32 ) ( 1216 5248 -32 ) straf3/pad [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -896 4864 128 ) ( 1216 5248 128 ) ( 1216 4864 128 ) straf3/pad [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -896 4864 -32 ) ( 1216 4864 128 ) ( 1216 4864 -32 ) straf3/pad [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -896 5248 -32 ) ( 1216 5248 -32 ) ( 1216 5248 128 ) straf3/pad [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -896 4864 -32 ) ( -896 5248 128 ) ( -896 4864 128 ) straf3/pad [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 1216 4864 -32 ) ( 1216 5248 128 ) ( 1216 5248 -32 ) straf3/pad [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
 }
 {
 // brush: ramp_finish_bail
-( -320 4992 -192 ) ( 320 4992 -192 ) ( 320 5344 -192 ) straf3/ramp [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
-( -320 4992 128 ) ( 320 5344 -128 ) ( 320 4992 128 ) straf3/ramp [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
-( -320 4992 -192 ) ( 320 4992 128 ) ( 320 4992 -192 ) straf3/ramp [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
-( -320 5344 -192 ) ( 320 5344 -192 ) ( 320 5344 -128 ) straf3/ramp [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
-( -320 4992 -192 ) ( -320 5344 -128 ) ( -320 4992 128 ) straf3/ramp [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
-( 320 4992 -192 ) ( 320 5344 -128 ) ( 320 5344 -192 ) straf3/ramp [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -320 5248 -192 ) ( 320 5248 -192 ) ( 320 5600 -192 ) straf3/ramp [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -320 5248 128 ) ( 320 5600 -128 ) ( 320 5248 128 ) straf3/ramp [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -320 5248 -192 ) ( 320 5248 128 ) ( 320 5248 -192 ) straf3/ramp [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -320 5600 -192 ) ( 320 5600 -192 ) ( 320 5600 -128 ) straf3/ramp [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -320 5248 -192 ) ( -320 5600 -128 ) ( -320 5248 128 ) straf3/ramp [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 320 5248 -192 ) ( 320 5600 -128 ) ( 320 5600 -192 ) straf3/ramp [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
 }
 {
 // brush: finish_ledge
-( -192 5344 -128 ) ( 192 5344 -128 ) ( 192 5664 -128 ) straf3/finish [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
-( -192 5344 144 ) ( 192 5664 144 ) ( 192 5344 144 ) straf3/finish [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
-( -192 5344 -128 ) ( 192 5344 144 ) ( 192 5344 -128 ) straf3/finish [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
-( -192 5664 -128 ) ( 192 5664 -128 ) ( 192 5664 144 ) straf3/finish [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
-( -192 5344 -128 ) ( -192 5664 144 ) ( -192 5344 144 ) straf3/finish [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
-( 192 5344 -128 ) ( 192 5664 144 ) ( 192 5664 -128 ) straf3/finish [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -192 5600 -128 ) ( 192 5600 -128 ) ( 192 5920 -128 ) straf3/finish [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -192 5600 144 ) ( 192 5920 144 ) ( 192 5600 144 ) straf3/finish [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -192 5600 -128 ) ( 192 5600 144 ) ( 192 5600 -128 ) straf3/finish [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -192 5920 -128 ) ( 192 5920 -128 ) ( 192 5920 144 ) straf3/finish [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -192 5600 -128 ) ( -192 5920 144 ) ( -192 5600 144 ) straf3/finish [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 192 5600 -128 ) ( 192 5920 144 ) ( 192 5920 -128 ) straf3/finish [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
 }
 {
 // brush: pit_floor
-( -928 4992 -192 ) ( 1120 4992 -192 ) ( 1120 6720 -192 ) straf3/floor [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
-( -928 4992 -128 ) ( 1120 6720 -128 ) ( 1120 4992 -128 ) straf3/floor [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
-( -928 4992 -192 ) ( 1120 4992 -128 ) ( 1120 4992 -192 ) straf3/floor [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
-( -928 6720 -192 ) ( 1120 6720 -192 ) ( 1120 6720 -128 ) straf3/floor [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
-( -928 4992 -192 ) ( -928 6720 -128 ) ( -928 4992 -128 ) straf3/floor [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
-( 1120 4992 -192 ) ( 1120 6720 -128 ) ( 1120 6720 -192 ) straf3/floor [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -928 5248 -192 ) ( 1248 5248 -192 ) ( 1248 6976 -192 ) straf3/floor [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -928 5248 -128 ) ( 1248 6976 -128 ) ( 1248 5248 -128 ) straf3/floor [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -928 5248 -192 ) ( 1248 5248 -128 ) ( 1248 5248 -192 ) straf3/floor [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -928 6976 -192 ) ( 1248 6976 -192 ) ( 1248 6976 -128 ) straf3/floor [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -928 5248 -192 ) ( -928 6976 -128 ) ( -928 5248 -128 ) straf3/floor [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 1248 5248 -192 ) ( 1248 6976 -128 ) ( 1248 6976 -192 ) straf3/floor [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
 }
 }
 // entity 1 — spawn, facing +X for the circle jump
@@ -502,12 +580,12 @@
 "target" "t_cp_rejoin"
 {
 // brush: trigger_cp_rejoin
-( -896 4608 96 ) ( 1088 4608 96 ) ( 1088 4672 96 ) common/trigger [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
-( -896 4608 768 ) ( 1088 4672 768 ) ( 1088 4608 768 ) common/trigger [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
-( -896 4608 96 ) ( 1088 4608 768 ) ( 1088 4608 96 ) common/trigger [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
-( -896 4672 96 ) ( 1088 4672 96 ) ( 1088 4672 768 ) common/trigger [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
-( -896 4608 96 ) ( -896 4672 768 ) ( -896 4608 768 ) common/trigger [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
-( 1088 4608 96 ) ( 1088 4672 768 ) ( 1088 4672 96 ) common/trigger [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -896 4864 96 ) ( 1216 4864 96 ) ( 1216 4928 96 ) common/trigger [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -896 4864 768 ) ( 1216 4928 768 ) ( 1216 4864 768 ) common/trigger [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -896 4864 96 ) ( 1216 4864 768 ) ( 1216 4864 96 ) common/trigger [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -896 4928 96 ) ( 1216 4928 96 ) ( 1216 4928 768 ) common/trigger [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -896 4864 96 ) ( -896 4928 768 ) ( -896 4864 768 ) common/trigger [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 1216 4864 96 ) ( 1216 4928 768 ) ( 1216 4928 96 ) common/trigger [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
 }
 }
 // entity 5 — trigger_finish
@@ -516,12 +594,12 @@
 "target" "t_finish"
 {
 // brush: trigger_finish
-( -192 5344 128 ) ( 192 5344 128 ) ( 192 5408 128 ) common/trigger [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
-( -192 5344 768 ) ( 192 5408 768 ) ( 192 5344 768 ) common/trigger [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
-( -192 5344 128 ) ( 192 5344 768 ) ( 192 5344 128 ) common/trigger [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
-( -192 5408 128 ) ( 192 5408 128 ) ( 192 5408 768 ) common/trigger [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
-( -192 5344 128 ) ( -192 5408 768 ) ( -192 5344 768 ) common/trigger [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
-( 192 5344 128 ) ( 192 5408 768 ) ( 192 5408 128 ) common/trigger [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -192 5600 128 ) ( 192 5600 128 ) ( 192 5664 128 ) common/trigger [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -192 5600 768 ) ( 192 5664 768 ) ( 192 5600 768 ) common/trigger [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -192 5600 128 ) ( 192 5600 768 ) ( 192 5600 128 ) common/trigger [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -192 5664 128 ) ( 192 5664 128 ) ( 192 5664 768 ) common/trigger [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -192 5600 128 ) ( -192 5664 768 ) ( -192 5600 768 ) common/trigger [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 192 5600 128 ) ( 192 5664 768 ) ( 192 5664 128 ) common/trigger [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
 }
 }
 // entity 6 — target_startTimer t_start
@@ -541,12 +619,12 @@
 {
 "classname" "target_checkpoint"
 "targetname" "t_cp_rejoin"
-"origin" "96 4640 256"
+"origin" "160 4896 256"
 "count" "1"
 }
 // entity 9 — target_stopTimer t_finish
 {
 "classname" "target_stopTimer"
 "targetname" "t_finish"
-"origin" "0 5376 272"
+"origin" "0 5632 272"
 }
