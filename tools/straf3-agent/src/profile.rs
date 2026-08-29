@@ -14,16 +14,27 @@
 //! know. A drift shows up as `straf3 --replay` rejecting the file by name, not
 //! as a run replayed under different physics.
 //!
-//! # Why the default is `cpm` and not `straf3`
+//! # `straf3` is now a name this crate offers, and the default is still `cpm`
 //!
-//! Because `straf3` is not a name the shipped client accepts. The canon freeze
-//! landed `PhysicsProfile::straf3()` in the simulation and its client half never
-//! did — `straf3-game` offers `cpm|vq3|experimental` — so a fixture headed
-//! `profile straf3` would be rejected by the very binary that has to replay it.
-//! `PhysicsProfile::straf3()` is today bit-for-bit identical to
-//! `PhysicsProfile::cpm()`, which is why running under `cpm` costs this crate
-//! nothing but a name. That is a finding about the tree, recorded here rather
-//! than worked around: closing it is requirement r1's job, not this crate's.
+//! Those are two decisions, not one, and only the first of them changed.
+//!
+//! This module used to record that `straf3` was unusable here because the
+//! shipped client did not know it: the canon freeze landed
+//! `PhysicsProfile::straf3()` in the simulation and its client half never
+//! arrived, so a fixture headed `profile straf3` would have been rejected by the
+//! very binary that has to replay it. **That is no longer true.** r1 landed the
+//! client half — `crates/straf3-game/src/profile.rs:102` now advertises
+//! `straf3|cpm|vq3|experimental` and `:118` resolves the name — so the table
+//! below follows it, which is the whole contract this module has.
+//!
+//! The default stays `cpm` for a narrower reason that has not changed. A fixture
+//! this crate writes is evidence only if the shipped binary reads it back to the
+//! same checksum, and **nobody in this tree has yet replayed a `profile
+//! straf3`-headed stream end to end**. `PhysicsProfile::straf3()` is bit-for-bit
+//! identical to `PhysicsProfile::cpm()` — asserted below, not assumed — so the
+//! header name is the only thing at stake and moving it would buy nothing while
+//! putting an unverified claim under r12. When someone verifies that replay, the
+//! default is a one-line change and this paragraph is its trigger.
 
 use straf3_sim::PhysicsProfile;
 
@@ -32,9 +43,9 @@ use straf3_sim::PhysicsProfile;
 /// Deliberately the same list `straf3-game` advertises, and no longer: a name
 /// this crate accepted and the replay parser did not would produce a command
 /// stream nothing can verify.
-pub const NAMES: &str = "cpm|vq3|experimental";
+pub const NAMES: &str = "straf3|cpm|vq3|experimental";
 
-/// The default, and why: see the module docs.
+/// The default, and why it is not `straf3`: see the module docs.
 pub const DEFAULT: &str = "cpm";
 
 /// The constants a profile name stands for, or `None` for a name the shipped
@@ -42,6 +53,10 @@ pub const DEFAULT: &str = "cpm";
 #[must_use]
 pub fn by_name(name: &str) -> Option<PhysicsProfile> {
     match name {
+        // Straf3's own frozen canon. Spelled out rather than written as
+        // `cpm()`, for the same reason `straf3-game`'s table spells it out: the
+        // two are equal today and the name says which one was asked for.
+        "straf3" => Some(PhysicsProfile::straf3()),
         "cpm" => Some(PhysicsProfile::cpm()),
         "vq3" => Some(PhysicsProfile::vq3()),
         // `straf3-game` resolves this through its own `experimental()`, which is
@@ -68,12 +83,23 @@ mod tests {
     }
 
     #[test]
-    fn straf3_is_not_a_spelling_this_crate_offers() {
-        // Not an oversight. The shipped `--replay` reader does not know the
-        // name, so a fixture written under it could not be verified — see the
-        // module docs. When r1 lands the client half, this test is the one that
-        // has to change, deliberately.
-        assert_eq!(by_name("straf3"), None);
+    fn straf3_is_a_spelling_this_crate_offers_now_that_r1_has_landed() {
+        // This test used to assert the opposite, and its own comment named the
+        // condition under which it had to invert: "when r1 lands the client
+        // half". It has. `straf3-game`'s table advertises the name and resolves
+        // it, so refusing it here would make this crate the one component that
+        // disagrees with the binary it writes files for.
+        assert_eq!(by_name("straf3"), Some(PhysicsProfile::straf3()));
+    }
+
+    #[test]
+    fn the_default_is_not_straf3_and_that_is_deliberate() {
+        // Not an oversight either, and the reason is no longer about the parser
+        // — it is that no seat has yet replayed a `profile straf3`-headed stream
+        // through the shipped binary. Until one has, defaulting to a header
+        // nobody has round-tripped would put an unverified claim under r12 to
+        // buy nothing, the two profiles being numerically equal.
+        assert_eq!(DEFAULT, "cpm");
     }
 
     #[test]

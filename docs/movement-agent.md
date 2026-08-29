@@ -255,15 +255,27 @@ generated run is never mistaken for a played one.
 
 ## The profile the agent runs under, and a finding it inherits
 
-The agent offers `cpm|vq3|experimental` and defaults to `cpm`. `straf3` is
-deliberately absent: `PhysicsProfile::straf3()` landed in the simulation and its
-client half did not, so `straf3-game` does not accept the name and a command
-stream headed `profile straf3` would be refused by the very binary that has to
-replay it. `PhysicsProfile::straf3()` is today bit-for-bit identical to
+The agent offers `straf3|cpm|vq3|experimental` and defaults to `cpm`.
+
+This paragraph used to say that `straf3` was deliberately absent, because the
+canon freeze had landed `PhysicsProfile::straf3()` in the simulation while its
+client half had not, so a stream headed `profile straf3` would have been refused
+by the very binary that has to replay it. **That gap is closed.** r1 landed the
+client half: `crates/straf3-game/src/profile.rs:102` advertises
+`straf3|cpm|vq3|experimental` and `:118` resolves the name, so `src/profile.rs`
+here follows it, and the two tests that asserted the old state have inverted
+under the trigger conditions their own comments named.
+
+The default is still `cpm`, and that is now a different and much narrower claim.
+It is not that the parser would refuse the name — it would not. It is that **no
+seat in this tree has yet replayed a `profile straf3`-headed stream end to end
+through the shipped binary**, and r12 is a claim about that round trip rather
+than about the table. `PhysicsProfile::straf3()` is bit-for-bit identical to
 `PhysicsProfile::cpm()` — `the_canonical_profile_is_still_cpm_by_another_name`
-in `src/profile.rs` asserts it — so running under `cpm` costs nothing but a
-name. Closing that gap is requirement r1's work, not this crate's; when it is
-closed, that test and `src/profile.rs`'s table are what have to change.
+in `src/profile.rs` asserts it rather than assuming it — so the header name is
+the only thing at stake, and moving the default would put an unverified claim
+under r12 to buy nothing. The first seat to verify that replay should move it;
+`the_default_is_not_straf3_and_that_is_deliberate` is where the reason lives.
 
 ## Running it
 
