@@ -1664,7 +1664,10 @@ frame,delta_ns
 
         // The worst case does not: a vsynced frame that runs no command makes
         // the next one wait two frames.
-        assert!(v.total.max_ns > u.total.max_ns + 3_000_000, "{v:?} vs {u:?}");
+        assert!(
+            v.total.max_ns > u.total.max_ns + 3_000_000,
+            "{v:?} vs {u:?}"
+        );
     }
 
     #[test]
@@ -1689,10 +1692,7 @@ frame,delta_ns
         // holds to within integer division. Percentiles are not linear, which
         // is the whole reason the two rows must not be added.
         assert!(
-            l.total
-                .mean_ns
-                .abs_diff(l.queue.mean_ns + l.carry.mean_ns)
-                <= 2,
+            l.total.mean_ns.abs_diff(l.queue.mean_ns + l.carry.mean_ns) <= 2,
             "{l:?}"
         );
         // Adding the two tails instead overstates, because the stages are

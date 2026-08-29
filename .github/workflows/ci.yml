@@ -70,6 +70,26 @@ jobs:
       - name: Probes still compile
         run: cargo xtask check-probes
 
+      # Every number a document publishes as a live claim, re-derived from the
+      # command published beside it. `probes/coil-course/results/coil.txt` told
+      # a reader to run the shipped binary and see 0x9a854d1a3653d8b7; a commit
+      # the next day widened the folded simulation state, the number moved, the
+      # trajectory did not move at all, and nothing in the tree noticed for nine
+      # days — because no command re-derived a published number and compared it.
+      #
+      # On this job rather than the fast gate: re-deriving means building and
+      # running the release client, which needs the system libraries installed
+      # above. Placed after `Probes still compile` for the same reason that step
+      # sits after Build/Test — a stale number is a weaker signal than a tree
+      # that does not compile, and reading them the other way round wastes a
+      # diagnosis.
+      #
+      # Fails closed. An unknown claim kind, a missing inventoried file, a
+      # marker governing nothing, or output it cannot parse are each a failure
+      # with a named reason rather than a skip.
+      - name: Published numbers still reproduce
+        run: cargo xtask check-evidence
+
   seam-only:
     # A fast gate that needs no system libraries and compiles nothing but
     # xtask: the architectural rule and the determinism rule are the things

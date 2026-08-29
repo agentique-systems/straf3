@@ -11,6 +11,9 @@
 //! - [`probes`] compiles every crate under `probes/`, which no `--workspace`
 //!   command reaches, so a probe cannot rot unnoticed the way two did when
 //!   C3 changed the command boundary.
+//! - [`evidence`] re-derives every number a document publishes as a live claim
+//!   and fails when one stops reproducing, so a checksum pasted into prose
+//!   cannot expire silently the way `coil.txt`'s did for nine days.
 //!
 //! Three more are instruments rather than checks — they exist so that a claim
 //! about how the game moves, or about the real GPU, is something a reader can
@@ -24,6 +27,7 @@
 
 pub mod capture;
 pub mod determinism;
+pub mod evidence;
 pub mod lab;
 pub mod pacing;
 pub mod probes;

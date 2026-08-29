@@ -7,6 +7,7 @@ fn main() -> ExitCode {
     match std::env::args().nth(1).as_deref() {
         Some("check-seam") => check_seam(),
         Some("check-probes") => check_probes(&argv),
+        Some("check-evidence") => check_evidence(&argv),
         Some("determinism") => determinism(&argv),
         Some("capture") => capture(&argv),
         Some("pacing") => pacing(&argv),
@@ -56,6 +57,34 @@ usage: cargo xtask <command>
                  --all-features      also compile `optional` path deps
                  --only <dir>        check only this probe (repeatable)
                  --skip <dir>        skip this probe, loudly (repeatable)
+
+  check-evidence
+               Re-derive every number a document publishes as a live claim,
+               and fail when one stops reproducing. `coil.txt` published a
+               state checksum and told a reader to run the binary and see it;
+               a commit the next day widened the folded simulation state, and
+               nothing noticed for nine days.
+
+               Numbers carry a declared category, because the same digest is a
+               live claim in one file and a dated snapshot in another and
+               nothing in the text tells them apart:
+
+                 straf3:claim kind=<kind>                 must reproduce
+                 straf3:snapshot taken=<date> build=<sha> must have provenance
+
+               Live claims are checked for their VALUE; snapshots are checked
+               for their PROVENANCE. Neither is unexamined — a snapshot with
+               no date and no commit is indistinguishable from a stale live
+               claim, which is exactly how this went unnoticed.
+
+               It scans a declared inventory of files rather than the tree, and
+               inside one every digest must be marked. The files deliberately
+               left out are named on every run, so the gate's silence is a
+               stated position rather than an oversight.
+
+               Fails closed: an unknown kind, a missing file, a marker that
+               governs nothing, a build that fails and output it cannot parse
+               are each a failure with a reason, never a skip.
 
   determinism  Run one reference command stream through straf3-sim on every
                target the project ships or verifies on — glibc, musl,
@@ -236,6 +265,41 @@ fn check_probes(argv: &[String]) -> ExitCode {
         }
         Err(e) => {
             eprintln!("probe check could not run: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn check_evidence(argv: &[String]) -> ExitCode {
+    println!(
+        "re-deriving every number this tree publishes as a live claim...\n\
+         a checksum in prose is a claim with an expiry date nobody can see\n\
+         (README.md, \"Status\"). This is what makes it visible.\n"
+    );
+    match xtask::evidence::run(argv) {
+        Ok(true) => ExitCode::SUCCESS,
+        Ok(false) => {
+            eprintln!(
+                "\nA published number no longer reproduces, or a claim could not be\n\
+                 checked at all. Each finding above names the file, the line, what\n\
+                 was published and what this tree produces now.\n\n\
+                 Before pasting the new value in: check whether the TRAJECTORY moved\n\
+                 too. An identical origin and velocity with a different checksum means\n\
+                 the folded simulation state widened, which is not a movement\n\
+                 regression — see crates/straf3-replay/src/identity.rs. A different\n\
+                 origin means the physics moved, and that is a different conversation.\n\n\
+                 Update every document the findings name in ONE commit, with the\n\
+                 reason in the message."
+            );
+            ExitCode::FAILURE
+        }
+        Err(e) => {
+            eprintln!("the evidence check could not run: {e}");
+            eprintln!(
+                "\nThat is a failure, not a skip. A gate that cannot run has the same\n\
+                 effect as a gate that passes, and this one exists because something\n\
+                 was green for the wrong reason."
+            );
             ExitCode::FAILURE
         }
     }
