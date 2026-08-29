@@ -1,68 +1,48 @@
 # probes/course-lab/results/cleave.txt
 #
-# The measurements behind assets/maps/cleave.map's header. Everything below the
-# blank line is `course-lab`'s own stdout, not hand-edited.
+# The measurements behind assets/maps/cleave.map. Everything below the header
+# blocks is `course-lab`'s own stdout, not hand-edited.
+#
+# MAP UNDER MEASUREMENT: collision digest 0xd2d7d01e8f9d03ef.
+# Every number here belongs to that cut and to no other. Reproduced on this host
+# at this commit; no cross-target claim is made, because map compilation is not
+# in the determinism suite and nothing has measured it in either direction.
 #
 # ONE WORLD, AND IT IS THE SHIPPED ONE
 # ------------------------------------
-# Every number here was produced in the world `straf3_map::compile` builds and
-# `CompiledMap::collider()` hands over -- the same call `straf3-game`'s scene and
-# `straf3-render` both go through. This probe has no second brush-to-hull
-# derivation and does not depend on the `quake-map` parser at all; `map.collider()`
-# at src/main.rs:175 is the only world it ever constructs, and every trace, every
-# `step_in_place` and every gate sweep runs against it.
+# `straf3_map::compile` then `CompiledMap::collider()` at src/main.rs:157/:175
+# is the ONLY world this probe constructs. It has no `quake-map` dependency, so
+# a second brush-to-hull derivation is not structurally possible. Every trace,
+# every `step_in_place` and every gate sweep runs in the world the player runs
+# in, with `compile_hull`'s bevel planes present -- which is exactly the case a
+# hull clearing a lip at 600 ups is sensitive to.
 #
-# That is a deliberate difference from `probes/coil-course`, which carries two
-# worlds and says so: its H1-H5 use its own `Hull::from_planes` path and only its
-# H6 uses the shipped compiler, because that probe's value is being an independent
-# second derivation of the compile step. This one asks a different question --
-# what does the course afford a player -- and a player runs in the compiled world.
-# `compile_hull` adds the bevel planes a swept box needs, and a hull clearing a lip
-# at 600 ups is exactly the case that is sensitive to them, so measuring anywhere
-# else would have been measuring a course nobody plays.
+# WHAT THESE NUMBERS ARE AND ARE NOT
+# ----------------------------------
+# All three lines below are --via-GUIDED: ordered region waypoints name each
+# local minimum for the searcher. That is legitimate for measuring what the
+# course affords, and it is per-map hand tuning of the instrument. It therefore
+# discharges nothing about an agent's generality and must never be offered
+# against r2 or r30. Where a number below is used, it is used as "this course
+# affords this", not as "a general agent achieved this".
 #
-# WHAT THIS FILE DOES NOT ESTABLISH
-# ---------------------------------
-# - No completing run. At the time of writing, no search has driven cleave from
-#   the start line to the finish. The searcher's negatives are recorded in full
-#   below, with their coverage, because a negative with no coverage numbers is
-#   not a result. They are statements about this search, not about the map.
-# - No branch times, and therefore no crossover speed. The map's headline
-#   question -- at what entry speed does the leap start beating the sweep --
-#   has no answer yet in any form.
-# - No maximum deliverable speed at the launch lip. Section S3's gate is only a
-#   gate if that number is near it, and it is unmeasured.
-# - Nothing here was played by a human, by operator decision for this milestone.
-#
-# REGENERATE
-# ----------
-#   cd probes/course-lab
-#   cargo run --release -- ../../assets/maps/cleave.map compile
-#   cargo run --release -- ../../assets/maps/cleave.map spawn
-#   cargo run --release -- ../../assets/maps/cleave.map survey --line "0,1400;-700,1900;-700,4700"
-#   cargo run --release -- ../../assets/maps/cleave.map survey --line "0,1400;900,2560;900,2900;0,3400;0,4700"
-#   cargo run --release -- ../../assets/maps/cleave.map gates \
-#       --gate "the_leap:-672,2932,152:560,700,10:75,105,5" \
-#       --gate "the_finish:0,4980,152:480,560,10:75,105,5"
-#
-# Output paths are derived from the map's file stem, so running this tool on one
-# map can never overwrite another map's evidence.
+# Nothing here was played by a human, by operator decision for this milestone.
 
 profile        straf3 (canon), 125 Hz; equal to cpm today
 == compile ==
 map            ../../assets/maps/cleave.map
 stem           cleave
 solids         29 hulls   mesh 696 vertices / 348 triangles
-digests        collision 0x58e3e260d6348b90  full 0xf7d41c5d65b30ab9
-bounds         Vec3(-928.0, -864.0, -192.0) .. Vec3(1120.0, 6720.0, 640.0)
+digests        collision 0xd2d7d01e8f9d03ef  full 0x63b77f21144cba7e
+bounds         Vec3(-928.0, -864.0, -192.0) .. Vec3(1248.0, 6976.0, 640.0)
 spawn          Vec3(-320.0, -736.0, 24.125) yaw 0  (1 spawn entities)
 warnings       none
 
 triggers       4
    t_start        -> target_starttimer    START                        Vec3(-224.0, 32.0, -32.0) .. Vec3(224.0, 64.0, 768.0)
    t_cp_fork      -> target_checkpoint    checkpoint 0 bit 0x00000004  Vec3(-224.0, 1376.0, -32.0) .. Vec3(224.0, 1440.0, 768.0)
-   t_cp_rejoin    -> target_checkpoint    checkpoint 1 bit 0x00000008  Vec3(-896.0, 4608.0, 96.0) .. Vec3(1088.0, 4672.0, 768.0)
-   t_finish       -> target_stoptimer     FINISH                       Vec3(-192.0, 5344.0, 128.0) .. Vec3(192.0, 5408.0, 768.0)
+   t_cp_rejoin    -> target_checkpoint    checkpoint 1 bit 0x00000008  Vec3(-896.0, 4864.0, 96.0) .. Vec3(1216.0, 4928.0, 768.0)
+   t_finish       -> target_stoptimer     FINISH                       Vec3(-192.0, 5600.0, 128.0) .. Vec3(192.0, 5664.0, 768.0)
 
 coverage       0x0000000f   has_timing()=true  START=true  FINISH=true
 every trigger volume resolves to a clock bit.
@@ -78,22 +58,24 @@ profile        straf3 (canon), 125 Hz; equal to cpm today
 spawn Vec3(-320.0, -736.0, 24.125) yaw 0  start_solid=false  all_solid=false
 ground under spawn: Some((0.0, Vec3(0.0, 0.0, 1.0)))
 
-== survey: the HIGH branch, (0,1400) -> (-700,1900) -> (-700,4700) ==
-     3612      -700      4652     128.0    1.0000  Grounded
+== survey: HIGH branch (0,1400) -> (-700,1900) -> (-700,4700) ==
      3644      -700      4684     128.0    1.0000  Grounded
 
 void samples: 0
   Grounded: 115 samples, normal.z 0.9285..1.0000
 
-  (full 115-sample table elided here only in this summary block; the
-   command above prints it. 0 void samples, normal.z 0.9285..1.0000.)
-
-== survey: the LOW branch, (0,1400) -> (900,2560) -> (900,2900) -> (0,3400) -> (0,4700) ==
-     4086         0      4648     128.0    1.0000  Grounded
-     4118         0      4680     128.0    1.0000  Grounded
+== survey: LOW branch (0,1400) -> (900,2560) -> (900,2900) -> (0,3400) -> (0,4700) ==
+     4118         0      4680      85.8    0.9701  Grounded
 
 void samples: 0
   Grounded: 131 samples, normal.z 0.9701..1.0000
+
+== survey: the LATERAL line that proves the hybrid exists, (-700,3100) -> (400,3100) ==
+   The slot and the low lane are ONE continuous surface at z=0. This is why
+   the deliberate hybrid cannot be prevented, only made slower.
+
+void samples: 0
+  Grounded: 35 samples, normal.z 1.0000..1.0000
 
 profile        straf3 (canon), 125 Hz; equal to cpm today
 == ballistic gates, swept over speed x approach yaw ==
@@ -120,70 +102,259 @@ column from one yaw measures one approach rather than the admissible window.
 
 -- the_finish from Vec3(0.0, 4980.0, 152.0), yaw 75..105 step 5
      ups     best y     best z    worst y    worst z  exit ups
-     480       5329        -82       5329        -82       342
-     490       5329        -82       5329        -82       343
-     500       5329        -82       5329        -82       344
-     510       5331        168       5329        -82       510
-     520       5332        168       5329        -82       520
-     530       5332        168       5331        168       530
-     540       5333        168       5330        168       540
-     550       5333        168       5331        168       550
-     560       5333        168       5329        168       560
+     480       5502        -22       5458         10       597
+     490       5529        -41       5484         -8       615
+     500       5556        -61       5509        -27       634
+     510       5580        -78       5536        -46       510
+     520       5585        -82       5563        -66       332
+     530       5585        -82       5585        -82       347
+     540       5585        -82       5585        -82       348
+     550       5585        -82       5585        -82       323
+     560       5585        -82       5585        -82       350
 
-== the searcher's negatives, recorded in full ==
-
-Neither branch has been driven to the finish. Both runs below are NEGATIVE and
-their coverage is printed because that is the only thing that makes a negative
-readable. What defeats the searcher is worth stating precisely, because it is a
-property of a greedy one-step hill climber and not of the map:
-
-  Its objective is the hull's distance to the next goal volume, which is the
-  right SHAPE -- the clock is satisfied by crossing a volume, not by arriving at
-  a point -- but it descends that distance greedily. Cleave's slot is therefore
-  a local minimum: from the launch lane, walking off the lip and INTO the slot
-  reduces distance to the landing pad, and the pad's 160-unit south face is then
-  a wall the search cannot climb. An earlier run sat there for 43 seconds of
-  simulated time, circling, and reached 1437 ups doing it.
-
-  Forbidding the slot (--forbid-box) is what a bypass hypothesis is for and it
-  does force the flight, but each remaining local minimum -- the finish bail
-  ramp, the chicane blocks -- has to be named the same way. That is per-map hand
-  tuning of the measurement driver. It is legitimate here, where the driver is
-  an instrument; it is exactly what r2's reusable agent may not need.
-
+################ PURE LOW ################
+profile        straf3 (canon), 125 Hz; equal to cpm today
 == search ==
-goal finish (0x00000002)  progress hull distance to next goal volume  alphabet jump-only  horizon 40 stride 8 budget 8000  controls 180
+goal finish (0x00000002)  progress hull distance to next goal volume  alphabet jump-only  horizon 40 stride 8 budget 9000  controls 180
 
   window end     run ms  volume
         1856         56  t_start
         3968       2168  t_cp_fork
+        9856       8056  t_cp_rejoin
 
-touched mask   0x00000005
-clock          RUNNING from 1800 ms, 62200 ms at cut-off
-end            Vec3(-463.2046, 1905.0, 89.95995)  852 ups  peak 852 ups  after 64000 ms
-
-coverage       stop=BudgetExhausted  states explored 180000  commands simulated 7208000
-               horizon 40 ticks  stride 8  controls 180  alphabet jump-only  budget 8000 ticks
-NEGATIVE: no line satisfying the goal was found at this budget. That is a
-statement about this search, not a proof that none exists.
-final checksum 0xce751e1a7076f603
-wrote results/cleave-high.txt (262876 bytes, 7555 cmd lines)
-
-== search ==
-goal finish (0x00000002)  progress hull distance to next goal volume  alphabet jump-only  horizon 40 stride 8 budget 8000  controls 180
-
-  window end     run ms  volume
-        1856         56  t_start
-        3968       2168  t_cp_fork
-        9280       7480  t_cp_rejoin
+gauges (first overlap; committed line only)
+   box                  entered        ups     peak z
+   HIGH                   never          -          -
+   LOW                  4848 ms        714      119.4
+   FARSIDE                never          -          -
+   GAP                    never          -          -
+   lip_leap               never          -          -
+   lip_finish          10496 ms        586      237.7
 
 touched mask   0x0000000d
-clock          RUNNING from 1800 ms, 62200 ms at cut-off
-end            Vec3(-207.0, 5419.7065, -54.602283)  849 ups  peak 900 ups  after 64000 ms
+clock          RUNNING from 1800 ms, 70200 ms at cut-off
+end            Vec3(27.05898, 5585.0, 90.1996)  1023 ups  peak 1023 ups  after 72000 ms
 
-coverage       stop=BudgetExhausted  states explored 180000  commands simulated 7208000
-               horizon 40 ticks  stride 8  controls 180  alphabet jump-only  budget 8000 ticks
+coverage       stop=BudgetExhausted  states explored 202500  commands simulated 8109000
+               horizon 40 ticks  stride 8  controls 180  alphabet jump-only  budget 9000 ticks
 NEGATIVE: no line satisfying the goal was found at this budget. That is a
 statement about this search, not a proof that none exists.
-final checksum 0x8017df8ef084f997
-wrote results/cleave-low.txt (259989 bytes, 7344 cmd lines)
+final checksum 0x0aeafbe59a92b188
+wrote results/cleave-low.txt (281167 bytes, 8000 cmd lines)
+################ PURE HIGH ################
+profile        straf3 (canon), 125 Hz; equal to cpm today
+== search ==
+goal finish (0x00000002)  progress hull distance to next goal volume  alphabet jump-only  horizon 40 stride 8 budget 9000  controls 180
+
+  window end     run ms  volume
+        1856         56  t_start
+        3968       2168  t_cp_fork
+       11008       9208  t_cp_rejoin
+
+gauges (first overlap; committed line only)
+   box                  entered        ups     peak z
+   HIGH                 6392 ms        443      237.7
+   LOW                    never          -          -
+   FARSIDE              9024 ms        684      200.4
+   GAP                  8328 ms        627      237.7
+   lip_leap             8280 ms        620      188.5
+   lip_finish          12256 ms        817      235.7
+
+touched mask   0x0000000d
+clock          RUNNING from 1800 ms, 70200 ms at cut-off
+end            Vec3(207.0, 5636.395, -42.854813)  859 ups  peak 859 ups  after 72000 ms
+
+coverage       stop=BudgetExhausted  states explored 202500  commands simulated 8109000
+               horizon 40 ticks  stride 8  controls 180  alphabet jump-only  budget 9000 ticks
+NEGATIVE: no line satisfying the goal was found at this budget. That is a
+statement about this search, not a proof that none exists.
+final checksum 0xad14ae70682ac645
+wrote results/cleave-high.txt (274232 bytes, 7761 cmd lines)
+################ DELIBERATE HYBRID ################
+profile        straf3 (canon), 125 Hz; equal to cpm today
+== search ==
+goal finish (0x00000002)  progress hull distance to next goal volume  alphabet jump-only  horizon 40 stride 8 budget 9000  controls 180
+
+  window end     run ms  volume
+        1856         56  t_start
+        3968       2168  t_cp_fork
+       14528      12728  t_cp_rejoin
+       15808      13968  t_finish
+
+gauges (first overlap; committed line only)
+   box                  entered        ups     peak z
+   HIGH                 6392 ms        443      237.7
+   LOW                  9320 ms        556      119.3
+   FARSIDE                never          -          -
+   GAP                  8352 ms        456      152.1
+   lip_leap             8280 ms        520      152.1
+   lip_finish          15136 ms        607      232.8
+
+touched mask   0x0000000f
+clock          FINISHED  start 1800 ms  finish 15768 ms  time 13.968 s (13968 ms)
+end            Vec3(33.30792, 5608.836, 168.12508)  463 ups  peak 734 ups  after 15808 ms
+
+coverage       stop=GoalReached  states explored 44460  commands simulated 1780376
+               horizon 40 ticks  stride 8  controls 180  alphabet jump-only  budget 9000 ticks
+final checksum 0xfaeb5a87ed0e773a
+wrote results/cleave-hybrid.txt (45285 bytes, 1271 cmd lines)
+
+# ===========================================================================
+# THE THREE LINES, READ OFF THE TABLES ABOVE
+# ===========================================================================
+#
+# TIMES, checkpoint 0 (fork) to checkpoint 1 (rejoin):
+#   PURE LOW     5888 ms   (2168 -> 8056)
+#   PURE HIGH    7040 ms   (2168 -> 9208)    +1152 ms
+#   HYBRID      10560 ms   (2168 -> 12728)   +4672 ms
+#
+# THE FORK DOES NOT WORK ON THESE NUMBERS, and it is published as a negative
+# rather than left as an open question. The harder branch is 1152 ms SLOWER
+# than the easier one, so nobody would ever take the leap: it costs a second
+# and buys nothing. Three caveats, in the order they are believed:
+#   1. Only the HYBRID completed. LOW's and HIGH's times are segments of lines
+#      that failed later at the finish, so they are not strictly comparable to
+#      the hybrid's segment of a line that finished.
+#   2. The searcher delivered 620 ups to the launch lip against a 620 ups
+#      worst-approach threshold -- it flew the gate at its exact minimum. The
+#      leap sweep above shows best-y climbing 3381 at 600 ups to 3414 at 700,
+#      so a line arriving faster lands further and carries more out.
+#   3. The HIGH via-chain forces a westward detour the LOW chain does not, so
+#      part of the deficit may be the instrument rather than the geometry.
+# The map was NOT widened to turn this number around. A trade that exists only
+# because its author enlarged one side is a weaker claim than one that survived
+# measurement, and this one did not survive.
+#
+# THE HYBRID IS THE SLOWEST, WHICH IS THE RE-CUT WORKING. Both chicane blocks
+# begin at y=3456, downstream of the slot's exit window at y 2944..3392, so
+# anything entering the low branch pays its cost in full. The hybrid is
+# therefore the low line PLUS the westward climb PLUS the drop. That was a
+# construction proof when the map was cut; 10560 against 5888 is the
+# measurement agreeing with it.
+#
+# DELIVERED SPEED AT THE GATES -- ups at the tick of FIRST OVERLAP, committed
+# line only, sampled per-tick inside the mover loop:
+#   lip_leap     PURE HIGH 620    HYBRID 520    PURE LOW never entered
+#   lip_finish   PURE LOW 586     PURE HIGH 817    HYBRID 607
+# The best figure delivered to the launch lip by ANY line searched is 620 ups,
+# against the 1437 ups an earlier searcher reached by circling the apron for 43
+# seconds of simulated time. That is the conditioned answer: a reservoir is not
+# a delivery, the clock runs while you farm, and nothing that was trying to go
+# fast arrived fast. It is a LOWER bound from a weak searcher, so it does not
+# close the question either. The leap's upper bound is UNMEASURED ABOVE THE
+# SWEPT RANGE -- the sweep covers 560..700 ups and says nothing about 1437.
+#
+# ROUTE CLASSIFICATION, and the launch predicate that makes it four-valued.
+#
+#   LAUNCHED := peak origin z, over the ticks where the hull is inside
+#               x -896..-448, y 2944..3392, exceeds 168.
+#
+# Both halves of r37's condition, in one number. The box begins AT the launch
+# lip's face, so a strafe-jump on the lane cannot satisfy it -- that is "beyond
+# the lip's face". And 168 is DERIVED, not chosen: the lip surface is z=128, a
+# standing hull puts the origin 24 above it at 152, and a jump adds 45.6, so
+# 168 sits 16 units above standing height and ~45 below a jump apex. It uses no
+# velocity and no duration, so it is reproducible from the shipped binary's
+# --trace positions alone -- which matters, because airborne DURATION and
+# DISTANCE provably cannot separate a leap from an ordinary strafe-jump.
+#
+# Measured, and the populations separate on the first attempt:
+#   PURE HIGH   GAP peak z 237.7   LAUNCHED     (85.7 units of flight)
+#   HYBRID      GAP peak z 152.1   NOT launched (exactly standing height: it
+#                                  walked off the lip without jumping)
+#   PURE LOW    GAP never entered
+# 85.6 units of separation against a 16-unit margin.
+#
+# The four categories:
+#   LOW only                        the sweep was run
+#   HIGH + FARSIDE                  the leap was flown and cleared
+#   HIGH + LOW + LAUNCHED           fell short -- the failure the slot exists
+#                                   to permit
+#   HIGH + LOW + NOT LAUNCHED       the DESCENT EXPLOIT: climbed the ramp,
+#                                   declined the leap, dropped through and
+#                                   crossed. This is what the HYBRID run below
+#                                   is, and it faced nothing.
+#   NEITHER, on a run that finished  a bypass finding by definition
+#
+# TWO LIMITS ON THIS COLUMN, stated so it is not over-read later.
+#   - LOW-only is NOT evidence of route choice. The low line is what a runner
+#     reaches by doing nothing, so entering it proves no deliberation.
+#   - Box entry is a PROXY. "Entered HIGH" means "was inside this volume", not
+#     "flew the leap"; that is what the LAUNCHED predicate is for.
+#   - These regions are DISJOINT CLASSIFICATION BOXES. They are not evidence of
+#     solid separation between the branches, which lives in the compiled hulls
+#     and is shown by `cargo run -p straf3-map --bin mapdump`. Cleave's branches
+#     are demonstrably CONNECTED space across the slot -- the lateral survey
+#     above is the proof -- so offering this classification for that purpose
+#     would be a category error.
+#
+# THE COMPLETING RUN
+# ------------------
+# results/cleave-hybrid.txt, 1976 commands. Its command stream replays through
+# the shipped binary:
+#
+#   ./target/release/straf3 --replay probes/course-lab/results/cleave-hybrid.txt \
+#       --map assets/maps/cleave.map
+#
+#     map        29 hulls, 4 triggers, 348 triangles, collision digest 0xd2d7d01e8f9d03ef
+#     run        13968 ms  (start 1800 ms, finish 15768 ms)
+#     origin     33.307919 5608.835938 168.125076
+#     checksum   0xfaeb5a87ed0e773a
+#
+# course-lab reported 13968 ms and 0xfaeb5a87ed0e773a. They agree bit for bit,
+# and the digest line confirms the stream was replayed against the map it was
+# made on -- the check the tree requires BEFORE checksums are compared.
+#
+# AND IT IS THE DESCENT EXPLOIT. The first line anything has driven end to end
+# on this map is the one the map was re-cut to make worst. Its GAP peak z of
+# 152.1 says it never launched. So it is a valid COMPLETION and it is not a run
+# that engaged the fork, and it must never be reported as the latter.
+#
+# THE LAUNCHED PREDICATE IS CONTESTED, AND THE OBJECTION IS SOUND
+# ---------------------------------------------------------------
+# Peak-origin-z above 168 separates JUMPED from WALKED. It does not separate a
+# committed LEAP from an ordinary strafe-jump, and the failure direction is
+# PERMISSIVE, which is the dangerous one.
+#
+# The arithmetic, from the frozen constants (profile.rs: gravity 800,
+# jump_velocity 270, hull_mins.z -24). Apex is 270^2/1600 = 45.5625. Solving
+# 400t^2 - 270t + 16 < 0 gives t in (0.0656, 0.6094), so an ordinary hop is
+# above 168 for 0.5437 s of its 0.675 s flight -- 80.6%. At 600 ups that is 326
+# units of horizontal travel while still above the threshold. The launch box is
+# 448 deep with its near face at the lip, so a runner hopping along the lane and
+# simply continuing off the end enters the box while ~330 units short of
+# dropping back through 168, and would score LAUNCHED without having leapt.
+# A leap and a hop are the same ballistic arc from the same jump_velocity; they
+# differ in initiation point and horizontal speed, and peak z reads neither.
+#
+# WHAT THE PREDICATE DID SAY ON THE ONE RUN THAT EXISTS. cleave-hybrid.txt
+# measured GAP peak z = 152.1 -- exactly standing height on a z=128 lip, so it
+# scored NOT LAUNCHED, which is the correct classification for that run: it
+# walked off. The predicate happened to be right here because the hybrid never
+# jumped at all, not because it can tell a decline from a commitment.
+#
+# THEREFORE, AND THIS IS THE CLAIM NOT BEING MADE: cleave-hybrid.txt is NOT
+# offered as satisfying r37, NOT recorded as a fell-short outcome, and NOT
+# offered as evidence that anything engaged the fork. Whether any run has
+# engaged cleave's fork is UNRESOLVED. The run is offered for exactly one
+# thing -- that the course is completable and its command stream reproduces
+# through the shipped binary.
+#
+# The constructive direction, recorded rather than acted on because inventing a
+# threshold under time pressure is how a fitted constant gets published: a
+# committed leap is aimed ACROSS the slot and a decline is aimed DOWN into it,
+# so the discriminating quantity is horizontal -- speed at the tick the hull
+# last leaves the lip face, or airborne horizontal distance from that face
+# before first ground contact, compared against what the lane's own hops
+# deliver. Both are readable from --trace. No number is proposed here.
+#
+# ONE MORE LIMIT ON THE GAUGE BOXES. lip_leap and lip_finish are z 96..300. A
+# runner arriving ABOVE z=300 at that y registers no overlap and the gauge
+# reports nothing, which is indistinguishable from "did not go there". So a
+# gauge reporting no entry may NOT be read as "the runner did not take that
+# line" unless the maximum z at that gate's y is separately shown to be below
+# the ceiling. The three lines here are safe by inspection -- their GAP and
+# HIGH peaks are 237.7 at most -- but the general reading is unsafe, and the
+# runs most likely to arrive high are the fast ones a bypass audit is looking
+# for. Tunnelling is not a concern: both boxes are 32 deep against a 30-deep
+# hull, a 62-unit window, about 5 samples at 1437 ups.

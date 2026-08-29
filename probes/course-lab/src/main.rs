@@ -313,6 +313,9 @@ struct SearchSpec {
     /// which on a long course is too far away to steer by.
     waypoints: Vec<Aim>,
     forbid: Vec<Forbid>,
+    /// Named boxes at which DELIVERED speed is sampled. Not goals and not
+    /// constraints: pure instrumentation.
+    gauges: Vec<(String, Aabb)>,
     progress: Progress,
     alphabet: Alphabet,
     lookahead: u32,
@@ -330,6 +333,10 @@ struct SearchResult {
     touched: TriggerSet,
     crossings: Vec<(u32, u32, String)>,
     trail: Vec<(u32, Vec3, Scalar)>,
+    /// First-overlap (time_ms, ups) per gauge, over the committed line only.
+    gauges: Vec<Option<(u32, Scalar)>>,
+    /// Peak origin z inside each gauge box, over the committed line only.
+    gauge_peak_z: Vec<Scalar>,
     /// Candidate futures evaluated. The coverage number a negative rests on.
     states_explored: u64,
     commands_simulated: u64,
@@ -355,12 +362,25 @@ struct Held {
     /// The hull was inside `aim_region` at the end of some tick, for the same
     /// reason: a waypoint passed through at speed has been reached.
     entered_aim: bool,
+    /// For each gauge box, the (time_ms, horizontal speed) at the FIRST tick the
+    /// hull overlapped it during this hold.
+    ///
+    /// Delivered speed, not peak speed. The distinction is the whole point:
+    /// "the searcher reached 1437 ups circling the apron" and "the apron
+    /// delivers 1437 ups to the lip" are different claims and only the second
+    /// one says anything about the gate. Sampled at the tick of first overlap
+    /// with the box so that an independent reader can reproduce it from the
+    /// shipped binary's `--trace` and the same AABB.
+    gauge_hits: Vec<Option<(u32, Scalar)>>,
+    /// Peak origin z while inside each gauge box; `NEG_INFINITY` if never.
+    gauge_peak_z: Vec<Scalar>,
 }
 
 #[allow(clippy::too_many_arguments)]
 fn hold(
     forbid: &[Aabb],
     aim_region: Option<Aabb>,
+    gauges: &[(String, Aabb)],
     half: Vec3,
     offset: Vec3,
     rate: TickRate,
@@ -376,6 +396,8 @@ fn hold(
     let mut simulated = 0u64;
     let mut entered_forbidden = false;
     let mut entered_aim = false;
+    let mut gauge_hits: Vec<Option<(u32, Scalar)>> = vec![None; gauges.len()];
+    let mut gauge_peak_z: Vec<Scalar> = vec![Scalar::NEG_INFINITY; gauges.len()];
     for _ in 0..ticks {
         // Q3 requires releasing jump between hops, so the button is pressed
         // only when there is ground to leave.
@@ -413,6 +435,20 @@ fn hold(
         {
             entered_aim = true;
         }
+        for (i, (_, b)) in gauges.iter().enumerate() {
+            if hull_in_box(b, st.player.origin, half, offset) {
+                if gauge_hits[i].is_none() {
+                    gauge_hits[i] = Some((st.time_ms, horizontal(st.player.velocity)));
+                }
+                // Peak origin z while inside. This is what separates a launched
+                // leap from a walk-off: standing on the lip the origin is at
+                // z=152, and a jump adds 45.6, so a run that exceeds 168 inside
+                // the gap footprint paid the launch and one that never does did
+                // not. Positional, so an independent reader can reproduce it
+                // from the shipped binary's --trace without needing velocity.
+                gauge_peak_z[i] = gauge_peak_z[i].max(st.player.origin.z);
+            }
+        }
     }
     Held {
         state: st,
@@ -420,6 +456,8 @@ fn hold(
         simulated,
         entered_forbidden,
         entered_aim,
+        gauge_hits,
+        gauge_peak_z,
     }
 }
 
@@ -443,6 +481,8 @@ fn search(
     let mut commands_simulated = 0u64;
     let mut stop = Stop::BudgetExhausted;
     let mut reached_regions = vec![false; spec.waypoints.len()];
+    let mut gauge_readings: Vec<Option<(u32, Scalar)>> = vec![None; spec.gauges.len()];
+    let mut gauge_peaks: Vec<Scalar> = vec![Scalar::NEG_INFINITY; spec.gauges.len()];
 
     let forbidden_boxes: Vec<Aabb> = spec
         .forbid
@@ -485,6 +525,7 @@ fn search(
             let h = hold(
                 &forbidden_boxes,
                 aim_region,
+                &[],
                 half,
                 offset,
                 rate,
@@ -535,6 +576,7 @@ fn search(
         let committed = hold(
             &forbidden_boxes,
             aim_region,
+            &spec.gauges,
             half,
             offset,
             rate,
@@ -546,6 +588,17 @@ fn search(
             Some(&mut cmds),
         );
         commands_simulated += committed.simulated;
+        // Gauges read the COMMITTED line only. A speculative future the search
+        // considered and did not take must not contribute a delivered speed any
+        // more than it may start the clock.
+        for (reading, hit) in gauge_readings.iter_mut().zip(&committed.gauge_hits) {
+            if reading.is_none() {
+                *reading = *hit;
+            }
+        }
+        for (peak, seen) in gauge_peaks.iter_mut().zip(&committed.gauge_peak_z) {
+            *peak = peak.max(*seen);
+        }
         if committed.entered_aim {
             for (i, w) in spec.waypoints.iter().enumerate() {
                 if matches!(w, Aim::Region(_)) && !reached_regions[i] {
@@ -587,6 +640,8 @@ fn search(
         touched,
         crossings,
         trail,
+        gauges: gauge_readings,
+        gauge_peak_z: gauge_peaks,
         states_explored,
         commands_simulated,
     }
@@ -755,6 +810,7 @@ struct Args {
     tag: String,
     write_fixture: bool,
     gates: Vec<String>,
+    gauges: Vec<String>,
     line: Vec<(Scalar, Scalar)>,
     out_dir: String,
 }
@@ -785,6 +841,9 @@ search options
   --lookahead <n>     horizon in ticks (default 40)
   --stride <n>        committed ticks per decision (default 8)
   --budget <n>        total committed ticks (default 20000)
+  --gauge name:x0,x1,y0,y1,z0,z1     sample DELIVERED speed: ups at the tick
+                      of first overlap with this box. Instrumentation only —
+                      not a goal and not a constraint. Repeatable.
   --fixture           write <out>/<stem>-<tag>.txt
   --tag <name>        fixture tag (default the goal selector)
   --out <dir>         output directory (default results)
@@ -820,6 +879,7 @@ fn parse_args() -> Args {
         tag: String::new(),
         write_fixture: false,
         gates: Vec::new(),
+        gauges: Vec::new(),
         line: Vec::new(),
         out_dir: "results".into(),
     };
@@ -835,6 +895,7 @@ fn parse_args() -> Args {
             "--goal" => a.goal = next(&mut i),
             "--waypoint" => a.waypoints.push(next(&mut i)),
             "--via" => a.waypoints.push(format!("box:{}", next(&mut i))),
+            "--gauge" => a.gauges.push(next(&mut i)),
             "--forbid" => a.forbid.push(next(&mut i)),
             "--forbid-box" => a.forbid.push(format!("box:{}", next(&mut i))),
             "--progress" => {
@@ -1187,6 +1248,16 @@ fn main() {
                 goal,
                 waypoints,
                 forbid: parse_forbid(&course, &args.forbid),
+                gauges: args
+                    .gauges
+                    .iter()
+                    .map(|g| {
+                        let (name, rest) = g
+                            .split_once(':')
+                            .unwrap_or_else(|| panic!("--gauge wants name:x0,x1,y0,y1,z0,z1"));
+                        (name.to_string(), parse_box(rest, "--gauge"))
+                    })
+                    .collect(),
                 progress: if baseline {
                     Progress::NorthY
                 } else {
@@ -1224,6 +1295,29 @@ fn main() {
             println!("\n{:>12} {:>10}  volume", "window end", "run ms");
             for (at, elapsed, name) in &r.crossings {
                 println!("{at:>12} {elapsed:>10}  {name}");
+            }
+            if !spec.gauges.is_empty() {
+                // Delivered speed, and peak origin z while inside. Committed
+                // line only. The peak-z column is what makes the launch
+                // predicate checkable: standing on a z=128 lip puts the origin
+                // at 152 and a jump adds 45.6, so a run that exceeds 168 inside
+                // a box beginning at the lip's face was airborne PAST that
+                // face — which is the two-part condition, in one number a
+                // reader can reproduce from --trace without needing velocity.
+                println!("\ngauges (first overlap; committed line only)");
+                println!(
+                    "   {:<18} {:>9} {:>10} {:>10}",
+                    "box", "entered", "ups", "peak z"
+                );
+                for (i, (name, _)) in spec.gauges.iter().enumerate() {
+                    match r.gauges[i] {
+                        Some((at, sp)) => println!(
+                            "   {name:<18} {at:>6} ms {sp:>10.0} {:>10.1}",
+                            r.gauge_peak_z[i]
+                        ),
+                        None => println!("   {name:<18} {:>9} {:>10} {:>10}", "never", "-", "-"),
+                    }
+                }
             }
             println!("\ntouched mask   {:#010x}", r.touched.0);
             match r.end.run {
